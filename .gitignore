@@ -44,10 +44,6 @@ analysis_results/
 .scalpel_ast_cache/
 .ruff_cache/
 compliance_reports/
-.code-scalpel/autonomy_audit/  # Autonomy audit trail runtime files
-.code-scalpel/audit.log  # Policy engine audit log
-.code-scalpel/audit.jsonl  # Policy engine audit log (JSONL format)
-.code-scalpel/limits.local.toml  # [20251225_CONFIG] Local tier limit overrides
 certs/  # Certificate and private key files for signing/encryption
 code_scalpel_community/
 
@@ -59,14 +55,6 @@ tests/.code-scalpel/audit.jsonl
 .test_simple/
 .tmp_tier_comm/
 
-# [20251228_TEST] Local remote-verifier integration artifacts (never commit)
-.code-scalpel/license.jwt
-.code-scalpel/license*.jwt
-.code-scalpel/**/*.jwt
-.code-scalpel/license_cache.json
-.code-scalpel/*.jwk.json
-.code-scalpel/test_write.json
-
 # [20250101_TEST] Test license files - valid JWT licenses for tier testing
 tests/licenses/
 
@@ -74,8 +62,6 @@ tests/licenses/
 code_scalpel_tier_management/
 license-management/
 tier-management/
-.code-scalpel/license/  # License directory contains JWT license files
-.code-scalpel/archive/  # Archived license files (potentially sensitive)
 keys/  # Private keys should never be in this repo
 *.pem  # Private key files
 *.key  # Key files
