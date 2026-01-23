@@ -1,0 +1,679 @@
+# Development Governance Policies
+# These policies govern AI agent behavior during development
+# to enforce best practices, architectural consistency, and project management discipline
+
+version: "1.0"
+policy_type: "development_governance"
+description: |
+  Meta-policies that govern how AI agents should approach development tasks.
+  These policies ensure consistency, quality, and adherence to project standards.
+
+policies:
+  # ============================================================================
+  # DOCUMENTATION POLICIES
+  # ============================================================================
+  
+  - name: mandatory-readme-for-new-modules
+    category: documentation
+    severity: HIGH
+    action: DENY
+    description: |
+      Every new module directory must have a README.md file explaining its purpose,
+      architecture, and usage patterns. READMEs must be placed IN the module directory,
+      not in a separate docs folder.
+    rule: |
+      package code_scalpel.dev_governance
+      
+      default allow = false
+      
+      # Check if operation creates a new module directory
+      creates_new_module {
+        input.operation.type == "create_directory"
+        input.operation.path contains "src/"
+        contains(input.operation.path, "__init__.py")
+      }
+      
+      # Check if README.md is included in the same operation
+      includes_readme {
+        some i
+        input.operation.files[i].path == concat("/", [input.operation.path, "README.md"])
+      }
+      
+      # Deny if creating module without README
+      allow {
+        not creates_new_module
+      }
+      
+      allow {
+        creates_new_module
+        includes_readme
+      }
+    
+    remediation: |
+      When creating a new module directory, always include a README.md that contains:
+      1. Overview - What this module does
+      2. Architecture - Key components and their relationships
+      3. Integration - How it connects to the rest of the system
+      4. Usage Examples - Common patterns with code samples
+      5. Configuration - Required setup or config files
+      6. Best Practices - Do's and don'ts
+    
+    examples:
+      violation: |
+        # Creating module without README
+        mkdir src/code_scalpel/new_feature
+        touch src/code_scalpel/new_feature/__init__.py
+        # ❌ DENIED - Missing README.md
+      
+      compliant: |
+        # Creating module with README
+        mkdir src/code_scalpel/new_feature
+        touch src/code_scalpel/new_feature/__init__.py
+        cat > src/code_scalpel/new_feature/README.md << EOF
+        # New Feature Module
+        ## Overview
+        This module provides...
+        EOF
+        # ✅ ALLOWED
+
+  - name: update-readme-on-major-changes
+    category: documentation
+    severity: MEDIUM
+    action: WARN
+    description: |
+      When making significant changes to a module (>100 lines or new public APIs),
+      check if the README needs updating to reflect the changes.
+    rule: |
+      package code_scalpel.dev_governance
+      
+      default allow = true
+      
+      # Check for significant changes
+      significant_change {
+        input.operation.lines_changed > 100
+      }
+      
+      significant_change {
+        input.operation.adds_public_api == true
+      }
+      
+      # Check if README is included in changes
+      updates_readme {
+        some i
+        contains(input.operation.files[i].path, "README.md")
+      }
+      
+      # Warn if significant change without README update
+      allow {
+        not significant_change
+      }
+      
+      allow {
+        significant_change
+        updates_readme
+      }
+    
+    remediation: |
+      Review the module's README.md and update:
+      - New features or APIs in the overview
+      - Architecture diagrams if structure changed
+      - Usage examples for new functionality
+      - Configuration if new options added
+
+  # ============================================================================
+  # ARCHITECTURAL CONSISTENCY POLICIES
+  # ============================================================================
+  
+  - name: respect-module-boundaries
+    category: architecture
+    severity: CRITICAL
+    action: DENY
+    description: |
+      Enforce separation of concerns between modules. Prevent cross-layer violations
+      and ensure proper dependency flow.
+    rule: |
+      package code_scalpel.dev_governance
+      
+      default allow = true
+      
+      # Define architectural layers
+      layers := {
+        "mcp": 1,           # MCP server layer (highest)
+        "autonomy": 2,      # Autonomy engine
+        "governance": 3,    # Governance layer
+        "policy_engine": 4, # Policy engine
+        "policy": 4,        # Budget control (same level)
+        "tools": 5,         # Code modification tools
+        "parsers": 6        # Language parsers (lowest)
+      }
+      
+      # Extract layer from file path
+      get_layer(path) = layer {
+        some key
+        contains(path, key)
+        layer := layers[key]
+      }
+      
+      # Check for upward dependency (lower layer importing higher layer)
+      upward_dependency {
+        source_layer := get_layer(input.operation.source_file)
+        target_layer := get_layer(input.operation.import_target)
+        source_layer > target_layer  # Lower layer importing higher layer
+      }
+      
+      # Deny upward dependencies
+      allow {
+        not upward_dependency
+      }
+    
+    remediation: |
+      Respect the architectural layers:
+      MCP → Autonomy → Governance → Policy/PolicyEngine → Tools → Parsers
+      
+      Dependencies should only flow downward or sideways (within same layer).
+      Never import from a higher layer.
+      
+      If you need functionality from a higher layer, use:
+      - Dependency injection
+      - Callbacks/events
+      - Interfaces/protocols
+    
+    examples:
+      violation: |
+        # In parsers/python_parser.py
+        from code_scalpel.governance import UnifiedGovernance  # ❌ Upward dependency
+      
+      compliant: |
+        # In autonomy/engine.py
+        from code_scalpel.governance import UnifiedGovernance  # ✅ Downward dependency
+
+  - name: require-design-review-for-new-architecture
+    category: architecture
+    severity: HIGH
+    action: WARN
+    description: |
+      Major architectural changes require documented design rationale.
+      Creating new top-level modules or changing core patterns needs justification.
+    rule: |
+      package code_scalpel.dev_governance
+      
+      default allow = true
+      
+      # Detect architectural changes
+      architectural_change {
+        input.operation.creates_new_top_level_module == true
+      }
+      
+      architectural_change {
+        input.operation.changes_core_interface == true
+      }
+      
+      # Check for design document
+      has_design_doc {
+        input.operation.includes_design_document == true
+      }
+      
+      has_design_doc {
+        input.operation.justification != null
+        count(input.operation.justification) > 200  # Substantial justification
+      }
+      
+      # Warn if architectural change without design doc
+      allow {
+        not architectural_change
+      }
+      
+      allow {
+        architectural_change
+        has_design_doc
+      }
+    
+    remediation: |
+      For architectural changes, provide:
+      1. Problem statement - What issue does this solve?
+      2. Alternatives considered - What other approaches were evaluated?
+      3. Design decision - Why this approach was chosen
+      4. Impact analysis - What components are affected?
+      5. Migration path - How to transition from old to new
+
+  # ============================================================================
+  # PROJECT MANAGEMENT POLICIES
+  # ============================================================================
+  
+  - name: update-backlog-on-task-completion
+    category: project_management
+    severity: MEDIUM
+    action: WARN
+    description: |
+      When completing tasks, update the project backlog/TODO tracking.
+      Ensures task visibility and progress tracking.
+    rule: |
+      package code_scalpel.dev_governance
+      
+      default allow = true
+      
+      # Check if operation completes a feature or fixes a bug
+      completes_work_item {
+        contains(input.operation.commit_message, "fix")
+      }
+      
+      completes_work_item {
+        contains(input.operation.commit_message, "feat")
+      }
+      
+      completes_work_item {
+        contains(input.operation.commit_message, "implement")
+      }
+      
+      # Check if backlog was updated
+      updates_backlog {
+        some i
+        regex.match(`TODO\.md|BACKLOG\.md|\.github/issues`, input.operation.files[i].path)
+      }
+      
+      # Warn if completing work without backlog update
+      allow {
+        not completes_work_item
+      }
+      
+      allow {
+        completes_work_item
+        updates_backlog
+      }
+    
+    remediation: |
+      Update project tracking files:
+      - TODO.md - Mark items as complete, add new items discovered
+      - BACKLOG.md - Update sprint status, move items between columns
+      - .github/issues - Close related issues, create new ones
+    
+    backlog_locations:
+      - "TODO.md"
+      - "BACKLOG.md"
+      - "docs/ROADMAP.md"
+      - ".github/ISSUES.md"
+
+  - name: check-sprint-capacity-before-new-work
+    category: project_management
+    severity: LOW
+    action: AUDIT
+    description: |
+      Before starting new features, check if sprint capacity allows it.
+      Prevents scope creep and helps maintain focus.
+    rule: |
+      package code_scalpel.dev_governance
+      
+      default allow = true
+      
+      # Check if starting new feature work
+      starts_new_feature {
+        input.operation.type == "feature_implementation"
+        input.operation.is_new == true
+      }
+      
+      # Check if sprint capacity was checked
+      checked_capacity {
+        input.context.sprint_capacity_checked == true
+      }
+      
+      # Audit if starting new feature without capacity check
+      allow {
+        not starts_new_feature
+      }
+      
+      allow {
+        starts_new_feature
+        checked_capacity
+      }
+    
+    remediation: |
+      Before starting new work:
+      1. Check current sprint backlog
+      2. Estimate effort (story points or hours)
+      3. Verify available capacity
+      4. Get approval if capacity is tight
+      5. Update sprint board
+
+  # ============================================================================
+  # CODE QUALITY POLICIES
+  # ============================================================================
+  
+  - name: require-tests-for-new-features
+    category: quality
+    severity: HIGH
+    action: DENY
+    description: |
+      New features must include tests. Prevents untested code from entering codebase.
+    rule: |
+      package code_scalpel.dev_governance
+      
+      default allow = false
+      
+      # Check if adding new feature code
+      adds_feature_code {
+        input.operation.adds_new_functionality == true
+      }
+      
+      # Check if tests are included
+      includes_tests {
+        some i
+        contains(input.operation.files[i].path, "test_")
+      }
+      
+      includes_tests {
+        some i
+        contains(input.operation.files[i].path, "/tests/")
+      }
+      
+      # Deny new features without tests
+      allow {
+        not adds_feature_code
+      }
+      
+      allow {
+        adds_feature_code
+        includes_tests
+      }
+    
+    test_requirements:
+      - Unit tests for all public APIs
+      - Integration tests for cross-module features
+      - Coverage > 80% for new code
+      - Both success and failure cases
+
+  - name: run-linting-before-commit
+    category: quality
+    severity: MEDIUM
+    action: WARN
+    description: |
+      Run linting tools before committing code. Ensures code style consistency.
+    rule: |
+      package code_scalpel.dev_governance
+      
+      default allow = true
+      
+      # Check if committing Python code
+      commits_python {
+        some i
+        endswith(input.operation.files[i].path, ".py")
+      }
+      
+      # Check if linting was run
+      ran_linting {
+        input.operation.pre_commit_checks.linting == true
+      }
+      
+      # Warn if committing without linting
+      allow {
+        not commits_python
+      }
+      
+      allow {
+        commits_python
+        ran_linting
+      }
+    
+    remediation: |
+      Run linting tools:
+      - ruff check . --fix
+      - ruff format .
+      - mypy src/
+      
+      Fix all errors before committing.
+
+  # ============================================================================
+  # SECURITY POLICIES
+  # ============================================================================
+  
+  - name: no-secrets-in-code
+    category: security
+    severity: CRITICAL
+    action: DENY
+    description: |
+      Never commit secrets, API keys, passwords, or tokens to version control.
+    rule: |
+      package code_scalpel.dev_governance
+      
+      default allow = true
+      
+      # Patterns that indicate secrets
+      contains_secret {
+        regex.match(`(password|token|api[_-]?key|secret)["\s]*[:=]`, input.operation.code)
+      }
+      
+      contains_secret {
+        regex.match(`[A-Za-z0-9]{32,}`, input.operation.code)  # Long random strings
+      }
+      
+      # Exceptions for test fixtures
+      is_test_fixture {
+        contains(input.operation.file_path, "test_")
+        contains(input.operation.code, "FAKE_")
+      }
+      
+      # Deny code with secrets
+      allow {
+        not contains_secret
+      }
+      
+      allow {
+        contains_secret
+        is_test_fixture
+      }
+    
+    remediation: |
+      Use environment variables or secret managers:
+      - os.environ.get("API_KEY")
+      - AWS Secrets Manager
+      - HashiCorp Vault
+      - .env files (with .gitignore)
+
+  - name: require-security-review-for-auth-changes
+    category: security
+    severity: CRITICAL
+    action: DENY
+    description: |
+      Changes to authentication, authorization, or cryptographic code require
+      explicit security review and approval.
+    rule: |
+      package code_scalpel.dev_governance
+      
+      default allow = false
+      
+      # Detect security-sensitive changes
+      touches_security_code {
+        contains(input.operation.file_path, "auth")
+      }
+      
+      touches_security_code {
+        contains(input.operation.file_path, "crypto")
+      }
+      
+      touches_security_code {
+        contains(input.operation.file_path, "security")
+      }
+      
+      # Check for security review approval
+      has_security_approval {
+        input.operation.security_review.approved == true
+        input.operation.security_review.reviewer != null
+      }
+      
+      # Deny security changes without approval
+      allow {
+        not touches_security_code
+      }
+      
+      allow {
+        touches_security_code
+        has_security_approval
+      }
+    
+    remediation: |
+      For security-sensitive changes:
+      1. Document the change rationale
+      2. Request security team review
+      3. Wait for approval before proceeding
+      4. Include reviewer name in commit message
+
+# ============================================================================
+# ENFORCEMENT CONFIGURATION
+# ============================================================================
+
+enforcement:
+  mode: "strict"  # strict | advisory | audit-only
+  
+  # Which policies to enforce at which times
+  pre_commit:
+    - mandatory-readme-for-new-modules
+    - respect-module-boundaries
+    - require-tests-for-new-features
+    - no-secrets-in-code
+    - require-security-review-for-auth-changes
+    - run-linting-before-commit
+  
+  pre_push:
+    - update-readme-on-major-changes
+    - update-backlog-on-task-completion
+  
+  ci_pipeline:
+    - require-design-review-for-new-architecture
+    - check-sprint-capacity-before-new-work
+  
+  # AI agent specific enforcement
+  ai_agent:
+    always_enforce:
+      - mandatory-readme-for-new-modules
+      - respect-module-boundaries
+      - require-tests-for-new-features
+      - no-secrets-in-code
+    
+    warn_on_violation:
+      - update-readme-on-major-changes
+      - update-backlog-on-task-completion
+      - run-linting-before-commit
+    
+    audit_only:
+      - check-sprint-capacity-before-new-work
+
+# ============================================================================
+# PROJECT-SPECIFIC CONFIGURATIONS
+# ============================================================================
+
+project:
+  name: "code-scalpel"
+  
+  # Architectural layers (in order from high to low)
+  architectural_layers:
+    - name: "mcp"
+      path: "src/code_scalpel/mcp"
+      description: "MCP server interface"
+    - name: "autonomy"
+      path: "src/code_scalpel/autonomy"
+      description: "Autonomy engine for AI-driven modifications"
+    - name: "governance"
+      path: "src/code_scalpel/governance"
+      description: "Unified governance system"
+    - name: "policy_engine"
+      path: "src/code_scalpel/policy_engine"
+      description: "OPA/Rego policy enforcement"
+    - name: "policy"
+      path: "src/code_scalpel/policy"
+      description: "Change budget control"
+    - name: "tools"
+      path: "src/code_scalpel/tools"
+      description: "Code modification tools"
+    - name: "parsers"
+      path: "src/code_scalpel/parsers"
+      description: "Language parsers"
+  
+  # Key documentation locations
+  documentation:
+    architecture: "docs/ARCHITECTURE.md"
+    api: "docs/API.md"
+    contributing: "CONTRIBUTING.md"
+    roadmap: "docs/ROADMAP.md"
+  
+  # Project management
+  project_management:
+    backlog: "TODO.md"
+    sprint_board: "BACKLOG.md"
+    issues: ".github/ISSUES.md"
+    
+  # Quality standards
+  quality_standards:
+    test_coverage_minimum: 80
+    complexity_threshold: 15
+    max_function_length: 100
+    max_file_length: 500
+
+# ============================================================================
+# CUSTOM RULES FOR AI AGENTS
+# ============================================================================
+
+ai_agent_instructions:
+  always:
+    - "Check existing architecture before proposing changes"
+    - "Create READMEs in module directories, not separate docs/"
+    - "Update TODO.md or BACKLOG.md when completing tasks"
+    - "Run tests after making changes"
+    - "Follow the FAIL CLOSED principle for security"
+    - "Document design decisions in commit messages"
+    - "Ask for clarification rather than making assumptions"
+  
+  never:
+    - "Never commit secrets or credentials"
+    - "Never bypass security checks"
+    - "Never modify core security code without review"
+    - "Never create circular dependencies"
+    - "Never use deprecated APIs"
+    - "Never hardcode environment-specific values"
+  
+  prefer:
+    - "Prefer composition over inheritance"
+    - "Prefer explicit over implicit"
+    - "Prefer small focused functions"
+    - "Prefer type hints and documentation"
+    - "Prefer integration tests over unit tests for complex features"
+    - "Prefer async/await for I/O operations"
+
+# ============================================================================
+# METRICS AND REPORTING
+# ============================================================================
+
+metrics:
+  track:
+    - policy_violations_by_category
+    - documentation_coverage
+    - architectural_violations
+    - test_coverage_trends
+    - code_quality_scores
+  
+  report_schedule: "weekly"
+  report_recipients:
+    - "tech-lead@example.com"
+    - "architecture-team@example.com"
+  
+  thresholds:
+    max_violations_per_sprint: 5
+    min_documentation_coverage: 90
+    max_architectural_debt_items: 10
+
+# ============================================================================
+# INTEGRATION WITH EXISTING POLICY ENGINE
+# ============================================================================
+
+integration:
+  # How dev governance relates to code governance
+  relationship: "complementary"
+  
+  # Dev governance policies run BEFORE code policies
+  execution_order:
+    1: "Development governance checks (this file)"
+    2: "Code modification policies (policy.yaml)"
+    3: "Change budget enforcement (budgets.yaml)"
+    4: "Semantic security analysis"
+  
+  # Override behavior
+  override_allowed: false  # Dev governance cannot be overridden
+  justification_required: true

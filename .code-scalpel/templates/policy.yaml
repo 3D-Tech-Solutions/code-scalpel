@@ -1,0 +1,57 @@
+# Example Policy Configuration for Code Scalpel v2.5.0 "Guardian"
+# [20251216_FEATURE] Policy-as-Code enforcement using OPA/Rego
+
+version: "1.0"
+
+policies:
+  # =================================================================
+  # P0: SQL Injection Prevention
+  # =================================================================
+  - name: "no-raw-sql"
+    description: "Prevent agents from introducing raw SQL queries"
+    rule: |
+      package scalpel.security
+      
+      deny[msg] {
+        input.operation == "code_edit"
+        contains(input.code, "SELECT")
+        not contains(input.code, "?")
+        not contains(input.code, "PreparedStatement")
+        msg = "Raw SQL detected without parameterized queries"
+      }
+    severity: "CRITICAL"
+    action: "DENY"
+  
+  # =================================================================
+  # P0: Spring Security Requirement (Java)
+  # =================================================================
+  - name: "spring-security-required"
+    description: "All Java controllers must use Spring Security"
+    rule: |
+      package scalpel.security
+      
+      deny[msg] {
+        input.language == "java"
+        contains(input.code, "@RestController")
+        not contains(input.code, "@PreAuthorize")
+        msg = "REST controller missing @PreAuthorize annotation"
+      }
+    severity: "HIGH"
+    action: "DENY"
+  
+  # =================================================================
+  # P0: Safe File Operations
+  # =================================================================
+  - name: "safe-file-operations"
+    description: "File operations must not use user-controlled paths"
+    rule: |
+      package scalpel.security
+      
+      deny[msg] {
+        input.operation == "code_edit"
+        contains(input.code, "open(")
+        contains(input.code, "request.")
+        msg = "File operation uses user-controlled path without validation"
+      }
+    severity: "HIGH"
+    action: "DENY"

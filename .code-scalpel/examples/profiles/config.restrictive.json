@@ -1,0 +1,45 @@
+{
+  "version": "3.0.0",
+  "profile": "restrictive",
+  "description": "Highly restrictive configuration for security-critical projects (financial, healthcare, infrastructure)",
+  "governance": {
+    "change_budgeting": {
+      "enabled": true,
+      "max_lines_per_change": 100,
+      "max_files_per_change": 3,
+      "max_complexity_delta": 10,
+      "require_justification": true,
+      "budget_refresh_interval_hours": 8
+    },
+    "blast_radius": {
+      "enabled": true,
+      "max_affected_functions": 5,
+      "max_affected_classes": 2,
+      "max_call_graph_depth": 2,
+      "warn_on_public_api_changes": true,
+      "block_on_critical_paths": true,
+      "critical_paths": [
+        "src/core/",
+        "src/security/",
+        "src/symbolic_execution_tools/",
+        "src/mcp/server.py",
+        "src/policy_engine/",
+        "src/ast_tools/security_scanner.py",
+        "src/autonomy/"
+      ],
+      "critical_path_max_lines": 25,
+      "critical_path_max_complexity_delta": 5
+    },
+    "autonomy_constraints": {
+      "max_autonomous_iterations": 3,
+      "require_approval_for_breaking_changes": true,
+      "require_approval_for_security_changes": true,
+      "sandbox_execution_required": true
+    },
+    "audit": {
+      "log_all_changes": true,
+      "log_rejected_changes": true,
+      "retention_days": 365
+    }
+  }
+}

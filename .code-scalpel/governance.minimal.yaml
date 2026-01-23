@@ -1,0 +1,82 @@
+# Minimal Development Governance Policies
+# [20251226_CONFIG] Budget-constrained compliance profile
+#
+# Design Principles:
+#   - ~50 lines, not 680 (minimal cognitive overhead)
+#   - Security-focused only (prevent real damage)
+#   - Zero agent token overhead (server-side evaluation)
+#   - Audit trail for compliance evidence
+#
+# Target Users:
+#   - Solo developers with compliance needs
+#   - Contractors delivering client projects
+#   - Small teams (2-5 devs) with limited budget
+#   - Startups needing audit trail without process overhead
+
+version: "1.0"
+profile: "minimal"
+
+policies:
+  # ============================================================================
+  # SECURITY POLICIES (CRITICAL - Cannot be disabled)
+  # ============================================================================
+  
+  - name: no-secrets-in-code
+    category: security
+    severity: CRITICAL
+    action: DENY
+    description: "Prevent hardcoded secrets, API keys, and credentials"
+    patterns:
+      - "(?i)(api[_-]?key|secret[_-]?key|password|credential)\\s*=\\s*['\"][^'\"]{8,}"
+      - "(?i)bearer\\s+[a-zA-Z0-9]{20,}"
+      - "AKIA[0-9A-Z]{16}"  # AWS Access Key
+      - "ghp_[a-zA-Z0-9]{36}"  # GitHub Personal Token
+    remediation: "Use environment variables or secrets manager"
+
+  - name: no-dangerous-functions
+    category: security
+    severity: HIGH
+    action: WARN
+    description: "Flag potentially dangerous function calls"
+    patterns:
+      - "eval\\("
+      - "exec\\("
+      - "os\\.system\\("
+      - "__import__\\("
+    remediation: "Use safe alternatives or add security review comment"
+
+  # ============================================================================
+  # CHANGE MANAGEMENT (HIGH - Prevent runaway AI)
+  # ============================================================================
+  
+  - name: limit-change-scope
+    category: change_management
+    severity: HIGH
+    action: WARN
+    description: "Flag large changes that may need human review"
+    thresholds:
+      max_lines_changed: 500
+      max_files_changed: 10
+    remediation: "Break into smaller, reviewable changes"
+
+  # ============================================================================
+  # AUDIT TRAIL (MEDIUM - Compliance evidence)
+  # ============================================================================
+  
+  - name: log-all-modifications
+    category: audit
+    severity: MEDIUM
+    action: AUDIT
+    description: "Log all code modifications for compliance"
+    log_fields:
+      - timestamp
+      - file_path
+      - change_type
+      - lines_affected
+      - agent_id
+
+# Disabled policies (available in full profile):
+#   - mandatory-readme-for-new-modules (process overhead)
+#   - require-design-review-for-new-architecture (process overhead)
+#   - update-backlog-on-task-completion (process overhead)
+#   - check-sprint-capacity-before-new-work (process overhead)

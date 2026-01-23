@@ -1,0 +1,45 @@
+# Local Development Overrides (EXAMPLE)
+# 
+# Copy this to .code-scalpel/limits.local.toml and customize.
+# The .local.toml file is gitignored and takes precedence over limits.toml.
+#
+# Use this for:
+#   - Testing features that require higher tiers
+#   - Debugging with unlimited limits
+#   - Personal development preferences
+
+# ============================================================================
+# DEVELOPMENT EXAMPLES
+# ============================================================================
+
+# Example 1: Test unlimited depth in Pro tier
+[pro.extract_code]
+max_depth = 999  # Effectively unlimited for testing
+
+# Example 2: Increase community limits for demos
+[community.security_scan]
+max_findings = 200  # Show more findings
+
+# Example 3: Test enterprise features in Pro
+[pro.symbolic_execute]
+max_paths = 100
+max_depth = 50
+
+# ============================================================================
+# QUICK TIER BOOST (DEVELOPMENT ONLY)
+# ============================================================================
+# 
+# Uncomment these to give all Community tools Pro-level limits:
+#
+# [community.extract_code]
+# cross_file_deps = true
+# max_depth = 2
+#
+# [community.security_scan]
+# max_findings = null
+# max_file_size_kb = null
+#
+# [community.crawl_project]
+# max_files = 1000
+# parsing_enabled = true
+# complexity_analysis = true

@@ -1,0 +1,41 @@
+{
+  "version": "3.0.0",
+  "profile": "ci-cd",
+  "description": "Configuration optimized for CI/CD pipelines with faster iterations and automated testing",
+  "governance": {
+    "change_budgeting": {
+      "enabled": true,
+      "max_lines_per_change": 1000,
+      "max_files_per_change": 20,
+      "max_complexity_delta": 100,
+      "require_justification": false,
+      "budget_refresh_interval_hours": 1
+    },
+    "blast_radius": {
+      "enabled": true,
+      "max_affected_functions": 50,
+      "max_affected_classes": 10,
+      "max_call_graph_depth": 4,
+      "warn_on_public_api_changes": true,
+      "block_on_critical_paths": true,
+      "critical_paths": [
+        "src/mcp/server.py",
+        "src/policy_engine/",
+        "src/security/"
+      ],
+      "critical_path_max_lines": 100,
+      "critical_path_max_complexity_delta": 20
+    },
+    "autonomy_constraints": {
+      "max_autonomous_iterations": 20,
+      "require_approval_for_breaking_changes": false,
+      "require_approval_for_security_changes": true,
+      "sandbox_execution_required": true
+    },
+    "audit": {
+      "log_all_changes": true,
+      "log_rejected_changes": true,
+      "retention_days": 60
+    }
+  }
+}

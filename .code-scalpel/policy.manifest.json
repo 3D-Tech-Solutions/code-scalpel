@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "files": {
+    "policy.yaml": "sha256:0bd17670b077c36f30a48990353908dbe00ed928c24af655a7d160b054a5ed6a",
+    "budget.yaml": "sha256:bae2255d2aa9023074d028da97456176ab4eda08b0a5e171080b3058025f9fb8"
+  },
+  "created_at": "2026-01-03T00:07:11.266656",
+  "signed_by": "admin@example.com",
+  "signature": "7d43a959edc35aa8e3626e33303d40d014abcdbe79b3f8e8dc3361a9f183517f"
+}

@@ -1,0 +1,423 @@
+# Code Scalpel Project Structure Configuration
+# Enforces consistent code organization and documentation standards
+
+project_config:
+  name: "code-scalpel"
+  type: "python-library"
+  strictness: high
+  auto_fix: false  # Require manual review for production library
+  
+  # File location rules - where different file types belong
+  file_locations:
+    # Core modules
+    core_module: "src/code_scalpel/"
+    submodule: "src/code_scalpel/*/"
+    
+    # Specific component types
+    policy_file: ".code-scalpel/policies/"
+    rego_policy: ".code-scalpel/policies/"
+    
+    # Analysis engines
+    pdg_tool: "src/code_scalpel/pdg_tools/"
+    graph_engine: "src/code_scalpel/graph_engine/"
+    ir_component: "src/code_scalpel/ir/"
+    symbolic_execution: "src/code_scalpel/symbolic_execution_tools/"
+    
+    # Integrations
+    ai_integration: "src/code_scalpel/integrations/"
+    mcp_server: "src/code_scalpel/mcp/"
+    
+    # Language support
+    parser: "src/code_scalpel/code_parsers/"
+    polyglot_analyzer: "src/code_scalpel/polyglot/"
+    
+    # Governance & security
+    policy_engine: "src/code_scalpel/policy_engine/"
+    governance: "src/code_scalpel/governance/"
+    security_tool: "src/code_scalpel/security/"
+    
+    # Testing
+    unit_test: "tests/unit/"
+    integration_test: "tests/integration/"
+    e2e_test: "tests/e2e/"
+    benchmark: "benchmarks/"
+    
+    # Documentation
+    api_docs: "docs/api/"
+    guide: "docs/guides/"
+    feature_doc: "docs/features/"
+    testing_doc: "docs/testing/"
+    summary: "docs/summaries/"
+    
+    # Examples
+    example_code: "examples/"
+    example_policy: "examples/policy_examples/"
+    
+    # Configuration
+    config_file: "config/"
+    docker_file: "./"  # Dockerfile in root
+    ci_config: ".github/workflows/"
+    
+    # Utilities
+    utility_function: "src/code_scalpel/utilities/"
+    script: "scripts/"
+    
+  # README requirements
+  readme_requirements:
+    # Every directory must have README.md (with exceptions)
+    excluded_directories:
+      - "**/__pycache__/**"
+      - "**/.pytest_cache/**"
+      - "**/node_modules/**"
+      - "**/.git/**"
+      - "**/dist/**"
+      - "**/build/**"
+      - "**/.venv/**"
+      - "**/venv/**"
+      - "**/*.egg-info/**"
+      - ".code-scalpel/certs/**"
+      - "evidence/**"
+      - "release_artifacts/**"
+    
+    # Required sections in every README
+    sections:
+      - "Overview"
+      - "Usage"
+    
+    # Directory-specific requirements
+    specific_requirements:
+      "src/code_scalpel/":
+        sections: ["Overview", "Architecture", "Core Components", "Usage"]
+      
+      "src/code_scalpel/pdg_tools/":
+        sections: ["Overview", "Components", "API", "Examples"]
+      
+      "src/code_scalpel/graph_engine/":
+        sections: ["Overview", "Graph Structure", "Confidence Scoring", "API"]
+      
+      "src/code_scalpel/policy_engine/":
+        sections: ["Overview", "Policy Format", "Integration", "Examples"]
+      
+      "src/code_scalpel/integrations/":
+        sections: ["Overview", "Supported Frameworks", "Integration Guide", "Examples"]
+      
+      "src/code_scalpel/mcp/":
+        sections: ["Overview", "MCP Protocol", "Server Setup", "Tools"]
+      
+      ".code-scalpel/policies/architecture/":
+        sections: ["Overview", "Policies", "Configuration", "Examples"]
+      
+      ".code-scalpel/policies/devops/":
+        sections: ["Overview", "Policies", "Configuration", "Examples"]
+      
+      ".code-scalpel/policies/devsecops/":
+        sections: ["Overview", "Policies", "Configuration", "Examples"]
+      
+      "tests/":
+        sections: ["Overview", "Running Tests", "Coverage Requirements"]
+      
+      "docs/":
+        sections: ["Overview", "Documentation Structure", "Quick Start"]
+      
+      "examples/":
+        sections: ["Overview", "Available Examples", "Running Examples"]
+  
+  # Naming conventions (Python PEP 8 + project-specific)
+  naming_conventions:
+    # Python modules
+    "Python Module": "^[a-z_][a-z0-9_]*\\.py$"
+    "Python Package": "^[a-z_][a-z0-9_]*$"
+    "Python Class": "^[A-Z][a-zA-Z0-9]*$"  # PascalCase
+    
+    # Specific component types
+    "PDG Tool": "^[a-z_][a-z0-9_]*\\.py$"  # snake_case
+    "Graph Engine": "^[a-z_][a-z0-9_]*\\.py$"
+    "Policy Engine": "^[a-z_][a-z0-9_]*\\.py$"
+    "Integration": "^[a-z_][a-z0-9_]*\\.py$"
+    
+    # Policy files
+    "Rego Policy": "^[a-z_][a-z0-9_]*\\.rego$"
+    
+    # Test files
+    "Unit Test": "^test_[a-z_][a-z0-9_]*\\.py$"
+    "Integration Test": "^test_[a-z_][a-z0-9_]*\\.py$"
+    
+    # Documentation
+    "Markdown Doc": "^[A-Z][A-Z0-9_]*\\.md$"  # UPPERCASE_WITH_UNDERSCORES
+    "README": "^README\\.md$"
+    
+    # Configuration
+    "YAML Config": "^[a-z-][a-z0-9-]*\\.ya?ml$"
+    "TOML Config": "^[a-z-][a-z0-9-]*\\.toml$"
+  
+  # Directory structure enforcement
+  required_directories:
+    - path: "src/code_scalpel/"
+      description: "Main source code"
+      requires_init: true
+    
+    - path: "src/code_scalpel/pdg_tools/"
+      description: "Program Dependence Graph analysis"
+      requires_init: true
+    
+    - path: "src/code_scalpel/graph_engine/"
+      description: "Graph-based code analysis"
+      requires_init: true
+    
+    - path: "src/code_scalpel/policy_engine/"
+      description: "OPA/Rego policy enforcement"
+      requires_init: true
+    
+    - path: "src/code_scalpel/integrations/"
+      description: "AI framework integrations"
+      requires_init: true
+    
+    - path: "src/code_scalpel/mcp/"
+      description: "Model Context Protocol server"
+      requires_init: true
+    
+    - path: "tests/unit/"
+      description: "Unit tests"
+      requires_init: true
+    
+    - path: "tests/integration/"
+      description: "Integration tests"
+      requires_init: true
+    
+    - path: "docs/"
+      description: "Documentation"
+      requires_init: false
+    
+    - path: "examples/"
+      description: "Example code and demonstrations"
+      requires_init: false
+    
+    - path: ".code-scalpel/policies/"
+      description: "Policy templates"
+      requires_init: false
+  
+  # Cohabitation rules - which file types can coexist in directories
+  cohabitation:
+    "src/code_scalpel/pdg_tools/":
+      allowed: ["pdg_tool", "utility_function", "__init__"]
+      forbidden: ["test_file", "integration", "policy_file"]
+      rationale: "PDG tools are pure analysis - no tests or integrations"
+    
+    "src/code_scalpel/graph_engine/":
+      allowed: ["graph_engine", "utility_function", "__init__"]
+      forbidden: ["test_file", "integration", "mcp_server"]
+      rationale: "Graph engine is core infrastructure - isolated from external concerns"
+    
+    "src/code_scalpel/integrations/":
+      allowed: ["ai_integration", "__init__"]
+      forbidden: ["pdg_tool", "graph_engine", "test_file"]
+      rationale: "Integrations isolated from core analysis logic"
+    
+    "src/code_scalpel/mcp/":
+      allowed: ["mcp_server", "utility_function", "__init__"]
+      forbidden: ["pdg_tool", "graph_engine", "integration"]
+      rationale: "MCP server is protocol boundary - separate from analysis"
+    
+    "src/code_scalpel/policy_engine/":
+      allowed: ["policy_engine", "models", "exceptions", "__init__"]
+      forbidden: ["test_file", "integration"]
+      rationale: "Policy engine is security-critical - minimal dependencies"
+    
+    ".code-scalpel/policies/":
+      allowed: ["rego_policy", "yaml_config", "readme"]
+      forbidden: ["python_module", "test_file"]
+      rationale: "Policy directory contains only policy definitions"
+    
+    "tests/unit/":
+      allowed: ["unit_test", "fixture", "conftest"]
+      forbidden: ["integration_test", "e2e_test"]
+      rationale: "Unit tests isolated from integration tests"
+    
+    "tests/integration/":
+      allowed: ["integration_test", "fixture", "conftest"]
+      forbidden: ["unit_test"]
+      rationale: "Integration tests separate from unit tests"
+    
+    "docs/":
+      allowed: ["markdown_doc", "readme", "image", "diagram"]
+      forbidden: ["python_module", "test_file", "policy_file"]
+      rationale: "Documentation directory is read-only content"
+    
+    "examples/":
+      allowed: ["example_code", "readme", "config_file"]
+      forbidden: ["test_file", "core_module"]
+      rationale: "Examples are demonstrations, not production code"
+  
+  # Module dependency rules
+  dependency_rules:
+    # Core can't depend on integrations
+    "src/code_scalpel/pdg_tools/":
+      can_import: ["src/code_scalpel/graph_engine/", "src/code_scalpel/ir/", "src/code_scalpel/utilities/"]
+      cannot_import: ["src/code_scalpel/integrations/", "src/code_scalpel/mcp/"]
+    
+    "src/code_scalpel/graph_engine/":
+      can_import: ["src/code_scalpel/ir/", "src/code_scalpel/utilities/"]
+      cannot_import: ["src/code_scalpel/pdg_tools/", "src/code_scalpel/integrations/", "src/code_scalpel/mcp/"]
+    
+    "src/code_scalpel/policy_engine/":
+      can_import: ["src/code_scalpel/ir/", "src/code_scalpel/utilities/"]
+      cannot_import: ["src/code_scalpel/integrations/", "src/code_scalpel/mcp/"]
+    
+    # Integrations can depend on core, but not each other
+    "src/code_scalpel/integrations/":
+      can_import: ["src/code_scalpel/pdg_tools/", "src/code_scalpel/graph_engine/", "src/code_scalpel/policy_engine/"]
+      cannot_import: ["src/code_scalpel/mcp/"]
+    
+    # MCP server can depend on everything except integrations
+    "src/code_scalpel/mcp/":
+      can_import: ["src/code_scalpel/pdg_tools/", "src/code_scalpel/graph_engine/", "src/code_scalpel/policy_engine/"]
+      cannot_import: ["src/code_scalpel/integrations/"]
+  
+  # Code quality requirements
+  quality_requirements:
+    # Test coverage
+    min_coverage: 90  # 90% required per SECURITY.md
+    
+    # Documentation
+    require_docstrings: true
+    docstring_style: "google"  # Google-style docstrings
+    
+    # Type hints
+    require_type_hints: true
+    
+    # Security
+    no_hardcoded_secrets: true
+    require_input_validation: true
+    
+  # File size limits (prevent monolithic files)
+  file_limits:
+    max_lines_python: 500  # Encourage modular design
+    max_lines_rego: 300
+    max_lines_markdown: 1000
+    warn_lines_python: 300
+    warn_lines_rego: 200
+  
+  # Enforcement actions
+  enforcement:
+    # README violations
+    missing_readme: "DENY"
+    incomplete_readme: "WARN"
+    
+    # File location violations
+    wrong_location: "DENY"
+    wrong_directory: "DENY"
+    
+    # Naming violations
+    naming_violation: "DENY"
+    
+    # Cohabitation violations
+    forbidden_cohabitation: "DENY"
+    
+    # Dependency violations
+    forbidden_import: "DENY"
+    circular_dependency: "DENY"
+    
+    # Quality violations
+    low_coverage: "DENY"
+    missing_docstring: "WARN"
+    missing_type_hint: "WARN"
+    large_file: "WARN"
+  
+  # AI agent guidance
+  ai_guidance:
+    # When creating new files, AI should:
+    create_with_readme: true  # Always create README.md for new directories
+    auto_generate_docstrings: true
+    auto_add_type_hints: true
+    
+    # When organizing code, AI should:
+    suggest_refactoring: true  # Suggest splitting large files
+    enforce_separation: true  # Keep core separate from integrations
+    
+    # When writing tests, AI should:
+    colocate_fixtures: false  # Fixtures in conftest.py, not in test files
+    separate_unit_integration: true
+    
+    # File templates
+    templates:
+      python_module: |
+        """[Module description]
+        
+        This module provides [functionality].
+        
+        Example:
+            >>> from code_scalpel.[module] import [Class]
+            >>> obj = [Class]()
+        """
+        
+        from typing import [types]
+        
+        __all__ = ["[exports]"]
+      
+      python_class: |
+        class [ClassName]:
+            """[Class description]
+            
+            Args:
+                param: [description]
+                
+            Attributes:
+                attr: [description]
+            """
+            
+            def __init__(self, param: [type]) -> None:
+                """Initialize [ClassName]."""
+                self.attr = param
+      
+      test_file: |
+        """Tests for [module_name]."""
+        
+        import pytest
+        from code_scalpel.[module] import [Class]
+        
+        
+        class Test[ClassName]:
+            """Test suite for [ClassName]."""
+            
+            def test_[functionality](self):
+                """Test [functionality]."""
+                # Arrange
+                obj = [Class]()
+                
+                # Act
+                result = obj.method()
+                
+                # Assert
+                assert result == expected
+      
+      readme_module: |
+        # [Module Name]
+        
+        ## Overview
+        
+        [Description of what this module does]
+        
+        ## Components
+        
+        - `[file.py]` - [description]
+        
+        ## API
+        
+        ### [ClassName]
+        
+        [Description]
+        
+        ```python
+        from code_scalpel.[module] import [Class]
+        
+        obj = [Class]()
+        result = obj.method()
+        ```
+        
+        ## Examples
+        
+        See [examples/](../../examples/) for usage examples.
+
+# Version control
+version: "3.2.0"
+last_updated: "2025-12-21"

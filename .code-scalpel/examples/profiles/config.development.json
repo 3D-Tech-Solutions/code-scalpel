@@ -1,0 +1,41 @@
+{
+  "version": "3.0.0",
+  "profile": "development",
+  "description": "Developer-friendly configuration for active development with moderate controls",
+  "governance": {
+    "change_budgeting": {
+      "enabled": true,
+      "max_lines_per_change": 750,
+      "max_files_per_change": 15,
+      "max_complexity_delta": 75,
+      "require_justification": false,
+      "budget_refresh_interval_hours": 4
+    },
+    "blast_radius": {
+      "enabled": true,
+      "max_affected_functions": 30,
+      "max_affected_classes": 8,
+      "max_call_graph_depth": 3,
+      "warn_on_public_api_changes": true,
+      "block_on_critical_paths": true,
+      "critical_paths": [
+        "src/core/",
+        "src/security/",
+        "src/mcp/server.py"
+      ],
+      "critical_path_max_lines": 75,
+      "critical_path_max_complexity_delta": 15
+    },
+    "autonomy_constraints": {
+      "max_autonomous_iterations": 15,
+      "require_approval_for_breaking_changes": true,
+      "require_approval_for_security_changes": true,
+      "sandbox_execution_required": true
+    },
+    "audit": {
+      "log_all_changes": true,
+      "log_rejected_changes": true,
+      "retention_days": 60
+    }
+  }
+}

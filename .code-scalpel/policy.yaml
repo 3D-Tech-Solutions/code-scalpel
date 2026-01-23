@@ -1,0 +1,20 @@
+# Code Scalpel Policy Configuration  
+# [20251227_BUGFIX] Minimal policy file for testing
+version: "1.0"
+
+policies:
+  - name: test-sql-injection
+    severity: HIGH
+    action: DENY
+    description: "Prevent SQL injection"
+    rule: |
+      package code_scalpel.test
+      default allow = true
+  
+  - name: test-command-injection
+    severity: HIGH
+    action: DENY
+    description: "Prevent command injection"
+    rule: |
+      package code_scalpel.test
+      default allow = true

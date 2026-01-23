@@ -1,0 +1,5 @@
+
+# Budget constraints for agent operations
+max_files_read: 100
+max_tokens_per_session: 50000
+max_api_calls_per_hour: 1000

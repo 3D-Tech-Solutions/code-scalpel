@@ -1,0 +1,37 @@
+{
+  "version": "3.0.0",
+  "profile": "permissive",
+  "description": "Permissive configuration for experimental projects, prototyping, or trusted development environments",
+  "governance": {
+    "change_budgeting": {
+      "enabled": true,
+      "max_lines_per_change": 2000,
+      "max_files_per_change": 50,
+      "max_complexity_delta": 200,
+      "require_justification": false,
+      "budget_refresh_interval_hours": 24
+    },
+    "blast_radius": {
+      "enabled": true,
+      "max_affected_functions": 100,
+      "max_affected_classes": 20,
+      "max_call_graph_depth": 5,
+      "warn_on_public_api_changes": false,
+      "block_on_critical_paths": false,
+      "critical_paths": [],
+      "critical_path_max_lines": 200,
+      "critical_path_max_complexity_delta": 50
+    },
+    "autonomy_constraints": {
+      "max_autonomous_iterations": 50,
+      "require_approval_for_breaking_changes": false,
+      "require_approval_for_security_changes": true,
+      "sandbox_execution_required": true
+    },
+    "audit": {
+      "log_all_changes": true,
+      "log_rejected_changes": true,
+      "retention_days": 30
+    }
+  }
+}

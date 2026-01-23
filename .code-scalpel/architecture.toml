@@ -1,0 +1,156 @@
+# Code Scalpel Architecture Configuration
+# [20251230_FEATURE] Enterprise tier: Configurable dependency rules
+#
+# This file defines architectural boundaries and dependency rules for the project.
+# It is used by the dependency_rule_engine in get_cross_file_dependencies.
+#
+# Rules are evaluated in order. First matching rule determines the violation status.
+#
+# Override Priority:
+#   1. Environment: CODE_SCALPEL_ARCHITECTURE_FILE=/path/to/custom.toml
+#   2. Project: .code-scalpel/architecture.toml (this file)
+#   3. Default: No rules (everything allowed)
+
+# ============================================================================
+# LAYER DEFINITIONS
+# ============================================================================
+# Define architectural layers from highest to lowest.
+# Higher layers should depend on lower layers, not vice versa.
+
+[layers]
+# Order matters: first layer is highest, last is lowest
+order = [
+    "presentation",  # UI/API controllers
+    "application",   # Use cases, orchestration
+    "domain",        # Business logic, entities
+    "infrastructure" # Database, external services
+]
+
+# Map module patterns to layers (glob-style matching)
+[layers.mapping]
+presentation = [
+    "**/controllers/**",
+    "**/views/**",
+    "**/api/**",
+    "**/routes/**",
+    "**/handlers/**"
+]
+application = [
+    "**/services/**",
+    "**/use_cases/**",
+    "**/usecases/**",
+    "**/commands/**",
+    "**/queries/**"
+]
+domain = [
+    "**/models/**",
+    "**/entities/**",
+    "**/domain/**",
+    "**/core/**"
+]
+infrastructure = [
+    "**/repositories/**",
+    "**/database/**",
+    "**/db/**",
+    "**/external/**",
+    "**/adapters/**"
+]
+
+# ============================================================================
+# BOUNDARY RULES
+# ============================================================================
+# Define allowed and forbidden dependency directions
+
+[rules]
+# Enable/disable rule categories
+enable_layer_rules = true
+enable_custom_rules = true
+enable_coupling_rules = true
+
+# Layer dependency direction: "downward_only" or "any"
+# "downward_only" means higher layers can only import from lower layers
+layer_direction = "downward_only"
+
+# Allow same-layer imports
+allow_same_layer = true
+
+# ============================================================================
+# CUSTOM DEPENDENCY RULES
+# ============================================================================
+# Define specific allow/deny rules using glob patterns
+
+[[rules.custom]]
+name = "no_direct_db_access_from_presentation"
+description = "Presentation layer should not directly access database"
+from_pattern = "**/controllers/**"
+to_pattern = "**/database/**"
+action = "deny"
+severity = "critical"
+
+[[rules.custom]]
+name = "no_circular_service_deps"
+description = "Services should not have circular dependencies"
+from_pattern = "**/services/**"
+to_pattern = "**/services/**"
+action = "warn"
+severity = "major"
+
+[[rules.custom]]
+name = "domain_isolation"
+description = "Domain layer should not depend on infrastructure"
+from_pattern = "**/domain/**"
+to_pattern = "**/infrastructure/**"
+action = "deny"
+severity = "critical"
+
+# ============================================================================
+# COUPLING LIMITS
+# ============================================================================
+# Define maximum allowed coupling metrics
+
+[rules.coupling]
+# Maximum number of modules that can import a single module (fan-in)
+max_fan_in = 20
+
+# Maximum number of modules a single module can import (fan-out)
+max_fan_out = 15
+
+# Maximum depth of dependency chains
+max_dependency_depth = 10
+
+# Coupling threshold for "highly coupled" warning
+coupling_threshold = 0.7
+
+# ============================================================================
+# EXEMPTIONS
+# ============================================================================
+# Patterns to exclude from rule checking
+
+[exemptions]
+# Test files are exempt from architectural rules
+patterns = [
+    "**/tests/**",
+    "**/test_*.py",
+    "**/*_test.py",
+    "**/conftest.py"
+]
+
+# Specific modules exempt from all rules
+modules = [
+    "__init__",
+    "utils",
+    "helpers",
+    "constants",
+    "config",
+    "settings"
+]
+
+# ============================================================================
+# SEVERITY LEVELS
+# ============================================================================
+# Define what happens at each severity level
+
+[severity]
+critical = "block"   # Block the operation, report as error
+major = "warn"       # Warn but continue, report in violations
+minor = "info"       # Informational only, include in report

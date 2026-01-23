@@ -1,0 +1,43 @@
+{
+  "version": "3.0.0",
+  "profile": "default",
+  "description": "Default balanced configuration for Code Scalpel autonomy",
+  "governance": {
+    "change_budgeting": {
+      "enabled": true,
+      "max_lines_per_change": 500,
+      "max_files_per_change": 10,
+      "max_complexity_delta": 50,
+      "require_justification": true,
+      "budget_refresh_interval_hours": 24
+    },
+    "blast_radius": {
+      "enabled": true,
+      "max_affected_functions": 20,
+      "max_affected_classes": 5,
+      "max_call_graph_depth": 3,
+      "warn_on_public_api_changes": true,
+      "block_on_critical_paths": true,
+      "critical_paths": [
+        "src/core/",
+        "src/security/",
+        "src/symbolic_execution_tools/security_analyzer.py",
+        "src/mcp/server.py",
+        "src/policy_engine/"
+      ],
+      "critical_path_max_lines": 50,
+      "critical_path_max_complexity_delta": 10
+    },
+    "autonomy_constraints": {
+      "max_autonomous_iterations": 10,
+      "require_approval_for_breaking_changes": true,
+      "require_approval_for_security_changes": true,
+      "sandbox_execution_required": true
+    },
+    "audit": {
+      "log_all_changes": true,
+      "log_rejected_changes": true,
+      "retention_days": 90
+    }
+  }
+}

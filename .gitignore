@@ -37,6 +37,8 @@ pip-delete-this-directory.txt
 
 # Code Scalpel specific
 .code-scalpel.code-workspace
+.code-scalpel/development-*.private.pem  # Private keys for development
+.code-scalpel/audit.jsonl  # Audit logs with user information
 pdg_visualizations/
 analysis_results/
 .scalpel_cache/

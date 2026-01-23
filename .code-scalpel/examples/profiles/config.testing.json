@@ -1,0 +1,39 @@
+{
+  "version": "3.0.0",
+  "profile": "testing",
+  "description": "Configuration for testing governance features with minimal restrictions but full auditing",
+  "governance": {
+    "change_budgeting": {
+      "enabled": true,
+      "max_lines_per_change": 50,
+      "max_files_per_change": 2,
+      "max_complexity_delta": 5,
+      "require_justification": true,
+      "budget_refresh_interval_hours": 24
+    },
+    "blast_radius": {
+      "enabled": true,
+      "max_affected_functions": 3,
+      "max_affected_classes": 1,
+      "max_call_graph_depth": 2,
+      "warn_on_public_api_changes": true,
+      "block_on_critical_paths": true,
+      "critical_paths": [
+        "tests/fixtures/critical/"
+      ],
+      "critical_path_max_lines": 10,
+      "critical_path_max_complexity_delta": 2
+    },
+    "autonomy_constraints": {
+      "max_autonomous_iterations": 2,
+      "require_approval_for_breaking_changes": true,
+      "require_approval_for_security_changes": true,
+      "sandbox_execution_required": true
+    },
+    "audit": {
+      "log_all_changes": true,
+      "log_rejected_changes": true,
+      "retention_days": 7
+    }
+  }
+}

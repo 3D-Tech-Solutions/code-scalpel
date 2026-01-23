@@ -1,0 +1,186 @@
+{
+  "$schema": "./response_config.schema.json",
+  "version": "3.3.1",
+  "description": "MCP response configuration for token efficiency - controls output verbosity for all tools independent of tier",
+  "global": {
+    "profile": "minimal",
+    "exclude_empty_arrays": true,
+    "exclude_empty_objects": true,
+    "exclude_null_values": true,
+    "exclude_default_values": true
+  },
+  "profiles": {
+    "minimal": {
+      "description": "Bare minimum for LLM understanding - maximum token efficiency (~50-100 tokens)",
+      "envelope": {
+        "include": []
+      },
+      "common_exclusions": [
+        "server_version",
+        "request_id",
+        "duration_ms",
+        "capabilities"
+      ]
+    },
+    "standard": {
+      "description": "Balanced output with essential metadata (~100-500 tokens)",
+      "envelope": {
+        "include": ["error", "upgrade_hints"]
+      },
+      "common_exclusions": [
+        "server_version",
+        "request_id"
+      ]
+    },
+    "verbose": {
+      "description": "Detailed output with full metadata (~500-2000 tokens)",
+      "envelope": {
+        "include": ["error", "upgrade_hints", "duration_ms"]
+      },
+      "common_exclusions": [
+        "server_version"
+      ]
+    },
+    "debug": {
+      "description": "Full output including all metadata for debugging (unlimited)",
+      "envelope": {
+        "include": ["tier", "tool_version", "tool_id", "request_id", "capabilities", "duration_ms", "error", "upgrade_hints"]
+      },
+      "common_exclusions": []
+    }
+  },
+  "tool_overrides": {
+    "_comment": "Per-tool field exclusions to control output size. Not tier-based - purely for token efficiency.",
+
+    "analyze_code": {
+      "profile": "minimal",
+      "exclude_fields": ["raw_ast", "parser_warnings", "token_positions"]
+    },
+
+    "security_scan": {
+      "profile": "minimal",
+      "exclude_fields": ["scan_metadata", "parser_warnings", "constraint_dump", "solver_statistics"]
+    },
+
+    "extract_code": {
+      "profile": "minimal",
+      "exclude_fields": ["extraction_metadata", "ast_node_ids"]
+    },
+
+    "rename_symbol": {
+      "profile": "minimal",
+      "exclude_fields": ["backup_path", "diff_hunks"]
+    },
+
+    "symbolic_execute": {
+      "profile": "minimal",
+      "exclude_fields": ["solver_statistics", "constraint_dump", "z3_model_dump", "path_conditions_raw", "concolic_results", "state_space_analysis", "memory_model"]
+    },
+
+    "generate_unit_tests": {
+      "profile": "minimal",
+      "exclude_fields": ["generation_metadata", "symbolic_paths_raw"]
+    },
+
+    "crawl_project": {
+      "profile": "minimal",
+      "exclude_fields": ["crawl_statistics", "file_hashes", "parse_timings"]
+    },
+
+    "get_call_graph": {
+      "profile": "minimal",
+      "exclude_fields": ["graph_metadata", "edge_weights", "traversal_order"]
+    },
+
+    "get_graph_neighborhood": {
+      "profile": "minimal",
+      "exclude_fields": ["traversal_statistics", "visited_nodes_raw"]
+    },
+
+    "get_symbol_references": {
+      "profile": "minimal",
+      "exclude_fields": ["search_metadata", "file_scan_order"]
+    },
+
+    "simulate_refactor": {
+      "profile": "minimal",
+      "exclude_fields": ["simulation_metadata", "ast_diff_raw"]
+    },
+
+    "scan_dependencies": {
+      "profile": "minimal",
+      "exclude_fields": ["scan_metadata", "api_response_raw"]
+    },
+
+    "get_cross_file_dependencies": {
+      "profile": "minimal",
+      "exclude_fields": ["resolution_metadata", "import_parse_details", "internal_state"],
+      "exclude_when_tier": {
+        "community": [
+          "coupling_analysis",
+          "boundary_violations",
+          "architectural_alerts",
+          "reexport_chains",
+          "alias_resolution_details",
+          "wildcard_expansions",
+          "transitive_dependencies",
+          "dependency_chain_visualization",
+          "deep_coupling_metrics"
+        ],
+        "pro": [
+          "architectural_alerts",
+          "boundary_violation_alerts",
+          "layer_constraint_details",
+          "dependency_rule_engine_results",
+          "architectural_firewall_report"
+        ]
+      },
+      "_comment": "Community: direct imports only (max_depth=1). Pro: adds transitive deps, wildcards, aliases, coupling. Enterprise: adds architectural rules, boundary enforcement."
+    },
+
+    "cross_file_security_scan": {
+      "profile": "minimal",
+      "exclude_fields": ["scan_metadata", "taint_propagation_log"]
+    },
+
+    "verify_policy_integrity": {
+      "profile": "minimal",
+      "exclude_fields": ["verification_metadata", "signature_bytes"]
+    },
+
+    "code_policy_check": {
+      "profile": "minimal",
+      "exclude_fields": ["check_metadata", "rule_evaluation_log", "best_practices_violations", "security_warnings"]
+    },
+
+    "type_evaporation_scan": {
+      "profile": "minimal",
+      "exclude_fields": ["scan_metadata", "ast_locations_raw", "compliance_report", "validation_code", "summary", "validation_code", "summary"]
+    },
+
+    "unified_sink_detect": {
+      "profile": "minimal",
+      "exclude_fields": ["detection_metadata", "pattern_match_details"]
+    },
+
+    "update_symbol": {
+      "profile": "minimal",
+      "exclude_fields": ["backup_metadata", "syntax_tree_diff"]
+    },
+
+    "get_file_context": {
+      "profile": "minimal",
+      "exclude_fields": ["parsing_metadata", "ast_node_count"]
+    },
+
+    "get_project_map": {
+      "profile": "minimal",
+      "exclude_fields": ["map_metadata", "file_modification_times", "city_map_data", "churn_heatmap", "historical_trends", "git_ownership", "bug_hotspots", "architectural_layers", "coupling_metrics"]
+    },
+
+    "validate_paths": {
+      "profile": "minimal",
+      "exclude_fields": ["validation_metadata", "stat_results"]
+    }
+  }
+}
