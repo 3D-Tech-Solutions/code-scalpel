@@ -46,9 +46,13 @@ analysis_results/
 compliance_reports/
 .code-scalpel/autonomy_audit/  # Autonomy audit trail runtime files
 .code-scalpel/audit.log  # Policy engine audit log
+.code-scalpel/audit.jsonl  # Policy engine audit log (JSONL format)
 .code-scalpel/limits.local.toml  # [20251225_CONFIG] Local tier limit overrides
 certs/  # Certificate and private key files for signing/encryption
 code_scalpel_community/
+
+# Test audit files (contain sensitive information)
+tests/.code-scalpel/audit.jsonl
 
 # [20260117_CLEANUP] Temporary/ephemeral directories for v1.0 fork
 .bench_tmp/
