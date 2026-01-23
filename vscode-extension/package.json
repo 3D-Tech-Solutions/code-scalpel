@@ -3,20 +3,16 @@
   "displayName": "Code Scalpel",
   "description": "MCP server toolkit for AI agents - surgical code analysis, security scanning, and intelligent refactoring",
   "version": "1.0.1",
-  "publisher": "3D-Tech-Solutions",
-  "icon": "images/icon.png",
+  "manifestVersion": 1,
+  "publisher": "3DTechus",
   "repository": {
     "type": "git",
-    "url": "https://github.com/3D-Tech-Solutions/code-scalpel.git"
+    "url": "https://github.com/3DTechus/code-scalpel.git"
   },
-  "bugs": {
-    "url": "https://github.com/3D-Tech-Solutions/code-scalpel/issues"
-  },
-  "homepage": "https://github.com/3D-Tech-Solutions/code-scalpel#readme",
-  "license": "MIT",
   "engines": {
     "vscode": "^1.85.0"
   },
+  "extensionKind": ["workspace"],
   "categories": [
     "Programming Languages",
     "Linters",

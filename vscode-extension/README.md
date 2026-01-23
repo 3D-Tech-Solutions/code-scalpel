@@ -65,9 +65,9 @@ This extension integrates with the Model Context Protocol (MCP) for AI agent com
 
 ## Support
 
-- [GitHub Issues](https://github.com/3D-Tech-Solutions/code-scalpel/issues)
-- [Documentation](https://github.com/3D-Tech-Solutions/code-scalpel#readme)
+- [GitHub Issues](https://github.com/3DTechus/code-scalpel/issues)
+- [Documentation](https://github.com/3DTechus/code-scalpel#readme)
 
 ## License
 
-MIT License - see [LICENSE](../LICENSE) for details.
+MIT License - see [LICENSE](LICENSE) for details.
