@@ -37,33 +37,42 @@ pip-delete-this-directory.txt
 
 # Code Scalpel specific
 .code-scalpel.code-workspace
-.code-scalpel/development-*.private.pem  # Private keys for development
-.code-scalpel/audit.jsonl  # Audit logs with user information
 pdg_visualizations/
 analysis_results/
 .scalpel_cache/
-.code_scalpel_cache/
+.code_scalpel_cache/    
 .scalpel_ast_cache/
 .ruff_cache/
 compliance_reports/
+.code-scalpel/autonomy_audit/  # Autonomy audit trail runtime files
+.code-scalpel/audit.log  # Policy engine audit log
+.code-scalpel/audit.jsonl  # Audit logs with user information
+.code-scalpel/limits.local.toml  # [20251225_CONFIG] Local tier limit overrides
 certs/  # Certificate and private key files for signing/encryption
 code_scalpel_community/
-
-# Test audit files (contain sensitive information)
-tests/.code-scalpel/audit.jsonl
+local_pipeline/
 
 # [20260117_CLEANUP] Temporary/ephemeral directories for v1.0 fork
 .bench_tmp/
 .test_simple/
 .tmp_tier_comm/
 
+# [20251228_TEST] Local remote-verifier integration artifacts (never commit)
+.code-scalpel/license.jwt
+.code-scalpel/license*.jwt
+.code-scalpel/**/*.jwt
+.code-scalpel/license_cache.json
+.code-scalpel/*.jwk.json
+.code-scalpel/test_write.json
+
 # [20250101_TEST] Test license files - valid JWT licenses for tier testing
-tests/licenses/
+# [20260120_SECURITY] ALL license files blocked - injected via GitHub Secrets in CI
+tests/licenses/*.jwt
+tests/licenses/**/*.jwt
 
 # License management (separate repo, ignore if checked out locally)
-code_scalpel_tier_management/
-license-management/
-tier-management/
+.code-scalpel/license/  # License directory contains JWT license files
+.code-scalpel/archive/  # Archived license files (potentially sensitive)
 keys/  # Private keys should never be in this repo
 *.pem  # Private key files
 *.key  # Key files
@@ -83,6 +92,32 @@ docs/analysis/  # Internal tool validation and verification documents
 
 # Internal GitHub workflow prompts (not for public consumption)
 .github/prompts/
+
+# Internal documentation (development-only, not for public repo)
+docs/adr/
+docs/architecture/
+docs/ci_cd/
+docs/compliance/
+docs/configuration/
+docs/deployment/
+docs/features/
+docs/modules/
+docs/parsers/
+docs/performance/
+docs/reference/
+# docs/release_notes/  [20260119] REMOVED - release notes are now tracked in git
+docs/research/
+docs/roadmap/
+docs/security/
+docs/testing/
+docs/todo_reports/
+docs/tools/
+docs/DEVELOPMENT_ROADMAP.md
+docs/guides/migration/
+docs/guides/pre_fork_analysis_findings.md
+docs/guides/production_release_v1.0.md
+docs/guides/enhancement_roadmap.md
+docs/guides/tool_architecture_analysis.md
 
 # Benchmark fixtures (generated/cloned data)
 tests/fixtures/data/
@@ -223,3 +258,9 @@ smoke_test*.py
 verify_*.py
 stress_test*.sh
 src/code_scalpel/mcp/archive/server.py
+
+# Internal examples (not for public distribution)
+examples/.internal/
+.internal/
+.pypirc
+*.archive

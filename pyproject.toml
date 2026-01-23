@@ -9,12 +9,18 @@ authors = [
     {name = "Timmothy Escolopio", email = "time@3dtechsolutions.us"}
 ]
 keywords = [
+    "mcp",
+    "mcp-server",
     "code-analysis",
+    "refactoring",
+    "security",
+    "agent",
+    "ai-agents",
+    "llm",
+    "tool-use",
     "ast",
     "pdg",
     "symbolic-execution",
-    "ai-agents",
-    "mcp",
     "autogen",
     "crewai",
     "static-analysis",

@@ -4,6 +4,8 @@
 
 import json
 
+import pytest
+
 pytest.importorskip("flask")
 
 from code_scalpel.integrations.rest_api_server import MCPServerConfig, create_app
