@@ -41,7 +41,7 @@ virtualenv>=20.36.1  # [20260121_SECURITY] Fix CVE-2026-22702
 werkzeug>=3.1.5  # [20260121_SECURITY] Fix CVE-2026-21860
 # Optional: web/REST adapter (code-scalpel[web])
 # flask>=2.0.0  # [20251218_BUGFIX] Add missing Flask dependency from pyproject.toml
-pytest-asyncio==0.21.1  # [20260116_BUGFIX] Fixed pytest 9.0.2 incompatibility (0.23.3 has 'Package' obj error)
+pytest-asyncio==1.3.0  # [20260116_BUGFIX] Fixed pytest 9.0.2 incompatibility (0.23.3 has 'Package' obj error)
 pytest-timeout>=2.3.1  # [20251230_TEST] Fail fast on hangs
 freezegun>=1.4.0  # [20251228_TEST] Time-mocking for expiration/grace tests
 structlog>=24.1.0  # [20251216_FEATURE] v2.2.0 Structured MCP logging
