@@ -1,0 +1,49 @@
+# [20251214_SECURITY] Security bump for CVE-2025-66416 (MCP DNS rebinding) and urllib3 redirect/decompression issues
+astor
+defusedxml  # [20251218_SECURITY] Safe XML parsing to prevent XXE attacks (B314)
+graphviz
+networkx
+z3-solver
+requests
+tqdm
+pyyaml
+# Optional: agent stack (code-scalpel[agents])
+# crewai
+# langchain
+# langgraph  # [20251217_FEATURE] LangGraph integration for autonomous fixing
+# autogen
+# anthropic
+# openai
+antlr4-python3-runtime
+toml
+# [20260122_BUGFIX] Ensure tomli present for Python <3.11 (architecture integration tests)
+tomli>=2.0.0; python_version < '3.11'
+plotly
+matplotlib
+esprima
+javalang
+tree-sitter
+tree-sitter-java
+tree-sitter-javascript  # [20251218_BUGFIX] Add missing JavaScript tree-sitter binding
+tree-sitter-typescript  # [20251218_BUGFIX] Add missing TypeScript tree-sitter binding
+mcp>=1.23.0
+pydantic>=2.11.0  # [20251230_BUGFIX] Required by mcp>=1.25.0
+pydantic-settings>=2.5.2  # [20251230_BUGFIX] Required by mcp>=1.25.0
+aiohttp>=3.13.3  # [20260121_SECURITY] Fix CVE-2025-69223 through CVE-2025-69230
+urllib3>=2.6.3  # [20260121_SECURITY] Fix CVE-2026-21441
+uvicorn
+fastapi>=0.128.0  # [20260121_SECURITY] Fix PYSEC-2024-38
+filelock>=3.20.3  # [20260121_SECURITY] Fix CVE-2026-22701
+jaraco.context>=6.1.0  # [20260121_SECURITY] Fix CVE-2026-23949
+pdfminer.six>=20260107  # [20260121_SECURITY] Fix GHSA-f83h-ghpp-7wcc
+pyasn1>=0.6.2  # [20260121_SECURITY] Fix CVE-2026-23490
+virtualenv>=20.36.1  # [20260121_SECURITY] Fix CVE-2026-22702
+werkzeug>=3.1.5  # [20260121_SECURITY] Fix CVE-2026-21860
+# Optional: web/REST adapter (code-scalpel[web])
+# flask>=2.0.0  # [20251218_BUGFIX] Add missing Flask dependency from pyproject.toml
+pytest-asyncio==0.21.1  # [20260116_BUGFIX] Fixed pytest 9.0.2 incompatibility (0.23.3 has 'Package' obj error)
+pytest-timeout>=2.3.1  # [20251230_TEST] Fail fast on hangs
+freezegun>=1.4.0  # [20251228_TEST] Time-mocking for expiration/grace tests
+structlog>=24.1.0  # [20251216_FEATURE] v2.2.0 Structured MCP logging
+PyJWT[crypto]>=2.10.1  # [20251230_BUGFIX] Align with mcp>=1.25.0
+cryptography>=43.0.1  # [20260121_SECURITY] Fix CVE-2025-50782, CVE-2024-0727, GHSA-h4gh-qq45-vh27

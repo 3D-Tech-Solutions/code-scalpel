@@ -1,0 +1,92 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-7.4.3, pluggy-1.6.0 -- /home/xbyooki/.venv/bin/python
+cachedir: .pytest_cache
+rootdir: /mnt/k/backup/Develop/code-scalpel
+configfile: pytest.ini
+plugins: anyio-4.12.0, cov-4.1.0, asyncio-0.23.3, timeout-2.4.0, langsmith-0.5.0
+asyncio: mode=Mode.AUTO
+timeout: 120.0s
+timeout method: thread
+timeout func_only: False
+collecting ... collected 13 items / 2 deselected / 11 selected
+
+tests/tools/get_file_context/test_performance.py::TestResponseTime::test_small_file_under_100ms ✅ Small file (224 LOC): 52.9ms
+PASSED
+tests/tools/get_file_context/test_performance.py::TestResponseTime::test_medium_file_under_1s ✅ Medium file (1733 LOC): 54.0ms
+PASSED
+tests/tools/get_file_context/test_performance.py::TestResponseTime::test_large_file_4k_loc_under_5s ✅ Large file (4049 LOC): 0.083s
+PASSED
+tests/tools/get_file_context/test_performance.py::TestResponseTime::test_performance_scales_linearly   small   :   224 LOC in   24.1ms
+  medium  :  1733 LOC in   48.0ms
+  large   :  4049 LOC in   70.1ms
+PASSED
+tests/tools/get_file_context/test_performance.py::TestMemoryUsage::test_small_file_under_10mb ✅ Small file memory: 0.16MB
+PASSED
+tests/tools/get_file_context/test_performance.py::TestMemoryUsage::test_medium_file_under_50mb ✅ Medium file memory: 4.78MB
+PASSED
+tests/tools/get_file_context/test_performance.py::TestMemoryUsage::test_no_memory_leaks_repeated_calls ✅ No memory leak: 4.8MB -> 4.8MB (growth: 1.00x)
+PASSED
+tests/tools/get_file_context/test_performance.py::TestStressTests::test_100_sequential_requests ✅ 100 sequential requests: 2.43s total, 24.3ms avg
+PASSED
+tests/tools/get_file_context/test_performance.py::TestStressTests::test_10_concurrent_requests ✅ 10 concurrent requests: 0.00s total
+PASSED
+tests/tools/get_file_context/test_performance.py::TestStressTests::test_recovery_after_limit ✅ Server recovered after limit/error
+PASSED
+tests/tools/get_file_context/test_performance.py::TestCrossPlatformStability::test_deterministic_output_repeated_calls ✅ Deterministic output across 3 calls
+PASSED
+
+=============================== warnings summary ===============================
+../../../../../home/xbyooki/.venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1373
+  /home/xbyooki/.venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1373: PytestConfigWarning: Unknown config option: asyncio_default_fixture_loop_scope
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+tests/tools/get_file_context/test_performance.py:68
+  /mnt/k/backup/Develop/code-scalpel/tests/tools/get_file_context/test_performance.py:68: PytestUnknownMarkWarning: Unknown pytest.mark.slow - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.slow
+
+tests/tools/get_file_context/test_performance.py:155
+  /mnt/k/backup/Develop/code-scalpel/tests/tools/get_file_context/test_performance.py:155: PytestUnknownMarkWarning: Unknown pytest.mark.slow - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.slow
+
+tests/tools/get_file_context/test_performance.py::TestStressTests::test_10_concurrent_requests
+  /usr/lib/python3.12/asyncio/base_events.py:1988: RuntimeWarning: coroutine 'TestStressTests.test_10_concurrent_requests.<locals>.call_tool' was never awaited
+    handle = None  # Needed to break cycles when an exception occurs.
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================= 11 passed, 2 deselected, 4 warnings in 7.32s =================
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-7.4.3, pluggy-1.6.0 -- /home/xbyooki/.venv/bin/python
+cachedir: .pytest_cache
+rootdir: /mnt/k/backup/Develop/code-scalpel
+configfile: pytest.ini
+plugins: anyio-4.12.0, cov-4.1.0, asyncio-0.23.3, timeout-2.4.0, langsmith-0.5.0
+asyncio: mode=Mode.AUTO
+timeout: 120.0s
+timeout method: thread
+timeout func_only: False
+collecting ... collected 13 items / 11 deselected / 2 selected
+
+tests/tools/get_file_context/test_performance.py::TestResponseTime::test_xlarge_file_20k_loc_under_10s ✅ XLarge file (20741 LOC): 0.386s
+PASSED
+tests/tools/get_file_context/test_performance.py::TestMemoryUsage::test_large_file_under_500mb ✅ Large file memory (20741 LOC): 51.39MB
+PASSED
+
+=============================== warnings summary ===============================
+../../../../../home/xbyooki/.venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1373
+  /home/xbyooki/.venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1373: PytestConfigWarning: Unknown config option: asyncio_default_fixture_loop_scope
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+tests/tools/get_file_context/test_performance.py:68
+  /mnt/k/backup/Develop/code-scalpel/tests/tools/get_file_context/test_performance.py:68: PytestUnknownMarkWarning: Unknown pytest.mark.slow - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.slow
+
+tests/tools/get_file_context/test_performance.py:155
+  /mnt/k/backup/Develop/code-scalpel/tests/tools/get_file_context/test_performance.py:155: PytestUnknownMarkWarning: Unknown pytest.mark.slow - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.slow
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================= 2 passed, 11 deselected, 3 warnings in 2.46s =================

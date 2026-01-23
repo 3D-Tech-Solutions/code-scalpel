@@ -1,0 +1,1086 @@
+# Configuration
+
+Code Scalpel can be configured through environment variables, configuration files, and runtime parameters.
+
+## Environment Variables
+
+### Tier Selection & Licensing
+
+#### `CODE_SCALPEL_TIER` / `SCALPEL_TIER`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Request a specific tier (downgrade only) |
+| **Valid Values** | `community`, `pro`, `enterprise`, `free` (alias for community), `all` (alias for enterprise) |
+| **Default** | Not set (uses licensed tier) |
+| **Applies To** | All tiers |
+
+**Security Note:** Environment variables can ONLY downgrade, not upgrade. To access a higher tier, you must provide a valid license file.
+
+```bash
+# Run as Community tier even with Pro license
+CODE_SCALPEL_TIER=community python -m code_scalpel.mcp.server
+```
+
+#### `CODE_SCALPEL_LICENSE_PATH`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Explicit path to JWT license file |
+| **Valid Values** | Absolute or relative file path |
+| **Default** | Auto-discovered from standard locations |
+| **Applies To** | Pro, Enterprise |
+
+```bash
+CODE_SCALPEL_LICENSE_PATH=/etc/code-scalpel/license.jwt
+```
+
+#### `CODE_SCALPEL_DISABLE_LICENSE_DISCOVERY`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Disable automatic license file discovery |
+| **Valid Values** | `1` (disable), `0` (enable) |
+| **Default** | `0` (discovery enabled) |
+| **Applies To** | All tiers |
+
+When set to `1`, the validator will not search default locations. Only `CODE_SCALPEL_LICENSE_PATH` is honored.
+
+#### `CODE_SCALPEL_ORGANIZATION`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Organization name for license validation |
+| **Valid Values** | String |
+| **Default** | Not set |
+| **Applies To** | Enterprise |
+
+### License Validation
+
+#### `CODE_SCALPEL_SECRET_KEY`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | HMAC secret key for HS256 license validation |
+| **Valid Values** | String (secret) |
+| **Default** | Not set |
+| **Applies To** | Development only |
+
+**Security Warning:** HS256 is for development/testing only. Production deployments should use RS256.
+
+#### `CODE_SCALPEL_ALLOW_HS256`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Allow HS256 algorithm for JWT validation |
+| **Valid Values** | `1` (allow), `0` (deny) |
+| **Default** | `0` (RS256 only) |
+| **Applies To** | Development only |
+
+**Security Warning:** Do not enable in production deployments.
+
+#### `CODE_SCALPEL_LICENSE_ISSUER`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Expected JWT issuer claim |
+| **Valid Values** | String |
+| **Default** | `code-scalpel` |
+| **Applies To** | Pro, Enterprise |
+
+#### `CODE_SCALPEL_LICENSE_AUDIENCE`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Expected JWT audience claim |
+| **Valid Values** | String |
+| **Default** | `code-scalpel-users` |
+| **Applies To** | Pro, Enterprise |
+
+#### `CODE_SCALPEL_LICENSE_PUBLIC_KEYS_JSON`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Inline JSON array of public keys for key rotation |
+| **Valid Values** | JSON array of PEM-encoded public keys |
+| **Default** | Not set |
+| **Applies To** | Pro, Enterprise |
+
+#### `CODE_SCALPEL_LICENSE_PUBLIC_KEYS_PATH`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Path to file containing public keys |
+| **Valid Values** | File path |
+| **Default** | Not set |
+| **Applies To** | Pro, Enterprise |
+
+#### `CODE_SCALPEL_SIGNATURE_SECRET`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Secret for license signature verification |
+| **Valid Values** | String (secret) |
+| **Default** | `scalpel-signing-key-v1` |
+| **Applies To** | Internal use |
+
+### License Certificate Revocation (CRL)
+
+#### `CODE_SCALPEL_LICENSE_CRL_URL`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | URL to fetch CRL token |
+| **Valid Values** | HTTP/HTTPS URL |
+| **Default** | `http://codescalpel.dev/.well-known/license-crl.jwt` |
+| **Applies To** | Pro, Enterprise |
+
+#### `CODE_SCALPEL_ENABLE_CRL_FETCH`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Enable automatic CRL fetching |
+| **Valid Values** | `1` (enable), `0` (disable) |
+| **Default** | `0` (disabled) |
+| **Applies To** | Pro, Enterprise |
+
+#### `CODE_SCALPEL_LICENSE_CRL_MAX_AGE_DAYS`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Maximum age in days for cached CRL |
+| **Valid Values** | Integer (days) |
+| **Default** | `7` |
+| **Applies To** | Pro, Enterprise |
+
+#### `CODE_SCALPEL_LICENSE_CRL_PATH`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Path to local CRL file |
+| **Valid Values** | File path |
+| **Default** | `~/.config/code-scalpel/license_crl.jwt` |
+| **Applies To** | Pro, Enterprise |
+
+#### `CODE_SCALPEL_LICENSE_CRL_JWT`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Inline CRL JWT token |
+| **Valid Values** | JWT string |
+| **Default** | Not set |
+| **Applies To** | Pro, Enterprise |
+
+### Remote License Verification
+
+#### `CODE_SCALPEL_LICENSE_VERIFIER_URL`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | URL of remote license verification server |
+| **Valid Values** | URL from trusted list (see below) |
+| **Default** | Not set (local validation only) |
+| **Applies To** | Pro, Enterprise |
+
+**Trusted Verifier URLs:**
+- `https://verifier.codescalpel.dev` (Production)
+- `http://scalpel-verifier:8000` (Docker internal)
+- `http://127.0.0.1:8003`, `http://localhost:8003` (Development)
+- `http://127.0.0.1:8000`, `http://localhost:8000` (Development)
+
+#### `CODE_SCALPEL_LICENSE_ENVIRONMENT`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Environment identifier for license verification |
+| **Valid Values** | `development`, `staging`, `production` |
+| **Default** | Not set |
+| **Applies To** | Pro, Enterprise |
+
+#### `CODE_SCALPEL_LICENSE_CACHE_PATH`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Path for license verification cache |
+| **Valid Values** | File path |
+| **Default** | `~/.config/code-scalpel/license_cache.json` |
+| **Applies To** | Pro, Enterprise |
+
+#### `CODE_SCALPEL_LICENSE_VERIFY_TIMEOUT_SECONDS`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Timeout for remote verification requests |
+| **Valid Values** | Float (seconds) |
+| **Default** | `2.0` |
+| **Applies To** | Pro, Enterprise |
+
+#### `CODE_SCALPEL_LICENSE_VERIFY_RETRIES`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Number of retries for remote verification |
+| **Valid Values** | Integer |
+| **Default** | `2` |
+| **Applies To** | Pro, Enterprise |
+
+#### `CODE_SCALPEL_DISABLE_LICENSE_REVALIDATION`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Disable periodic license revalidation thread |
+| **Valid Values** | `1` (disable), `0` (enable) |
+| **Default** | `0` (enabled) |
+| **Applies To** | All tiers |
+
+### MCP Server Configuration
+
+#### `SCALPEL_MCP_OUTPUT`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Log verbosity level for MCP server |
+| **Valid Values** | `DEBUG`, `INFO`, `ALERT`, `WARNING` |
+| **Default** | `WARNING` |
+| **Applies To** | All tiers |
+
+```bash
+SCALPEL_MCP_OUTPUT=DEBUG python -m code_scalpel.mcp.server
+```
+
+### Auto-Initialization
+
+#### `SCALPEL_AUTO_INIT`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Enable automatic `.code-scalpel/` directory creation |
+| **Valid Values** | `1`, `true`, `yes`, `on` (enable), others (disable) |
+| **Default** | Disabled |
+| **Applies To** | All tiers |
+
+#### `SCALPEL_AUTO_INIT_MODE`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Mode for auto-initialization |
+| **Valid Values** | `full`, `templates_only` |
+| **Default** | `full` |
+| **Applies To** | All tiers |
+
+#### `SCALPEL_AUTO_INIT_TARGET`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Where to create `.code-scalpel/` directory |
+| **Valid Values** | `project`, `user` |
+| **Default** | `project` |
+| **Applies To** | All tiers |
+
+#### `SCALPEL_HOME`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | User-level Code Scalpel home directory |
+| **Valid Values** | Directory path |
+| **Default** | `$XDG_CONFIG_HOME/code-scalpel` or `~/.config/code-scalpel` |
+| **Applies To** | All tiers |
+
+### Caching
+
+#### `CODE_SCALPEL_CACHE_ENABLED`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Enable/disable analysis caching |
+| **Valid Values** | `1` (enable), `0` (disable) |
+| **Default** | `1` (enabled) |
+| **Applies To** | All tiers |
+
+#### `CODE_SCALPEL_CACHE_PERSIST`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Persist license cache to disk |
+| **Valid Values** | `true`, `false` |
+| **Default** | `false` |
+| **Applies To** | Pro, Enterprise |
+
+#### `CODE_SCALPEL_CACHE_KEY`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Encryption key for persistent cache |
+| **Valid Values** | String (secret) |
+| **Default** | Not set |
+| **Applies To** | Enterprise |
+
+#### `CODE_SCALPEL_CACHE_DISTRIBUTED`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Enable distributed caching (Redis) |
+| **Valid Values** | `true`, `false` |
+| **Default** | `false` |
+| **Applies To** | Enterprise |
+
+#### `CODE_SCALPEL_REDIS_URL`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Redis URL for distributed caching |
+| **Valid Values** | Redis connection URL |
+| **Default** | `redis://localhost:6379` |
+| **Applies To** | Enterprise |
+
+### Governance & Policy
+
+#### `SCALPEL_GOVERNANCE_ENFORCEMENT`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Governance enforcement mode |
+| **Valid Values** | `advisory`, `enforcing` |
+| **Default** | `advisory` |
+| **Applies To** | Pro, Enterprise |
+
+#### `SCALPEL_GOVERNANCE_MODE` (Legacy)
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Legacy alias for `SCALPEL_GOVERNANCE_ENFORCEMENT` |
+| **Valid Values** | Same as `SCALPEL_GOVERNANCE_ENFORCEMENT` |
+| **Default** | Not set |
+| **Applies To** | Deprecated |
+
+#### `SCALPEL_GOVERNANCE_FEATURES`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Comma-separated list of governance features to enable |
+| **Valid Values** | Feature names |
+| **Default** | All features |
+| **Applies To** | Pro, Enterprise |
+
+#### `SCALPEL_GOVERNANCE_REQUIRED`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Require governance to be configured |
+| **Valid Values** | `true`, `false` |
+| **Default** | `false` |
+| **Applies To** | Enterprise |
+
+#### `SCALPEL_CONFIG_PROFILE`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Configuration profile to load |
+| **Valid Values** | Profile name |
+| **Default** | Not set |
+| **Applies To** | Pro, Enterprise |
+
+#### `SCALPEL_CONFIG`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Path to governance configuration file |
+| **Valid Values** | File path |
+| **Default** | Auto-discovered |
+| **Applies To** | Pro, Enterprise |
+
+### Change Budget Variables
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `SCALPEL_CHANGE_BUDGET_MAX_LINES` | Maximum lines per change | Not set |
+| `SCALPEL_CHANGE_BUDGET_MAX_FILES` | Maximum files per change | Not set |
+| `SCALPEL_CHANGE_BUDGET_MAX_COMPLEXITY` | Maximum complexity change | Not set |
+| `SCALPEL_CRITICAL_PATHS` | Comma-separated critical paths | Not set |
+| `SCALPEL_CRITICAL_PATH_MAX_LINES` | Max lines for critical paths | Not set |
+| `SCALPEL_MAX_CALL_GRAPH_DEPTH` | Max call graph analysis depth | Not set |
+| `SCALPEL_MAX_AUTONOMOUS_ITERATIONS` | Max autonomous iterations | Not set |
+| `SCALPEL_AUDIT_RETENTION_DAYS` | Audit log retention | Not set |
+
+### Security & Integrity
+
+#### `SCALPEL_MANIFEST_SECRET`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Secret key for policy manifest signing |
+| **Valid Values** | String (secret) |
+| **Default** | Not set (required for policy verification) |
+| **Applies To** | Pro, Enterprise |
+
+**Security Note:** This secret should be managed by administrators, not agents.
+
+#### `SCALPEL_POLICY_MANIFEST_SOURCE`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Source for policy manifest |
+| **Valid Values** | `git`, `env`, `file` |
+| **Default** | `file` |
+| **Applies To** | Enterprise |
+
+#### `SCALPEL_POLICY_DIR`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Directory containing policy files |
+| **Valid Values** | Directory path |
+| **Default** | `.code-scalpel` |
+| **Applies To** | Pro, Enterprise |
+
+#### `SCALPEL_POLICY_MANIFEST`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Inline policy manifest JSON |
+| **Valid Values** | JSON string |
+| **Default** | Not set |
+| **Applies To** | Enterprise |
+
+#### `SCALPEL_CONFIG_HASH`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Expected SHA-256 hash of config file |
+| **Valid Values** | Hex string |
+| **Default** | Not set |
+| **Applies To** | Enterprise |
+
+#### `SCALPEL_CONFIG_SECRET`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Secret for config signature verification |
+| **Valid Values** | String (secret) |
+| **Default** | Not set |
+| **Applies To** | Enterprise |
+
+#### `SCALPEL_CONFIG_SIGNATURE`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Expected config file signature |
+| **Valid Values** | Signature string |
+| **Default** | Not set |
+| **Applies To** | Enterprise |
+
+#### `SCALPEL_TOTP_SECRET`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | TOTP secret for tamper resistance |
+| **Valid Values** | String (secret) |
+| **Default** | `default-totp-secret` |
+| **Applies To** | Enterprise |
+
+#### `SCALPEL_AUDIT_SECRET`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Secret for audit log signing |
+| **Valid Values** | String (secret) |
+| **Default** | `default-secret` |
+| **Applies To** | Enterprise |
+
+### Path Resolution
+
+#### `WORKSPACE_ROOT`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Override workspace root for path resolution |
+| **Valid Values** | Directory path |
+| **Default** | Current working directory |
+| **Applies To** | All tiers |
+
+#### `PROJECT_ROOT`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Override project root for path resolution |
+| **Valid Values** | Directory path |
+| **Default** | Current working directory |
+| **Applies To** | All tiers |
+
+#### `SCALPEL_ROOT` / `CODE_SCALPEL_ROOT`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Root directories for file access |
+| **Valid Values** | Colon-separated paths |
+| **Default** | Not set |
+| **Applies To** | All tiers |
+
+#### `WINDOWS_DRIVE_MAP`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Windows drive letter mapping for cross-platform |
+| **Valid Values** | Mapping string |
+| **Default** | Not set |
+| **Applies To** | All tiers (Windows) |
+
+### Testing & Development
+
+#### `CODE_SCALPEL_TEST_FORCE_TIER`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Force tier override for testing |
+| **Valid Values** | `1` (enable), `0` (disable) |
+| **Default** | `0` |
+| **Applies To** | Testing only |
+
+**Warning:** Do not use in production.
+
+#### `CODE_SCALPEL_RUN_MCP_CONTRACT`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Enable MCP contract tests |
+| **Valid Values** | `1` (enable), `0` (disable) |
+| **Default** | `0` |
+| **Applies To** | Testing only |
+
+#### `MCP_CONTRACT_TRANSPORT`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Transport for contract tests |
+| **Valid Values** | `stdio`, `http` |
+| **Default** | `stdio` |
+| **Applies To** | Testing only |
+
+#### `MCP_CONTRACT_ARTIFACT_DIR`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Directory for contract test artifacts |
+| **Valid Values** | Directory path |
+| **Default** | Temp directory |
+| **Applies To** | Testing only |
+
+#### `RUN_DOCKER_TESTS`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Enable Docker integration tests |
+| **Valid Values** | `1` (enable), `0` (disable) |
+| **Default** | `0` |
+| **Applies To** | Testing only |
+
+#### `CODE_SCALPEL_DOCKER_IMAGE`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Docker image for tests |
+| **Valid Values** | Docker image name |
+| **Default** | Auto-built |
+| **Applies To** | Testing only |
+
+#### `REBUILD_DOCKER_IMAGE`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Force rebuild Docker image |
+| **Valid Values** | `1` (rebuild), `0` (use cached) |
+| **Default** | `0` |
+| **Applies To** | Testing only |
+
+#### `RUN_NINJA_WARRIOR`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Enable Ninja Warrior acceptance tests |
+| **Valid Values** | `1` (enable), `0` (disable) |
+| **Default** | `0` |
+| **Applies To** | Testing only |
+
+#### `RUN_NINJA_WARRIOR_HEAVY`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Enable heavy Ninja Warrior tests |
+| **Valid Values** | `1` (enable), `0` (disable) |
+| **Default** | `0` |
+| **Applies To** | Testing only |
+
+#### `NINJA_WARRIOR_ROOT`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Root directory for Ninja Warrior tests |
+| **Valid Values** | Directory path |
+| **Default** | Not set |
+| **Applies To** | Testing only |
+
+#### `NINJA_WARRIOR_EVIDENCE_DIR`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Evidence directory for Ninja Warrior tests |
+| **Valid Values** | Directory path |
+| **Default** | Not set |
+| **Applies To** | Testing only |
+
+### System Environment Variables
+
+These are standard system environment variables used by Code Scalpel:
+
+| Variable | Purpose |
+|----------|---------|
+| `XDG_CONFIG_HOME` | XDG config directory (Linux/macOS) |
+| `USER` / `USERNAME` | Current user name for audit logs |
+| `HOSTNAME` / `COMPUTERNAME` | Machine hostname for audit logs |
+| `LOCALAPPDATA` | Windows local app data directory |
+| `XDG_CACHE_HOME` | XDG cache directory |
+| `FLASK_ENV` | Flask environment (for REST API server) |
+| `CI` | Indicates CI environment |
+| `GITHUB_ACTIONS` | Indicates GitHub Actions environment |
+
+### Configuration Files
+
+#### `CODE_SCALPEL_LIMITS_FILE`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Path to tier limits configuration |
+| **Valid Values** | File path |
+| **Default** | Auto-discovered |
+| **Applies To** | All tiers |
+
+#### `CODE_SCALPEL_RESPONSE_CONFIG`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Path to response format configuration |
+| **Valid Values** | File path |
+| **Default** | Auto-discovered |
+| **Applies To** | All tiers |
+
+#### `CODE_SCALPEL_ARCHITECTURE_FILE`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Path to architecture rules file |
+| **Valid Values** | File path |
+| **Default** | Auto-discovered |
+| **Applies To** | Pro, Enterprise |
+
+### Quick Reference by Tier
+
+#### Community Tier
+```bash
+# Minimal configuration
+SCALPEL_MCP_OUTPUT=INFO
+CODE_SCALPEL_CACHE_ENABLED=1
+```
+
+#### Pro Tier
+```bash
+# Standard Pro configuration
+CODE_SCALPEL_LICENSE_PATH=/path/to/license.jwt
+SCALPEL_MCP_OUTPUT=INFO
+CODE_SCALPEL_CACHE_ENABLED=1
+SCALPEL_GOVERNANCE_ENFORCEMENT=advisory
+```
+
+#### Enterprise Tier
+```bash
+# Enterprise with full security
+CODE_SCALPEL_LICENSE_PATH=/path/to/license.jwt
+CODE_SCALPEL_LICENSE_VERIFIER_URL=https://verifier.codescalpel.dev
+SCALPEL_MCP_OUTPUT=INFO
+SCALPEL_GOVERNANCE_ENFORCEMENT=enforcing
+SCALPEL_GOVERNANCE_REQUIRED=true
+SCALPEL_MANIFEST_SECRET=your-secret-key
+CODE_SCALPEL_CACHE_DISTRIBUTED=true
+CODE_SCALPEL_REDIS_URL=redis://redis-cluster:6379
+```
+
+#### See Also
+
+- [Configuration Guide](../docs/Configuration_Guide.md) - Complete configuration reference
+- [Limits TOML Behavior](LIMITS_TOML_BEHAVIOR.md)
+- [Testing Configurations](TESTING_CONFIGURATIONS.md)
+- [Security Documentation](../security/)
+
+## Configuration Files
+
+### `.env` File
+
+Create a `.env` file in your project root:
+
+```bash
+# Generated by: code-scalpel init
+# Documentation: https://github.com/3D-Tech-Solutions/code-scalpel/wiki/Configuration
+
+# ========================================================================
+# PROJECT CONFIGURATION
+# ========================================================================
+SCALPEL_PROJECT_ROOT=/path/to/project
+SCALPEL_TIER=community
+
+# ========================================================================
+# POLICY INTEGRITY VERIFICATION
+# ========================================================================
+# CRITICAL: Required for verify_policy_integrity to work
+# 
+# Security Model: FAIL CLOSED
+# - Missing secret -> DENY ALL
+# - Invalid signature -> DENY ALL
+# - Hash mismatch -> DENY ALL
+#
+# GENERATED SECRET (DO NOT COMMIT):
+SCALPEL_MANIFEST_SECRET=your-secret-here
+#
+# PRODUCTION DEPLOYMENT:
+# 1. Copy to CI/CD secrets (GitHub Secrets, etc.)
+# 2. Never commit to git
+# 3. Rotate if compromised
+# 4. After rotation: code-scalpel regenerate-manifest
+# ========================================================================
+
+# ========================================================================
+# PERFORMANCE
+# ========================================================================
+SCALPEL_MAX_FILE_SIZE=10485760
+CODE_SCALPEL_CACHE_ENABLED=true
+SCALPEL_CACHE_DIR=./.code_scalpel_cache
+
+# ========================================================================
+# LOGGING
+# ========================================================================
+SCALPEL_LOG_LEVEL=INFO
+SCALPEL_ENABLE_TRACING=false
+
+# ========================================================================
+# MCP TRANSPORT
+# ========================================================================
+SCALPEL_TRANSPORT=stdio
+# SCALPEL_HTTP_PORT=8000
+# SCALPEL_HTTP_HOST=127.0.0.1
+```
+
+### Initialize Configuration
+
+```bash
+# Create .env with secure defaults
+python -m code_scalpel init
+
+# This generates:
+# - .env file with random SCALPEL_MANIFEST_SECRET
+# - .gitignore entry for .env
+# - Default policy directory structure
+```
+
+### Migrating from Legacy config.json
+
+If you have an existing `.code-scalpel/config.json` with governance sections, you'll need to migrate to the new structure:
+
+**Old Structure (v2.x):** Governance settings were embedded in `config.json`  
+**New Structure (v3.x):**
+- Governance rules → `governance.yaml`
+- Change limits → `agent_limits.yaml` 
+- Basic metadata only → `config.json`
+
+**Migration Steps:**
+1. Run `code-scalpel init` to create the new structure
+2. Manually migrate governance settings from `config.json` to `governance.yaml`
+3. Move change budget settings to `agent_limits.yaml`
+4. Remove governance sections from `config.json`
+
+The old `config.json` with governance sections will be ignored by the new system. For help with migration, see [Troubleshooting](Troubleshooting).
+
+### `pyproject.toml` Integration
+
+Code Scalpel can read configuration from `pyproject.toml`:
+
+```toml
+[tool.code-scalpel]
+project_root = "."
+tier = "community"
+max_file_size = 10485760
+cache_enabled = true
+
+[tool.code-scalpel.security]
+sandbox_enabled = false
+policy_dir = "./policies"
+
+[tool.code-scalpel.logging]
+level = "INFO"
+enable_tracing = false
+```
+
+## Tier Configuration
+
+### Community Tier (Default)
+
+Free and open-source (MIT License):
+
+```bash
+SCALPEL_TIER=community
+```
+
+**Limits:**
+- Security findings: 50 per scan
+- Symbol references: 100 per query
+- Call graph nodes: 500 per analysis
+- Project files: 1,000 files
+- Test generation: 10 paths
+
+**Features:**
+- All 22 tools available ✅
+- AST parsing ✅
+- Taint analysis ✅
+- Symbolic execution ✅
+- Basic reporting ✅
+
+### Pro Tier
+
+Commercial license required:
+
+```bash
+SCALPEL_TIER=pro
+SCALPEL_LICENSE_PATH=/secure/pro-license.jwt
+```
+
+**Limits:**
+- Security findings: Unlimited
+- Symbol references: Unlimited
+- Call graph nodes: 10,000 per analysis
+- Project files: 10,000 files
+- Test generation: 50 paths
+
+**Additional Features:**
+- Cross-file security scanning ✅
+- Advanced metrics ✅
+- Priority support ✅
+- Custom rules ✅
+
+### Enterprise Tier
+
+Enterprise license required:
+
+```bash
+SCALPEL_TIER=enterprise
+SCALPEL_LICENSE_PATH=/secure/enterprise-license.jwt
+```
+
+**Limits:**
+- All unlimited
+
+**Additional Features:**
+- Compliance reporting (HIPAA, SOC2, GDPR, PCI-DSS) ✅
+- PDF compliance certificates ✅
+- Audit trails ✅
+- Custom policies ✅
+- SLA support ✅
+- On-premise deployment ✅
+
+## Docker Configuration
+
+### Environment Variables in Docker
+
+```bash
+docker run -i \
+  -e SCALPEL_PROJECT_ROOT=/workspace \
+  -e SCALPEL_TIER=community \
+  -e SCALPEL_LOG_LEVEL=DEBUG \
+  -v $(pwd):/workspace \
+  3dtechsolutions/code-scalpel:latest
+```
+
+### Docker Compose
+
+Create `docker-compose.yml`:
+
+```yaml
+version: '3.8'
+
+services:
+  code-scalpel:
+    image: 3dtechsolutions/code-scalpel:latest
+    environment:
+      - SCALPEL_PROJECT_ROOT=/workspace
+      - SCALPEL_TIER=community
+      - SCALPEL_LOG_LEVEL=INFO
+      - CODE_SCALPEL_CACHE_ENABLED=true
+      - SCALPEL_MANIFEST_SECRET=${SCALPEL_MANIFEST_SECRET}
+    volumes:
+      - ./:/workspace
+      - cache:/cache
+    stdin_open: true
+    tty: true
+
+volumes:
+  cache:
+```
+
+Run with:
+```bash
+# Set secret in environment
+export SCALPEL_MANIFEST_SECRET="your-secret"
+
+# Start service
+docker-compose up
+```
+
+## MCP Client Configuration
+
+### VS Code / GitHub Copilot
+
+`.vscode/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "code-scalpel": {
+      "command": "python",
+      "args": ["-m", "code_scalpel.mcp.server"],
+      "env": {
+        "SCALPEL_PROJECT_ROOT": "${workspaceFolder}",
+        "SCALPEL_TIER": "community",
+        "SCALPEL_LOG_LEVEL": "INFO",
+        "CODE_SCALPEL_CACHE_ENABLED": "true"
+      }
+    }
+  }
+}
+```
+
+### Claude Desktop
+
+`claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "code-scalpel": {
+      "command": "python",
+      "args": ["-m", "code_scalpel.mcp.server"],
+      "env": {
+        "SCALPEL_PROJECT_ROOT": "/path/to/project",
+        "SCALPEL_TIER": "community",
+        "SCALPEL_MANIFEST_SECRET": "your-secret-here"
+      }
+    }
+  }
+}
+```
+
+**Security Warning:** For Claude Desktop, consider using environment variable expansion:
+
+```json
+{
+  "env": {
+    "SCALPEL_MANIFEST_SECRET": "${SCALPEL_SECRET}"
+  }
+}
+```
+
+Then set `SCALPEL_SECRET` in your system environment.
+
+## Advanced Configuration
+
+### Custom Policy Rules
+
+Create `policies/custom.yaml`:
+
+```yaml
+version: "1.0"
+policies:
+  - id: "CUSTOM001"
+    name: "No hardcoded credentials"
+    pattern: "(password|api_key|secret)\\s*=\\s*['\"]\\w+"
+    severity: "critical"
+    message: "Hardcoded credentials detected"
+  
+  - id: "CUSTOM002"
+    name: "Require type hints"
+    check: "missing_type_hints"
+    severity: "warning"
+    message: "Functions should have type hints"
+```
+
+Reference in `.env`:
+```bash
+SCALPEL_POLICY_DIR=./policies
+```
+
+### Symbolic Execution Tuning
+
+Fine-tune Z3 solver behavior:
+
+```bash
+# Maximum paths to explore
+SCALPEL_SYMBOLIC_MAX_PATHS=20
+
+# Path exploration timeout (seconds)
+SCALPEL_SYMBOLIC_TIMEOUT=30
+
+# Loop unrolling depth
+SCALPEL_SYMBOLIC_LOOP_DEPTH=3
+```
+
+### Performance Optimization
+
+For large projects:
+
+```bash
+# Enable aggressive caching
+CODE_SCALPEL_CACHE_ENABLED=true
+SCALPEL_CACHE_TTL=3600  # 1 hour
+
+# Increase limits
+SCALPEL_MAX_FILE_SIZE=52428800  # 50 MB
+SCALPEL_MAX_WORKERS=8  # Parallel processing
+
+# Disable expensive features if not needed
+SCALPEL_ENABLE_SYMBOLIC=false
+SCALPEL_ENABLE_TRACING=false
+```
+
+## Configuration Priority
+
+Settings are applied in this order (later overrides earlier):
+
+1. Built-in defaults
+2. `pyproject.toml`
+3. `.env` file
+4. Environment variables
+5. MCP client configuration
+6. Runtime parameters
+
+## Troubleshooting Configuration
+
+### Check Active Configuration
+
+```bash
+python -m code_scalpel config show
+```
+
+### Validate Configuration
+
+```bash
+python -m code_scalpel config validate
+```
+
+### Reset to Defaults
+
+```bash
+python -m code_scalpel config reset
+```
+
+---
+
+**Next Steps:**
+- [MCP Tools Reference](MCP-Tools-Reference) - Use the tools with your configuration
+- [Security](Security) - Policy enforcement and integrity verification
+- [Troubleshooting](Troubleshooting) - Common configuration issues
+

@@ -1,0 +1,65 @@
+pipeline {
+    agent any
+
+    environment {
+        PYTHON = 'python3'
+        VENV = '.venv'
+    }
+
+    stages {
+        stage('Setup') {
+            steps {
+                sh '''
+                    ${PYTHON} -m venv ${VENV}
+                    . ${VENV}/bin/activate
+                    pip install --upgrade pip
+                    pip install -r requirements.txt
+                    pip install build twine pytest pytest-cov bandit black ruff pyright pip-audit anyio httpx
+                '''
+            }
+        }
+
+        stage('Static Analysis') {
+            steps {
+                script {
+                    sh '. ${VENV}/bin/activate && black --check --diff src/ tests/'
+                    sh '. ${VENV}/bin/activate && ruff check src/ tests/'
+                }
+            }
+        }
+
+        stage('Type Check') {
+            steps {
+                sh '. ${VENV}/bin/activate && pyright -p pyrightconfig.json'
+            }
+        }
+
+        stage('Security Scan') {
+            steps {
+                sh '. ${VENV}/bin/activate && bandit -r src/ -ll -ii -x "**/test_*.py" --format key --output bandit-results.txt || true'
+                archiveArtifacts artifacts: 'bandit-results.txt'
+            }
+        }
+
+        stage('Test') {
+            steps {
+                sh '. ${VENV}/bin/activate && pytest tests/core/ --junitxml=test-results.xml'
+                junit 'test-results.xml'
+            }
+        }
+
+        stage('Build') {
+            steps {
+                sh '. ${VENV}/bin/activate && python -m build'
+                sh '. ${VENV}/bin/activate && twine check dist/*'
+                archiveArtifacts artifacts: 'dist/*'
+            }
+        }
+    }
+
+    post {
+        always {
+            cleanWs()
+        }
+    }
+}

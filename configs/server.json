@@ -1,0 +1,21 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.3d-tech-solutions/code-scalpel",
+  "title": "Code Scalpel",
+  "description": "MCP server toolkit for AI agents - surgical code analysis, extraction, and modification using ASTs, PDGs, taint analysis, and symbolic execution. Supports Python, JavaScript, TypeScript, and Java.",
+  "repository": {
+    "url": "https://github.com/3D-Tech-Solutions/code-scalpel",
+    "source": "github"
+  },
+  "version": "1.0.0",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "code-scalpel",
+      "version": "1.0.0",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}

@@ -1,0 +1,201 @@
+[project]
+name = "codescalpel"
+version = "1.0.1"
+description = "MCP server toolkit for AI agents - surgical code analysis and modification"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"  # [20251218_BUGFIX] tree-sitter-java and mcp require Python 3.10+
+authors = [
+    {name = "Timmothy Escolopio", email = "time@3dtechsolutions.us"}
+]
+keywords = [
+    "code-analysis",
+    "ast",
+    "pdg",
+    "symbolic-execution",
+    "ai-agents",
+    "mcp",
+    "autogen",
+    "crewai",
+    "static-analysis",
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Quality Assurance",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",  # [20251218_BUGFIX] Dropped 3.9 - dependencies require 3.10+
+]
+dependencies = [
+    "astor>=0.8.1",
+    "defusedxml>=0.7.1",
+    "PyYAML>=6.0",
+    "networkx>=2.6.3",
+    "z3-solver>=4.8.12",
+    "graphviz>=0.16",
+    "tomli>=2.0.0; python_version < '3.11'",
+    # [20251214_SECURITY] Bump MCP to include default DNS rebinding protection for FastMCP HTTP transport
+    "mcp>=1.23.0",
+    # [20251230_BUGFIX] Ensure MCP dependency constraints are satisfied (mcp>=1.25.0 requires pydantic>=2.11).
+    "pydantic>=2.11.0",
+    "pydantic-settings>=2.5.2",
+    # [20251214_SECURITY] Ensure redirect/decompression protections for HTTP clients
+    "urllib3>=2.6.0",
+    # [20251230_BUGFIX] MCP's HTTP transport depends on modern uvicorn/starlette.
+    "uvicorn>=0.31.1",
+    "tree-sitter>=0.21.0",
+    "tree-sitter-java>=0.21.0",
+    "tree-sitter-javascript>=0.21.0",
+    "tree-sitter-typescript>=0.21.0",  # [20251214_FEATURE] v2.0.0 TypeScript support
+    "structlog>=24.1.0",  # [20251216_FEATURE] v2.2.0 Structured MCP logging
+    "PyJWT[crypto]>=2.10.1",  # [20251230_BUGFIX] Align with MCP requirement for JWT validation
+    "cryptography>=41.0.0",  # [20251225_FEATURE] v3.3.0 RSA key support for JWT
+]
+
+[project.optional-dependencies]
+# [20251230_REFACTOR] MCP-first packaging: keep core install focused on MCP runtime.
+# Agent frameworks and web/REST adapters are opt-in extras.
+agents = [
+    "pyautogen>=0.2.0",
+    "crewai>=0.1.0",
+    "langchain>=0.1.0",
+    "langgraph>=0.1.0",
+]
+web = [
+    "flask>=2.0.0",
+]
+autogen = ["pyautogen>=0.2.0"]
+crewai = ["crewai>=0.1.0"]
+langchain = ["langchain>=0.1.0"]
+all = [
+    "pyautogen>=0.2.0",
+    "crewai>=0.1.0",
+    "langchain>=0.1.0",
+    "langgraph>=0.1.0",
+    "anthropic>=0.18.0",
+    "openai>=1.0.0",
+    "tree-sitter>=0.21.0",
+    "tree-sitter-javascript>=0.21.0",
+    "tree-sitter-typescript>=0.21.0",  # [20251214_FEATURE] v2.0.0 TypeScript support
+]
+polyglot = [
+    "tree-sitter>=0.21.0",
+    "tree-sitter-javascript>=0.21.0",
+    "tree-sitter-java>=0.21.0",
+    "tree-sitter-typescript>=0.21.0",  # [20251214_FEATURE] v2.0.0 TypeScript support
+]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-timeout>=2.3.1",
+    "freezegun>=1.4.0",  # [20251228_TEST] Time-mocking for expiration/grace tests
+    "anyio>=4.0.0",
+    "httpx>=0.27.0",
+    "black>=24.0.0",
+    "ruff>=0.4.0",
+    "pyright>=1.1.0",
+    "bandit>=1.7.0",
+    "pip-audit>=2.7.0",
+    "pre-commit>=3.7.0",
+    "build>=1.0.0",
+    "twine>=4.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/3D-Tech-Solutions/code-scalpel"
+Documentation = "https://github.com/3D-Tech-Solutions/code-scalpel#readme"
+Repository = "https://github.com/3D-Tech-Solutions/code-scalpel.git"
+Issues = "https://github.com/3D-Tech-Solutions/code-scalpel/issues"
+Changelog = "https://github.com/3D-Tech-Solutions/code-scalpel/releases"
+
+[project.scripts]
+codescalpel = "code_scalpel.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+
+[tool.hatch.build]
+# VCS integration - DISABLE to prevent .gitignore from leaking in
+ignore-vcs = true
+
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/code_scalpel"]
+
+
+[tool.hatch.build.targets.sdist]
+only-include = [
+    "src/code_scalpel",
+    "README.md",
+    "LICENSE",
+    "pyproject.toml",
+]
+exclude = [
+    "*.gitignore",
+    ".git*",
+    "**/.*",
+]
+# ============================================================================
+# CODE QUALITY ENFORCEMENT
+# ============================================================================
+
+[tool.coverage.run]
+branch = true
+source = ["src/code_scalpel"]
+omit = [
+    "src/code_scalpel/core.py",  # Legacy PDG builder - replaced by pdg_tools/
+    "src/code_scalpel/parsers/*",  # Legacy parsers - replaced by code_parser/
+    "src/code_scalpel/utilities/path_resolution.py",  # Utility tested indirectly via surgical_extractor
+    "src/code_scalpel/utilities/cache.py",  # Utility tested indirectly via symbolic_execution_tools
+    # [20251215_TEST] Exclude integration-facing surfaces that rely on external runtimes
+    "src/code_scalpel/agents/*",
+    "src/code_scalpel/integrations/*",
+    "src/code_scalpel/ir/normalizers/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "pragma: no branch",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+]
+partial_branches = [
+    "pragma: no branch",
+]
+
+# ============================================================================
+# IMPORT SORTING CONFIGURATION
+# ============================================================================
+
+[tool.ruff]
+extend-exclude = ["*.ipynb"]  # [20260121_BUGFIX] Exclude Jupyter notebooks from linting
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "A"]
+ignore = ["E501", "A", "B007", "B018", "B019", "B023", "B904", "UP007", "E402", "B024", "B017", "B015"]  # Line too long - acceptable in docstrings/comments
+
+[tool.black]
+line-length = 120
+
+# ============================================================================
+# TYPE CHECKING CONFIGURATION
+# ============================================================================
+
+[tool.pyright]
+pythonVersion = "3.10"
+typeCheckingMode = "basic"
+stubPath = "typings"
+reportMissingTypeStubs = false
+reportUnknownMemberType = false
+reportAttributeAccessIssue = false
+

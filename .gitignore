@@ -1,0 +1,233 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Python Distribution / packaging
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+.env
+.venv
+.venv-*/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Code Scalpel specific
+.code-scalpel.code-workspace
+pdg_visualizations/
+analysis_results/
+.scalpel_cache/
+.code_scalpel_cache/
+.scalpel_ast_cache/
+.ruff_cache/
+compliance_reports/
+.code-scalpel/autonomy_audit/  # Autonomy audit trail runtime files
+.code-scalpel/audit.log  # Policy engine audit log
+.code-scalpel/limits.local.toml  # [20251225_CONFIG] Local tier limit overrides
+certs/  # Certificate and private key files for signing/encryption
+code_scalpel_community/
+
+# [20260117_CLEANUP] Temporary/ephemeral directories for v1.0 fork
+.bench_tmp/
+.test_simple/
+.tmp_tier_comm/
+
+# [20251228_TEST] Local remote-verifier integration artifacts (never commit)
+.code-scalpel/license.jwt
+.code-scalpel/license*.jwt
+.code-scalpel/**/*.jwt
+.code-scalpel/license_cache.json
+.code-scalpel/*.jwk.json
+.code-scalpel/test_write.json
+
+# [20250101_TEST] Test license files - valid JWT licenses for tier testing
+tests/licenses/
+
+# License management (separate repo, ignore if checked out locally)
+code_scalpel_tier_management/
+license-management/
+tier-management/
+.code-scalpel/license/  # License directory contains JWT license files
+.code-scalpel/archive/  # Archived license files (potentially sensitive)
+keys/  # Private keys should never be in this repo
+*.pem  # Private key files
+*.key  # Key files
+
+# Internal development archives
+.archive/
+
+# Internal project management, status docs, and checklists (not for public repo)
+.internal/
+
+# Development summaries (internal archives - not for version control)
+docs/summaries/
+docs/project-management/
+docs/internal/
+docs/status/
+docs/analysis/  # Internal tool validation and verification documents
+
+# Internal GitHub workflow prompts (not for public consumption)
+.github/prompts/
+
+# Benchmark fixtures (generated/cloned data)
+tests/fixtures/data/
+
+# Polyglot stubs (exclude compiled tree-sitter)
+*.so
+*.dylib
+*.dll
+
+# tree-sitter build artifacts
+# Build and distribution artifacts (regenerate as needed)
+dist/
+dist_protected/
+build/
+build_protected/
+*.whl
+*.tar.gz
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
+coverage.json
+
+# Release evidence and artifacts (internal test/validation artifacts - keep local, exclude from fork)
+evidence/
+release_artifacts/
+release_artifacts/**/*.key
+release_artifacts/**/*.pem
+release_artifacts/**/cosign.key
+
+# Jupyter Notebook
+.ipynb_checkpoints
+# Allow notebooks in examples directory
+!examples/*.ipynb
+
+# IDEs and editors
+# PyCharm
+.idea/
+*.iml
+*.iws
+.idea_modules/
+
+# VSCode
+.vscode/
+*.code-workspace
+.history
+
+# Sublime Text
+*.tmlanguage.cache
+*.tmPreferences.cache
+*.stTheme.cache
+*.sublime-workspace
+*.sublime-project
+
+# Vim
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.lnk
+[Dd]esktop.ini
+
+# Logs and databases
+*.log
+*.sqlite
+*.db
+
+# Documentation
+docs/_build/
+docs/_static/
+docs/_templates/
+
+# Pre-release marketing drafts (generated content; keep local)
+docs/marketing-pack/
+
+# Environment configurations
+.env.*
+!.env.example
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pytype static type analyzer
+.pytype/
+
+# Cython debug symbols
+cython_debug/
+
+# Build tools
+.gradle/
+target/
+
+# Poetry
+poetry.lock
+
+# Project specific temporary files
+temp/
+tmp/
+*.tmp
+*.bak
+
+# Generated files
+generated/
+*.generated.*
+
+# Misc
+.*.sw[po]
+
+# Ruff cache
+.ruff_cache/
+
+# Ad-hoc debug files (should not be committed)
+debug_*.py
+smoke_test*.py
+/test_mcp_*.py
+verify_*.py
+stress_test*.sh
+src/code_scalpel/mcp/archive/server.py

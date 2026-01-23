@@ -1,0 +1,151 @@
+SPDX-License-Identifier: MIT AND Commercial
+
+CODE SCALPEL LICENSE AGREEMENT
+
+================================================================================
+PART 1: COMMUNITY EDITION (MIT LICENSE)
+================================================================================
+
+The Community Edition of Code Scalpel is licensed under the MIT License:
+
+MIT License
+
+Copyright (c) 2025 3D Tech Solutions LLC
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+================================================================================
+PART 2: PRO & ENTERPRISE EDITIONS (COMMERCIAL LICENSE)
+================================================================================
+
+The Pro and Enterprise Editions of Code Scalpel are proprietary commercial
+software developed and maintained by 3D Tech Solutions LLC.
+
+COMMERCIAL LICENSE TERMS:
+
+1. LICENSE GRANT
+   Pro and Enterprise editions are currently available exclusively through
+   Beta Testing programs. Licensees are granted a limited, non-exclusive,
+   non-transferable license to use the software in accordance with the
+   terms of their individual Beta Testing Agreement or Commercial License
+   Agreement.
+
+2. RESTRICTIONS
+   Licensees MAY NOT:
+   - Sublicense, resell, or redistribute the software
+   - Modify, reverse engineer, or create derivative works
+   - Remove or obscure any proprietary notices or labels
+   - Use the software in any unlicensed tier beyond their license grant
+
+3. LICENSE AUTHENTICATION & VALIDATION
+   
+   a) REQUIRED AUTHENTICATION
+      Pro and Enterprise editions require valid license authentication to
+      unlock tier-specific features and capabilities. License validation
+      is performed by cryptographic verification of signed license tokens.
+   
+   b) LICENSE VALIDITY
+      A valid license must:
+      - Contain an authentic signature from 3D Tech Solutions LLC
+      - Not be expired, revoked, or suspended
+      - Match the licensed tier and authorized use case
+      - Not have been tampered with or modified in any way
+   
+   c) VOIDING THE LICENSE
+      The license is immediately void and unenforceable if:
+      - The licensee attempts to circumvent, bypass, or disable the license
+        authentication and validation mechanisms
+      - The licensee attempts to forge, duplicate, or create unauthorized
+        copies of the license token
+      - The licensee attempts to modify the license file, its contents, or
+        cryptographic signatures
+      - The licensee uses the software with an invalid, expired, or revoked
+        license
+      - The licensee attempts to reverse engineer or analyze the license
+        validation code for the purpose of circumvention
+      - Any other breach of the license terms occurs
+   
+   d) CONSEQUENCES OF VOIDING
+      Upon license voiding:
+      - All rights to use Pro and Enterprise features are immediately
+        terminated
+      - The licensee must cease all use of the software within 30 days
+      - No refunds or credits will be issued
+      - 3D Tech Solutions LLC may pursue legal remedies and damages
+      - The licensee may be excluded from future beta testing programs
+        and commercial licensing
+
+4. BETA TESTING TERMS
+   During Beta Testing periods, Code Scalpel Pro and Enterprise are provided
+   under the condition that:
+   - Licensees provide feedback and bug reports
+   - Licensees understand the software may change significantly
+   - Licensees do not rely on the software for mission-critical production
+     use without explicit written permission
+   - Licensees agree to maintain the confidentiality of unreleased features
+   - Beta testing may be terminated at the sole discretion of 3D Tech
+     Solutions LLC
+
+5. NO WARRANTY
+   Pro and Enterprise editions are provided "AS IS" without warranty of any
+   kind. 3D Tech Solutions LLC disclaims all implied warranties of
+   merchantability, fitness for a particular purpose, and non-infringement.
+
+6. LIMITATION OF LIABILITY
+   In no event shall 3D Tech Solutions LLC be liable for any indirect,
+   incidental, special, consequential, or punitive damages arising out of or
+   related to the software, even if advised of the possibility of such damages.
+
+================================================================================
+PART 3: DETERMINING YOUR EDITION
+================================================================================
+
+Your Code Scalpel edition is determined by:
+- The presence and validity of a signed license file
+- The "tier" field in a valid license token
+- The absence of a license file indicates Community Edition
+
+Community Edition Features:
+- Limited to basic functionality as defined in the documentation
+- Available under the MIT License (Part 1)
+- No license authentication required
+
+Pro Edition Features:
+- Enhanced analysis capabilities (expanded depth limits, file limits, etc.)
+- Priority support during beta period
+- Requires valid signed license token with tier="pro"
+
+Enterprise Edition Features:
+- Unlimited analysis capabilities
+- Advanced security analysis and cross-file taint tracking
+- Custom metrics and compliance reporting
+- Requires valid signed license token with tier="enterprise"
+
+================================================================================
+PART 4: CONTACT & DISPUTES
+================================================================================
+
+For license-related inquiries, violations, or disputes, contact:
+3D Tech Solutions LLC
+https://github.com/3d-tech-solutions/code-scalpel
+
+Any violation of this license agreement may result in legal action to protect
+our intellectual property rights and commercial interests.
+
+================================================================================

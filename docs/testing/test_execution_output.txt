@@ -1,0 +1,138 @@
+============================= test session starts ==============================
+platform linux -- Python 3.10.19, pytest-7.4.3, pluggy-1.6.0 -- /home/xbyooki/anaconda3/envs/code-scalpel/bin/python3.10
+cachedir: .pytest_cache
+rootdir: /mnt/k/backup/Develop/code-scalpel
+configfile: pytest.ini
+plugins: anyio-4.12.0, langsmith-0.5.1, mock-3.15.1, cov-4.1.0, asyncio-0.23.3, timeout-2.4.0
+asyncio: mode=auto
+timeout: 120.0s
+timeout method: thread
+timeout func_only: False
+collecting ... collected 4732 items
+
+tests/test_governance_budget_enforcement.py::test_pro_block_mode_denies_update_symbol_when_budget_exceeded PASSED [  0%]
+tests/test_governance_budget_enforcement.py::test_pro_block_mode_emits_audit_event_on_budget_deny PASSED [  0%]
+tests/test_governance_budget_enforcement.py::test_pro_warn_mode_allows_update_symbol_with_break_glass_and_warning +++++++++++++++++++++++++++++++++++ Timeout ++++++++++++++++++++++++++++++++++++
+~~~~~~~~~~~~~~~~~~~~~ Stack of asyncio_0 (139178763146944) ~~~~~~~~~~~~~~~~~~~~~
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/threading.py", line 973, in _bootstrap
+    self._bootstrap_inner()
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/threading.py", line 1016, in _bootstrap_inner
+    self.run()
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/threading.py", line 953, in run
+    self._target(*self._args, **self._kwargs)
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/concurrent/futures/thread.py", line 83, in _worker
+    work_item.run()
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+  File "/mnt/k/backup/Develop/code-scalpel/src/code_scalpel/mcp/server.py", line 14573, in _get_symbol_references_sync
+    for py_file in root.rglob("*.py"):
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/pathlib.py", line 1047, in rglob
+    for p in selector.select_from(self):
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/pathlib.py", line 493, in _select_from
+    for p in successor_select(starting_point, is_dir, exists, scandir):
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/pathlib.py", line 441, in _select_from
+    entries = list(scandir_it)
+~~~~~~~~~~~ Stack of OtelBatchSpanRecordProcessor (139179179632320) ~~~~~~~~~~~~
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/threading.py", line 973, in _bootstrap
+    self._bootstrap_inner()
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/threading.py", line 1016, in _bootstrap_inner
+    self.run()
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/threading.py", line 953, in run
+    self._target(*self._args, **self._kwargs)
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/site-packages/opentelemetry/sdk/_shared_internal/__init__.py", line 159, in worker
+    sleep_interrupted = self._worker_awaken.wait(self._schedule_delay)
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/threading.py", line 607, in wait
+    signaled = self._cond.wait(timeout)
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/threading.py", line 324, in wait
+    gotit = waiter.acquire(True, timeout)
+~~~~~~~~~~~~~~~~~ Stack of CrewAIEventsLoop (139179194316480) ~~~~~~~~~~~~~~~~~~
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/threading.py", line 973, in _bootstrap
+    self._bootstrap_inner()
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/threading.py", line 1016, in _bootstrap_inner
+    self.run()
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/threading.py", line 953, in run
+    self._target(*self._args, **self._kwargs)
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/site-packages/crewai/events/event_bus.py", line 117, in _run_loop
+    self._loop.run_forever()
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/asyncio/base_events.py", line 603, in run_forever
+    self._run_once()
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/asyncio/base_events.py", line 1871, in _run_once
+    event_list = self._selector.select(timeout)
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/selectors.py", line 469, in select
+    fd_event_list = self._selector.poll(timeout, max_ev)
+~~~~~~~~~~~~~~~~~~~~ Stack of MainThread (139179725063680) ~~~~~~~~~~~~~~~~~~~~~
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/bin/pytest", line 7, in <module>
+    sys.exit(console_main())
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/site-packages/_pytest/config/__init__.py", line 192, in console_main
+    code = main()
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/site-packages/_pytest/config/__init__.py", line 169, in main
+    ret: Union[ExitCode, int] = config.hook.pytest_cmdline_main(
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/site-packages/pluggy/_hooks.py", line 512, in __call__
+    return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/site-packages/pluggy/_manager.py", line 120, in _hookexec
+    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/site-packages/pluggy/_callers.py", line 121, in _multicall
+    res = hook_impl.function(*args)
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/site-packages/_pytest/main.py", line 318, in pytest_cmdline_main
+    return wrap_session(config, _main)
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/site-packages/_pytest/main.py", line 271, in wrap_session
+    session.exitstatus = doit(config, session) or 0
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/site-packages/_pytest/main.py", line 325, in _main
+    config.hook.pytest_runtestloop(session=session)
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/site-packages/pluggy/_hooks.py", line 512, in __call__
+    return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/site-packages/pluggy/_manager.py", line 120, in _hookexec
+    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/site-packages/pluggy/_callers.py", line 121, in _multicall
+    res = hook_impl.function(*args)
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/site-packages/_pytest/main.py", line 350, in pytest_runtestloop
+    item.config.hook.pytest_runtest_protocol(item=item, nextitem=nextitem)
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/site-packages/pluggy/_hooks.py", line 512, in __call__
+    return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/site-packages/pluggy/_manager.py", line 120, in _hookexec
+    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/site-packages/pluggy/_callers.py", line 121, in _multicall
+    res = hook_impl.function(*args)
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/site-packages/_pytest/runner.py", line 114, in pytest_runtest_protocol
+    runtestprotocol(item, nextitem=nextitem)
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/site-packages/_pytest/runner.py", line 133, in runtestprotocol
+    reports.append(call_and_report(item, "call", log))
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/site-packages/_pytest/runner.py", line 222, in call_and_report
+    call = call_runtest_hook(item, when, **kwds)
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/site-packages/_pytest/runner.py", line 261, in call_runtest_hook
+    return CallInfo.from_call(
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/site-packages/_pytest/runner.py", line 341, in from_call
+    result: Optional[TResult] = func()
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/site-packages/_pytest/runner.py", line 262, in <lambda>
+    lambda: ihook(item=item, **kwds), when=when, reraise=reraise
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/site-packages/pluggy/_hooks.py", line 512, in __call__
+    return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/site-packages/pluggy/_manager.py", line 120, in _hookexec
+    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/site-packages/pluggy/_callers.py", line 121, in _multicall
+    res = hook_impl.function(*args)
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/site-packages/_pytest/runner.py", line 169, in pytest_runtest_call
+    item.runtest()
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/site-packages/pytest_asyncio/plugin.py", line 430, in runtest
+    super().runtest()
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/site-packages/_pytest/python.py", line 1792, in runtest
+    self.ihook.pytest_pyfunc_call(pyfuncitem=self)
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/site-packages/pluggy/_hooks.py", line 512, in __call__
+    return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/site-packages/pluggy/_manager.py", line 120, in _hookexec
+    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/site-packages/pluggy/_callers.py", line 121, in _multicall
+    res = hook_impl.function(*args)
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/site-packages/_pytest/python.py", line 194, in pytest_pyfunc_call
+    result = testfunction(**testargs)
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/site-packages/pytest_asyncio/plugin.py", line 887, in inner
+    _loop.run_until_complete(task)
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/asyncio/base_events.py", line 636, in run_until_complete
+    self.run_forever()
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/asyncio/base_events.py", line 603, in run_forever
+    self._run_once()
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/asyncio/base_events.py", line 1871, in _run_once
+    event_list = self._selector.select(timeout)
+  File "/home/xbyooki/anaconda3/envs/code-scalpel/lib/python3.10/selectors.py", line 469, in select
+    fd_event_list = self._selector.poll(timeout, max_ev)
++++++++++++++++++++++++++++++++++++ Timeout ++++++++++++++++++++++++++++++++++++

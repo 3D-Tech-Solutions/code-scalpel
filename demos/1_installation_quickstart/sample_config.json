@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "code-scalpel": {
+      "command": "python",
+      "args": ["-m", "code_scalpel.mcp"],
+      "env": {
+        "SCALPEL_ROOT": "/path/to/your/project"
+      }
+    }
+  }
+}
