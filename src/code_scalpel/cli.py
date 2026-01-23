@@ -717,6 +717,8 @@ def regenerate_manifest_command(policy_dir: str = ".code-scalpel", signed_by: st
 
     except Exception as e:
         print(f"\n[ERROR] Failed to regenerate manifest: {e}")
+
+
 def list_tools_command(tier: str | None = None, json_output: bool = False) -> int:
     """List available MCP tools for the specified or current tier."""
     from .licensing.features import TOOL_CAPABILITIES
@@ -756,26 +758,24 @@ def list_tools_command(tier: str | None = None, json_output: bool = False) -> in
         tool_caps = TOOL_CAPABILITIES.get(tool_name, {})
         tier_caps = tool_caps.get(tier, {})
         if tier_caps.get("enabled", True):  # Assume enabled if not specified
-            available_tools.append({
-                "name": tool_name,
-                "description": tool_descriptions[tool_name],
-                "tier": tier,
-                "limits": tier_caps.get("limits", {}),
-            })
+            available_tools.append(
+                {
+                    "name": tool_name,
+                    "description": tool_descriptions[tool_name],
+                    "tier": tier,
+                    "limits": tier_caps.get("limits", {}),
+                }
+            )
 
     if json_output:
-        print(json.dumps({
-            "tier": tier,
-            "tools": available_tools,
-            "total": len(available_tools)
-        }, indent=2))
+        print(json.dumps({"tier": tier, "tools": available_tools, "total": len(available_tools)}, indent=2))
     else:
         print(f"Code Scalpel MCP Tools (Tier: {tier})")
         print("=" * 50)
         for tool in available_tools:
             print(f"• {tool['name']}: {tool['description']}")
-            if tool['limits']:
-                limits_str = ", ".join(f"{k}={v}" for k, v in tool['limits'].items())
+            if tool["limits"]:
+                limits_str = ", ".join(f"{k}={v}" for k, v in tool["limits"].items())
                 print(f"  Limits: {limits_str}")
         print(f"\nTotal tools available: {len(available_tools)}")
 
