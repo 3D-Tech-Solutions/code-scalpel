@@ -37,6 +37,7 @@ pip-delete-this-directory.txt
 
 # Code Scalpel specific
 .code-scalpel.code-workspace
+.code-scalpel/  # User-specific configuration and runtime data
 pdg_visualizations/
 analysis_results/
 .scalpel_cache/
