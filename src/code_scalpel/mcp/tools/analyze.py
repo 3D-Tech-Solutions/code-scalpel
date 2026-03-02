@@ -165,6 +165,7 @@ async def analyze_code(
     **Args:**
         code (str, optional): Source code to analyze. Either code or file_path required.
         language (str): Programming language for analysis. Default: "auto" (auto-detect).
+                       Supported: python, javascript, typescript, java, c, cpp, csharp, go
         file_path (str, optional): Path to file to analyze. Either code or file_path required.
 
     **Returns:**

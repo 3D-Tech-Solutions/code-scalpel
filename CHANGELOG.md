@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2026-03-02
+
+### Added
+- **Full Go language support** via new `GoNormalizer` and `GoVisitor` (tree-sitter-go).
+  Handles functions, methods (with receiver stored in metadata), structs, interfaces,
+  imports (aliased and grouped), `var`/`const` declarations, `:=` short variable
+  declarations, `if`/`for` statements, `return` statements, and call expressions.
+  Extensions: `.go`
+- `GoParserAdapter` — replaces the previous `NotImplementedError` stub with a full
+  implementation that delegates to `GoNormalizer` and returns a typed `ParseResult`.
+- Go integrated into `PolyglotExtractor` (`polyglot/extractor.py`) and
+  `code_parsers.extractor` — extension-based and content-based detection.
+- Content detection heuristics: `package main`, `func `, `import (`, `fmt.Println`,
+  `fmt.Printf` — placed before Java check to avoid `"package "` ambiguity.
+- `tree-sitter-go>=0.21.0` added to `[all]` and `[polyglot]` optional extras in
+  `pyproject.toml`.
+- `limits.toml`: `"go"` added to `analyze_code.languages` (Community, Pro, Enterprise);
+  `"csharp"` and `"go"` added to `unified_sink_detect.languages` (all tiers — csharp
+  was previously missing).
+- 23 new Go-specific tests in `tests/languages/test_go_parser.py` covering extension
+  detection, content detection, function/method/struct/interface/import extraction,
+  `:=` short var, for-loop IR mapping, and round-trip via `PolyglotExtractor`.
+- MCP docstrings in `extraction.py`, `analyze.py`, and `security.py` updated to list
+  Go as a supported language.
+- Internal wiki guides for adding Kotlin, Ruby, Rust, and Swift (four stub languages)
+  as standalone documents in `wiki/`.
+
+### Fixed
+- `cli.py`: Removed unused `missing: list[str]` parameter from `_print_group()` and
+  its three call sites — eliminates the Pyright "parameter declared but never used"
+  warning (line 573).
+- `go_normalizer.py`: Import alias now stored in `IRImport.alias` field (was
+  incorrectly placed in `names=`).
+
+---
+
 ## [2.0.2] - 2026-02-25
 
 ### Added

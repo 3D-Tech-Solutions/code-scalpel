@@ -58,6 +58,16 @@ except ImportError:
     CSharpVisitor = None  # type: ignore[assignment]
     _HAS_CSHARP = False
 
+# [20260302_FEATURE] Go normalizer — requires tree-sitter-go
+try:
+    from .go_normalizer import GoNormalizer, GoVisitor
+
+    _HAS_GO = True
+except ImportError:
+    GoNormalizer = None  # type: ignore[assignment]
+    GoVisitor = None  # type: ignore[assignment]
+    _HAS_GO = False
+
 __all__ = [
     "BaseNormalizer",
     "PythonNormalizer",
@@ -77,3 +87,6 @@ if _HAS_CPP:
 
 if _HAS_CSHARP:
     __all__ += ["CSharpNormalizer", "CSharpVisitor"]
+
+if _HAS_GO:
+    __all__ += ["GoNormalizer", "GoVisitor"]

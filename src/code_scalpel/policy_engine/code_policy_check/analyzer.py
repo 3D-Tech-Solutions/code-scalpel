@@ -14,8 +14,8 @@ This module provides the CodePolicyChecker class that orchestrates:
 from __future__ import annotations
 
 import ast
-import base64
 import hashlib
+import hmac
 import json
 import logging
 import os
@@ -35,6 +35,7 @@ from .models import (
     CustomRule,
     PatternMatch,
     PolicyViolation,
+    ReportConfig,
     SecurityWarning,
     ViolationSeverity,
 )
@@ -69,6 +70,7 @@ class CodePolicyChecker:
         custom_rules: list[CustomRule] | None = None,
         compliance_standards: list[str] | None = None,
         policy_path: str | None = None,
+        report_config: ReportConfig | None = None,
     ):
         """
         Initialize the checker.
@@ -77,10 +79,12 @@ class CodePolicyChecker:
             tier: Tier level (community, pro, enterprise)
             custom_rules: Custom rules to apply (Pro tier)
             compliance_standards: Compliance standards to audit (Enterprise tier)
+            report_config: Optional branding/org metadata for PDF report (Enterprise tier)
         """
         self.tier = tier.lower()
         self.custom_rules = custom_rules or []
         self.compliance_standards = compliance_standards or []
+        self.report_config = report_config
 
         # Organization policies + templates (best-effort)
         policy, discovered_path, policy_hash = load_effective_policy()
@@ -1016,13 +1020,24 @@ class CodePolicyChecker:
                 except Exception as e:
                     logger.warning(f"Compliance check failed for {file_path}: {e}")
 
-            # Calculate compliance score
+            # Calculate compliance score using severity-weighted deductions.
+            # Each finding is weighted by severity and normalized per file so
+            # that a codebase with 1 CRITICAL finding in 1 file scores the
+            # same as 10 CRITICALs in 10 files, while absolute counts still
+            # matter when density increases beyond 1 finding/file.
             if len(files) > 0:
-                # Score based on critical findings per file
-                critical_findings = sum(
-                    1 for f in findings if f.get("severity") in ("critical", "error")
+                _severity_weight = {
+                    "critical": 15,
+                    "error": 8,
+                    "warning": 3,
+                    "info": 1,
+                }
+                total_penalty = sum(
+                    _severity_weight.get(f.get("severity", "warning"), 3)
+                    for f in findings
                 )
-                score = max(0, 100 - (critical_findings / len(files)) * 20)
+                # Normalize by file count so large codebases aren't unfairly penalized
+                score = max(0.0, 100.0 - (total_penalty / len(files)))
             else:
                 score = 100.0
 
@@ -1056,93 +1071,19 @@ class CodePolicyChecker:
 
     def _generate_pdf_report(self, result: CodePolicyResult) -> str:
         """
-        Generate PDF compliance report (Enterprise tier).
+        Generate compliance report (Enterprise tier).
 
         [20251226_FEATURE] Enterprise tier PDF generation.
+        [20260227_FEATURE] Delegates to ComplianceReportBuilder for fully branded,
+        white-label-ready output.  Accepts optional ReportConfig for org branding.
 
-        Returns base64-encoded PDF content.
+        Returns base64-encoded content (real PDF if weasyprint is available,
+        otherwise a self-contained, styled HTML document).
         """
-        # Simple HTML-based PDF (requires weasyprint or similar)
-        html_content = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>Code Policy Compliance Report</title>
-            <style>
-                body {{ font-family: Arial, sans-serif; margin: 40px; }}
-                h1 {{ color: #333; }}
-                .summary {{ background: #f5f5f5; padding: 20px; margin: 20px 0; }}
-                .score {{ font-size: 48px; font-weight: bold; color: {'green' if result.compliance_score >= 90 else 'orange' if result.compliance_score >= 70 else 'red'}; }}
-                table {{ border-collapse: collapse; width: 100%; }}
-                th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
-                th {{ background-color: #4CAF50; color: white; }}
-                .critical {{ color: red; font-weight: bold; }}
-                .warning {{ color: orange; }}
-            </style>
-        </head>
-        <body>
-            <h1>Code Policy Compliance Report</h1>
-            <p>Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
-            
-            <div class="summary">
-                <h2>Executive Summary</h2>
-                <p class="score">{result.compliance_score:.1f}%</p>
-                <p>Files Checked: {result.files_checked}</p>
-                <p>Rules Applied: {result.rules_applied}</p>
-                <p>Violations Found: {len(result.violations)}</p>
-            </div>
-            
-            <h2>Compliance Status by Standard</h2>
-            <table>
-                <tr>
-                    <th>Standard</th>
-                    <th>Status</th>
-                    <th>Score</th>
-                    <th>Findings</th>
-                </tr>
-        """
+        from .report_builder import ComplianceReportBuilder
 
-        for standard, report in result.compliance_reports.items():
-            html_content += f"""
-                <tr>
-                    <td>{standard}</td>
-                    <td>{report.status.upper()}</td>
-                    <td>{report.score:.1f}%</td>
-                    <td>{len(report.findings)}</td>
-                </tr>
-            """
-
-        html_content += """
-            </table>
-            
-            <h2>Critical Findings</h2>
-        """
-
-        critical = [
-            v for v in result.violations if v.severity == ViolationSeverity.CRITICAL
-        ]
-
-        if critical:
-            html_content += "<ul>"
-            for v in critical[:20]:  # Limit to 20
-                html_content += (
-                    f"<li class='critical'>{v.file}:{v.line} - {v.message}</li>"
-                )
-            html_content += "</ul>"
-        else:
-            html_content += "<p>No critical findings.</p>"
-
-        html_content += """
-            <div style="margin-top: 50px; border-top: 1px solid #ccc; padding-top: 20px;">
-                <p><em>This report was generated by Code Scalpel Enterprise.</em></p>
-            </div>
-        </body>
-        </html>
-        """
-
-        # For now, return base64-encoded HTML
-        # In production, use weasyprint to convert to PDF
-        return base64.b64encode(html_content.encode()).decode()
+        builder = ComplianceReportBuilder(result, self.report_config)
+        return builder.build()
 
     def _generate_certifications(
         self, reports: dict[str, ComplianceReport]
@@ -1208,6 +1149,13 @@ class CodePolicyChecker:
         Save audit entry to persistent storage.
 
         [20251229_FEATURE] Persist audit logs to .code-scalpel/audit.jsonl
+        [20260227_FEATURE] HMAC-SHA256 signature for tamper-evident audit trail.
+
+        Each line is a JSON object with an optional ``_sig`` field that is the
+        HMAC-SHA256 hex digest of the canonicalized payload, keyed with
+        ``SCALPEL_MANIFEST_SECRET``.  Verifiers can re-compute the digest over
+        the same canonical payload (all fields except ``_sig``, sorted keys,
+        no extra whitespace) to detect tampering.
         """
         try:
             # Determine audit log path
@@ -1217,8 +1165,8 @@ class CodePolicyChecker:
 
             audit_file = audit_dir / "audit.jsonl"
 
-            # Convert entry to dict
-            entry_dict = {
+            # Build the payload dict (canonical field order for deterministic signing)
+            entry_dict: dict[str, Any] = {
                 "timestamp": entry.timestamp.isoformat(),
                 "action": entry.action,
                 "user": entry.user,
@@ -1228,6 +1176,17 @@ class CodePolicyChecker:
                 "compliance_standards": entry.compliance_standards,
                 "metadata": entry.metadata,
             }
+
+            # HMAC-SHA256 signature — keyed on SCALPEL_MANIFEST_SECRET when present.
+            # The canonical payload is the JSON-serialised dict (sorted keys, no
+            # extra whitespace) to guarantee a stable byte sequence across platforms.
+            secret = os.environ.get("SCALPEL_MANIFEST_SECRET", "").encode("utf-8")
+            if secret:
+                canonical = json.dumps(
+                    entry_dict, sort_keys=True, separators=(",", ":")
+                ).encode("utf-8")
+                sig = hmac.new(secret, canonical, hashlib.sha256).hexdigest()
+                entry_dict["_sig"] = sig
 
             # Append to file
             with open(audit_file, "a", encoding="utf-8") as f:

@@ -16,6 +16,7 @@ class Language(Enum):
     C = "c"  # [20260225_FEATURE]
     CPP = "cpp"
     CSHARP = "csharp"  # [20260225_FEATURE]
+    GO = "go"  # [20260302_FEATURE]
     UNKNOWN = "unknown"
 
 

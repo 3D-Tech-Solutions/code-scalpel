@@ -257,6 +257,88 @@ class Certification:
 
 
 @dataclass
+class ReportConfig:
+    """
+    Organization-specific configuration for compliance PDF reports (Enterprise tier).
+
+    Pass this to code_policy_check via the report_config parameter to white-label
+    the generated PDF with your organization's branding, contact details, and
+    project metadata.
+
+    Fields
+    ------
+    organization_name : str
+        Company / organization name shown on the cover page and every page header.
+    project_name : str
+        Name of the project or codebase being audited.
+    report_title : str | None
+        Custom report title. Defaults to "<standard> Compliance Audit Report".
+    contact_name : str | None
+        Primary contact person for this report.
+    contact_email : str | None
+        Contact e-mail shown in the report metadata.
+    department : str | None
+        Department or team responsible for the codebase (e.g. "Engineering", "InfoSec").
+    prepared_by : str | None
+        Name of the person who commissioned / prepared the report.
+    classification : str
+        Document classification banner on every page.
+        One of: "CONFIDENTIAL", "INTERNAL", "PUBLIC".  Default: "CONFIDENTIAL".
+    project_description : str | None
+        One- or two-sentence description of the project, shown in the executive summary.
+    audit_period : str | None
+        Human-readable audit period, e.g. "Q1 2026" or "2026-01-01 – 2026-03-31".
+    version : str
+        Report version string (default "1.0").
+    logo_b64 : str | None
+        Base64-encoded PNG or SVG logo to display on the cover page alongside the
+        Code Scalpel branding. Supply a data-URI string, e.g.
+        ``"data:image/png;base64,iVBOR..."``.
+    custom_footer : str | None
+        Additional text appended to every page footer (e.g. legal disclaimers).
+    """
+
+    organization_name: str = "Your Organization"
+    project_name: str = "Code Review"
+    report_title: str | None = None
+    contact_name: str | None = None
+    contact_email: str | None = None
+    department: str | None = None
+    prepared_by: str | None = None
+    classification: str = "CONFIDENTIAL"
+    project_description: str | None = None
+    audit_period: str | None = None
+    version: str = "1.0"
+    logo_b64: str | None = None
+    custom_footer: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a plain dict (suitable for JSON / MCP transport)."""
+        return {
+            "organization_name": self.organization_name,
+            "project_name": self.project_name,
+            "report_title": self.report_title,
+            "contact_name": self.contact_name,
+            "contact_email": self.contact_email,
+            "department": self.department,
+            "prepared_by": self.prepared_by,
+            "classification": self.classification,
+            "project_description": self.project_description,
+            "audit_period": self.audit_period,
+            "version": self.version,
+            "logo_b64": self.logo_b64,
+            "custom_footer": self.custom_footer,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ReportConfig":
+        """Deserialize from a plain dict (e.g. received over MCP)."""
+        valid_keys = {f.name for f in cls.__dataclass_fields__.values()}  # type: ignore[attr-defined]
+        filtered = {k: v for k, v in data.items() if k in valid_keys}
+        return cls(**filtered)
+
+
+@dataclass
 class CodePolicyResult:
     """
     Complete result from code policy check.

@@ -181,6 +181,7 @@ async def code_policy_check(
     rules: list[str] | None = None,
     compliance_standards: list[str] | None = None,
     generate_report: bool = False,
+    report_config: dict | None = None,
 ) -> ToolResponseEnvelope:
     """Check code against style guides, best practices, and compliance standards.
 
@@ -202,6 +203,21 @@ async def code_policy_check(
         rules (list[str], optional): Specific rules to enforce. If None, use defaults.
         compliance_standards (list[str], optional): Compliance frameworks (HIPAA, SOC2, GDPR, PCI-DSS). Enterprise tier only.
         generate_report (bool): Generate compliance report. Default: False. Enterprise tier only.
+        report_config (dict, optional): Organization branding for the PDF report. Enterprise tier only.
+            Accepted keys (all optional):
+            - organization_name (str): Company name shown on every page.
+            - project_name (str): Project or codebase being audited.
+            - report_title (str): Custom report title.
+            - contact_name (str): Primary contact person.
+            - contact_email (str): Contact e-mail.
+            - department (str): Department or team responsible for the codebase.
+            - prepared_by (str): Name of person who prepared the report.
+            - classification (str): Document classification — "CONFIDENTIAL", "INTERNAL", or "PUBLIC".
+            - project_description (str): Short description of the project.
+            - audit_period (str): Human-readable audit period, e.g. "Q1 2026".
+            - version (str): Report version string, e.g. "1.0".
+            - logo_b64 (str): Base64-encoded org logo (data-URI, PNG or SVG).
+            - custom_footer (str): Additional text appended to every page footer.
 
     **Returns:**
         ToolResponseEnvelope with CodePolicyCheckResult containing:
@@ -222,8 +238,6 @@ async def code_policy_check(
         - files_limit_applied (int, optional): Max files limit applied
         - rules_limit_applied (int, optional): Max rules limit applied
         - error (str, optional): Error message if check failed
-        - error (str): Error message if analysis failed
-        - tier_applied (str): Tier used for analysis
         - duration_ms (int): Analysis duration in milliseconds
     """
     started = time.perf_counter()
@@ -245,6 +259,7 @@ async def code_policy_check(
             generate_report,
             tier,
             capabilities,
+            report_config,
         )
         duration_ms = int((time.perf_counter() - started) * 1000)
         return make_envelope(

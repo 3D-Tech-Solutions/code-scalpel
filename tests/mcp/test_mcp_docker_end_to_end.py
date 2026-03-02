@@ -131,6 +131,16 @@ default allow = true
 """,
         encoding="utf-8",
     )
+    # [20260302_BUGFIX] verify_policy_integrity scans for *.yaml/*.yml/*.json
+    # (not *.rego), so add a yaml policy file that the verifier will find.
+    (policy_dir / "governance.yaml").write_text(
+        """\
+version: "1.0"
+rules:
+  allow_all: true
+""",
+        encoding="utf-8",
+    )
 
     return {
         "project_root": project_root,
@@ -144,7 +154,7 @@ default allow = true
 def _write_signed_policy_manifest(policy_dir: Path, secret: str) -> None:
     from code_scalpel.policy_engine.crypto_verify import CryptographicPolicyVerifier
 
-    policy_files = ["policy.rego"]
+    policy_files = ["policy.rego", "governance.yaml"]
     manifest = CryptographicPolicyVerifier.create_manifest(
         policy_files=policy_files,
         secret_key=secret,
@@ -198,11 +208,17 @@ def _ensure_docker_image(repo_root: Path) -> str:
 
 
 def _tool_json(result) -> dict:
+    # [20260302_BUGFIX] Unwrap ToolResponseEnvelope: if the result JSON has a
+    # "data" key containing the actual tool payload, return that inner dict so
+    # callers can use .get("success"), .get("target_code"), etc. directly.
     assert result.isError is False
     assert result.content
     first = result.content[0]
     assert hasattr(first, "text"), f"Unexpected content type: {type(first)!r}"
-    return json.loads(first.text)
+    parsed = json.loads(first.text)
+    if isinstance(parsed.get("data"), dict):
+        return parsed["data"]
+    return parsed
 
 
 @pytest.mark.docker
@@ -213,7 +229,9 @@ async def test_mcp_docker_streamable_http_end_to_end(tmp_path: Path):
         if not _docker_available():
             pytest.skip("Docker is not available")
 
-        repo_root = Path(__file__).resolve().parents[1]
+        # [20260302_BUGFIX] Use parents[2] (project root) not parents[1] (tests/)
+        # to avoid tests/mcp/ shadowing and get correct Dockerfile location.
+        repo_root = Path(__file__).resolve().parents[2]
 
         paths = _make_project(tmp_path)
         project_root = paths["project_root"]
@@ -259,10 +277,23 @@ async def test_mcp_docker_streamable_http_end_to_end(tmp_path: Path):
 
             _wait_for_tcp("127.0.0.1", ports.mcp_port, timeout_s=30.0)
 
+            # [20260302_BUGFIX] Wait for health endpoint to be ready too.
+            # The health server starts in a background thread and may not be
+            # ready immediately after the MCP port accepts connections.
             health_url = f"http://127.0.0.1:{ports.health_port}/health"
-            r = httpx.get(health_url, timeout=5.0)
-            r.raise_for_status()
-            assert r.json().get("status") == "healthy"
+            health_deadline = time.time() + 15.0
+            health_ok = False
+            while time.time() < health_deadline:
+                try:
+                    r = httpx.get(health_url, timeout=3.0)
+                    r.raise_for_status()
+                    assert r.json().get("status") == "healthy"
+                    health_ok = True
+                    break
+                except Exception:
+                    time.sleep(0.5)
+            if not health_ok:
+                raise RuntimeError(f"Health endpoint not ready after 15s: {health_url}")
 
             base_url = f"http://127.0.0.1:{ports.mcp_port}/mcp"
 
@@ -275,7 +306,8 @@ async def test_mcp_docker_streamable_http_end_to_end(tmp_path: Path):
                     await session.initialize()
 
                     tools = await session.list_tools()
-                    assert len({t.name for t in tools.tools}) == 22
+                    # [20260302_BUGFIX] Updated from 22 to 23 (get_capabilities).
+                    assert len({t.name for t in tools.tools}) == 23
 
                     # Representative file-based operations exercising the volume mount.
                     ctx = await session.call_tool(

@@ -7,15 +7,10 @@ Tests all fixture injection functionality:
 - Context manager fixtures
 - Parametrization via @tier_aware marker
 
-[20260212_SKIP] Temporarily skipped - architectural model changed.
-These tests validate the OLD tool-gating model (Pro=19 tools, Enterprise=10 tools).
-Current architecture: Feature-gating model (ALL tiers have 22 tools with different limits).
-
-To fix these tests:
-1. Update tool count expectations: All tiers should assert 22 tools
-2. Replace resolver._LIMITS_CACHE checks with config_loader cache APIs
-3. Change assertions from tool availability to capability/limit differences
-4. See docs/guides/implementing_feature_gating.md for current architecture
+[20260301_TEST] Rewritten for feature-gating architecture.
+All tiers have 22 tools available; tiers differ in limits and features only.
+Cache clearing uses config_loader.clear_cache() (resolver._LIMITS_CACHE removed).
+License files located in tests/licenses/.
 """
 
 from __future__ import annotations
@@ -27,28 +22,20 @@ import pytest
 
 from code_scalpel.testing import TierAdapter
 
-# [20260212_SKIP] Architecture changed: Tool-gating → Feature-gating
-# All 22 tools now available at all tiers (Community/Pro/Enterprise)
-# Tests expect old model: Pro=19, Enterprise=10 tools
-# Tests also reference removed resolver._LIMITS_CACHE (now in config_loader)
-pytestmark = pytest.mark.skip(
-    reason="Architectural change: All tiers have 22 tools (feature-gating not tool-gating). Tests need updating."
-)
-
 
 class TestClearAllCaches:
     """Test cache clearing fixture."""
 
-    def test_clear_all_caches_clears_resolver_cache(self, clear_all_caches):
-        """Verify resolver cache is cleared."""
-        from code_scalpel.capabilities import resolver
+    def test_clear_all_caches_clears_config_loader_cache(self, clear_all_caches):
+        """[20260301_TEST] Verify config_loader cache is cleared by fixture."""
+        from code_scalpel.licensing import config_loader
 
-        # Cache should be None before test starts
-        assert resolver._LIMITS_CACHE is None
+        # After clear_all_caches, cache should be None
+        assert config_loader._config_cache is None
 
-        # Set it to something
-        resolver._LIMITS_CACHE = {"test": "value"}
-        assert resolver._LIMITS_CACHE is not None
+        # Load to populate it
+        config_loader.get_cached_limits()
+        assert config_loader._config_cache is not None
 
     def test_clear_all_caches_clears_jwt_validator_cache(self, clear_all_caches):
         """Verify JWT validator cache is cleared."""
@@ -76,28 +63,32 @@ class TestTierAdapterFixture:
         assert all(isinstance(tool, str) for tool in available)
 
     def test_tier_adapter_no_locked_tools_community(self, tier_adapter: TierAdapter):
-        """Community tier should have no locked tools."""
+        """Community tier should have no locked tools (feature-gating model)."""
         locked = tier_adapter.get_unavailable_tools()
         assert len(locked) == 0
 
 
 class TestSpecificAdapterFixtures:
-    """Test tier-specific adapter fixtures."""
+    """Test tier-specific adapter fixtures.
+
+    [20260301_TEST] Feature-gating model: all tiers have 22 tools.
+    Differences are in limits, not tool availability.
+    """
 
     def test_community_adapter(self, community_adapter: TierAdapter):
-        """Community adapter should be community tier."""
+        """Community adapter should be community tier with all 22 tools."""
         assert community_adapter.get_tier() == "community"
         assert len(community_adapter.get_available_tools()) == 22
 
     def test_pro_adapter(self, pro_adapter: TierAdapter):
-        """Pro adapter should be pro tier."""
+        """[20260301_TEST] Pro adapter should be pro tier with all 22 tools."""
         assert pro_adapter.get_tier() == "pro"
-        assert len(pro_adapter.get_available_tools()) == 19
+        assert len(pro_adapter.get_available_tools()) == 22
 
     def test_enterprise_adapter(self, enterprise_adapter: TierAdapter):
-        """Enterprise adapter should be enterprise tier."""
+        """[20260301_TEST] Enterprise adapter should be enterprise tier with all 22 tools."""
         assert enterprise_adapter.get_tier() == "enterprise"
-        assert len(enterprise_adapter.get_available_tools()) == 10
+        assert len(enterprise_adapter.get_available_tools()) == 22
 
     def test_each_adapter_is_independent(
         self, community_adapter, pro_adapter, enterprise_adapter
@@ -106,6 +97,18 @@ class TestSpecificAdapterFixtures:
         assert community_adapter is not pro_adapter
         assert pro_adapter is not enterprise_adapter
         assert community_adapter is not enterprise_adapter
+
+    def test_tiers_have_different_limits(
+        self, community_adapter, pro_adapter, enterprise_adapter
+    ):
+        """[20260301_TEST] Tiers should have different limits for the same tools."""
+        # get_call_graph has known limit differences (from limits.toml)
+        community_limits = community_adapter.get_tool_limits("get_call_graph")
+        pro_limits = pro_adapter.get_tool_limits("get_call_graph")
+
+        # Community: max_depth=10; Pro: max_depth=-1 (unlimited)
+        assert community_limits.get("max_depth") == 10
+        assert pro_limits.get("max_depth") == -1
 
 
 class TestAllAdaptersFixture:
@@ -121,18 +124,20 @@ class TestAllAdaptersFixture:
         assert tiers == {"community", "pro", "enterprise"}
 
     def test_all_adapters_correct_tool_counts(self, all_adapters: list[TierAdapter]):
-        """Each adapter should have correct tool count."""
-        tier_to_count = {
-            adapter.get_tier(): len(adapter.get_available_tools())
-            for adapter in all_adapters
-        }
-        assert tier_to_count["community"] == 22
-        assert tier_to_count["pro"] == 19
-        assert tier_to_count["enterprise"] == 10
+        """[20260301_TEST] Each adapter should have 22 tools (feature-gating)."""
+        for adapter in all_adapters:
+            available_count = len(adapter.get_available_tools())
+            assert (
+                available_count == 22
+            ), f"{adapter.get_tier()} should have 22 tools, got {available_count}"
 
 
 class TestLicensePathFixtures:
-    """Test license path fixtures."""
+    """Test license path fixtures.
+
+    [20260301_TEST] Licenses are available in tests/licenses/.
+    Removed TEST_WITH_LICENSES env var gating.
+    """
 
     def test_pro_license_path_is_path_or_none(self, pro_license_path):
         """Pro license path should be Path or None."""
@@ -144,23 +149,19 @@ class TestLicensePathFixtures:
             enterprise_license_path, Path
         )
 
-    @pytest.mark.skipif(
-        os.environ.get("TEST_WITH_LICENSES") != "true",
-        reason="Licenses not available in this environment",
-    )
     def test_pro_license_path_exists(self, pro_license_path):
-        """Pro license path should exist if available."""
-        if pro_license_path is not None:
-            assert pro_license_path.exists()
+        """[20260301_TEST] Pro license path should exist (tests/licenses/ has test licenses)."""
+        assert (
+            pro_license_path is not None
+        ), "Pro license not found — expected in tests/licenses/"
+        assert pro_license_path.exists()
 
-    @pytest.mark.skipif(
-        os.environ.get("TEST_WITH_LICENSES") != "true",
-        reason="Licenses not available in this environment",
-    )
     def test_enterprise_license_path_exists(self, enterprise_license_path):
-        """Enterprise license path should exist if available."""
-        if enterprise_license_path is not None:
-            assert enterprise_license_path.exists()
+        """[20260301_TEST] Enterprise license path should exist (tests/licenses/ has test licenses)."""
+        assert (
+            enterprise_license_path is not None
+        ), "Enterprise license not found — expected in tests/licenses/"
+        assert enterprise_license_path.exists()
 
 
 class TestWithCommunityTierFixture:
@@ -177,34 +178,27 @@ class TestWithCommunityTierFixture:
         original = "test_original_path"
         os.environ["CODE_SCALPEL_LICENSE_PATH"] = original
 
-        # Import here to use the fixture
-
-        # Can't directly test restoration without using the fixture,
-        # but the fixture code shows it does this
+        # Can't directly test restoration without calling the fixture,
+        # but the fixture code handles save/restore via try/finally.
+        # Clean up our test env var
+        os.environ.pop("CODE_SCALPEL_LICENSE_PATH", None)
 
 
 class TestWithProLicenseFixture:
-    """Test with_pro_license context manager fixture."""
+    """Test with_pro_license context manager fixture.
 
-    @pytest.mark.skipif(
-        os.environ.get("TEST_WITH_LICENSES") != "true",
-        reason="Pro license not available",
-    )
+    [20260301_TEST] Removed TEST_WITH_LICENSES gating — license files are
+    always available in tests/licenses/.
+    """
+
     def test_with_pro_license_sets_env_var(self, with_pro_license):
         """with_pro_license should set CODE_SCALPEL_LICENSE_PATH."""
-        # Inside the fixture, license path should be set
         license_path = os.environ.get("CODE_SCALPEL_LICENSE_PATH")
         assert license_path is not None
         assert license_path == str(with_pro_license)
 
-    @pytest.mark.skipif(
-        os.environ.get("TEST_WITH_LICENSES") != "true",
-        reason="Pro license not available",
-    )
     def test_with_pro_license_sets_correct_path(self, with_pro_license):
         """with_pro_license should set the correct pro license path."""
-        from pathlib import Path
-
         license_path_str = os.environ.get("CODE_SCALPEL_LICENSE_PATH")
         assert license_path_str is not None
         license_path = Path(license_path_str)
@@ -212,27 +206,20 @@ class TestWithProLicenseFixture:
 
 
 class TestWithEnterpriseLicenseFixture:
-    """Test with_enterprise_license context manager fixture."""
+    """Test with_enterprise_license context manager fixture.
 
-    @pytest.mark.skipif(
-        os.environ.get("TEST_WITH_LICENSES") != "true",
-        reason="Enterprise license not available",
-    )
+    [20260301_TEST] Removed TEST_WITH_LICENSES gating — license files are
+    always available in tests/licenses/.
+    """
+
     def test_with_enterprise_license_sets_env_var(self, with_enterprise_license):
         """with_enterprise_license should set CODE_SCALPEL_LICENSE_PATH."""
-        # Inside the fixture, license path should be set
         license_path = os.environ.get("CODE_SCALPEL_LICENSE_PATH")
         assert license_path is not None
         assert license_path == str(with_enterprise_license)
 
-    @pytest.mark.skipif(
-        os.environ.get("TEST_WITH_LICENSES") != "true",
-        reason="Enterprise license not available",
-    )
     def test_with_enterprise_license_sets_correct_path(self, with_enterprise_license):
         """with_enterprise_license should set the correct enterprise license path."""
-        from pathlib import Path
-
         license_path_str = os.environ.get("CODE_SCALPEL_LICENSE_PATH")
         assert license_path_str is not None
         license_path = Path(license_path_str)
@@ -246,37 +233,38 @@ class TestTierAwareParametrization:
     def test_tier_aware_runs_all_tiers(self, tier_adapter: TierAdapter):
         """Test marked tier_aware should run for all tiers."""
         # This test will run 3 times - once per tier
-        # We verify the adapter is correctly set
         assert tier_adapter.get_tier() in ("community", "pro", "enterprise")
 
     @pytest.mark.tier_aware
     def test_tier_aware_receives_correct_tier(self, tier_adapter: TierAdapter):
-        """Each tier_aware test should receive correct tier."""
+        """[20260301_TEST] Each tier should have all 22 tools (feature-gating)."""
         tier = tier_adapter.get_tier()
         assert tier in ("community", "pro", "enterprise")
 
-        # Verify tier has expected tool count
+        # All tiers have 22 tools in the feature-gating model
         available_count = len(tier_adapter.get_available_tools())
-        if tier == "community":
-            assert available_count == 22
-        elif tier == "pro":
-            assert available_count == 19
-        elif tier == "enterprise":
-            assert available_count == 10
+        assert (
+            available_count == 22
+        ), f"{tier} should have 22 tools, got {available_count}"
 
     @pytest.mark.tier_aware
     def test_tier_aware_with_tier_specific_assertions(self, tier_adapter: TierAdapter):
-        """tier_aware test can use tier-specific assertions."""
+        """[20260301_TEST] All tiers have all tools; verify limit differences."""
         tier = tier_adapter.get_tier()
 
-        # These assertions should work for all tiers
-        tier_adapter.assert_tool_available("analyze_code")  # Available in all
+        # All tools available in all tiers
+        tier_adapter.assert_tool_available("analyze_code")
+        tier_adapter.assert_tool_available("get_file_context")
+        tier_adapter.assert_tool_available("security_scan")
 
-        # Tier-specific availability
-        if tier in ("community", "pro"):
-            tier_adapter.assert_tool_available("get_file_context")
-        else:
-            tier_adapter.assert_tool_unavailable("get_file_context")
+        # Tiers differ in limits, not availability
+        limits = tier_adapter.get_tool_limits("get_call_graph")
+        if tier == "community":
+            assert limits.get("max_depth") == 10
+            assert limits.get("max_nodes") == 200
+        elif tier == "pro":
+            assert limits.get("max_depth") == -1
+            assert limits.get("max_nodes") == -1
 
 
 class TestFixtureIntegration:
@@ -285,16 +273,14 @@ class TestFixtureIntegration:
     def test_multiple_adapters_independently_available(
         self, community_adapter, pro_adapter, enterprise_adapter
     ):
-        """Multiple adapter fixtures should work independently."""
-        # All should have analyze_code
-        community_adapter.assert_tool_available("analyze_code")
-        pro_adapter.assert_tool_available("analyze_code")
-        enterprise_adapter.assert_tool_available("analyze_code")
-
-        # get_file_context should be locked in enterprise
-        community_adapter.assert_tool_available("get_file_context")
-        pro_adapter.assert_tool_available("get_file_context")
-        enterprise_adapter.assert_tool_unavailable("get_file_context")
+        """[20260301_TEST] All adapters should have all 22 tools available."""
+        # All tools available at all tiers (feature-gating model)
+        for adapter in [community_adapter, pro_adapter, enterprise_adapter]:
+            adapter.assert_tool_available("analyze_code")
+            adapter.assert_tool_available("get_file_context")
+            adapter.assert_tool_available("security_scan")
+            adapter.assert_tool_available("get_call_graph")
+            assert len(adapter.get_available_tools()) == 22
 
     def test_clear_all_caches_with_adapters(
         self, clear_all_caches, community_adapter, pro_adapter

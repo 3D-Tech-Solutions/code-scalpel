@@ -1,6 +1,6 @@
 [project]
 name = "codescalpel"
-version = "2.0.2"
+version = "2.1.0"
 description = "MCP server toolkit for AI agents - surgical code analysis and modification"
 readme = "README.md"
 license = {text = "MIT"}
@@ -54,6 +54,7 @@ dependencies = [
     "tree-sitter-c>=0.21.0",           # [20260224_FEATURE] v2.0.0 C language support
     "tree-sitter-cpp>=0.21.0",         # [20260224_FEATURE] v2.0.0 C++ language support
     "tree-sitter-c-sharp>=0.21.0",     # [20260224_FEATURE] v2.0.0 C# language support
+    "tree-sitter-go>=0.21.0",          # [20260302_FEATURE] Go language support
     "structlog>=24.1.0",  # [20251216_FEATURE] v2.2.0 Structured MCP logging
     "PyJWT[crypto]>=2.10.1",  # [20251230_BUGFIX] Align with MCP requirement for JWT validation
     "cryptography>=42.0.0",  # [20251225_FEATURE] v3.3.0 RSA key support for JWT; [20260218_SECURITY] bump >=42.0.0 (CVE-2024-26130 fixed in 42.x)
@@ -87,6 +88,7 @@ all = [
     "tree-sitter-c>=0.21.0",           # [20260224_FEATURE] v2.0.0 C language support
     "tree-sitter-cpp>=0.21.0",         # [20260224_FEATURE] v2.0.0 C++ language support
     "tree-sitter-c-sharp>=0.21.0",     # [20260224_FEATURE] v2.0.0 C# language support
+    "tree-sitter-go>=0.21.0",          # [20260302_FEATURE] Go language support
 ]
 polyglot = [
     "tree-sitter>=0.21.0",
@@ -96,6 +98,7 @@ polyglot = [
     "tree-sitter-c>=0.21.0",           # [20260224_FEATURE] v2.0.0 C language support
     "tree-sitter-cpp>=0.21.0",         # [20260224_FEATURE] v2.0.0 C++ language support
     "tree-sitter-c-sharp>=0.21.0",     # [20260224_FEATURE] v2.0.0 C# language support
+    "tree-sitter-go>=0.21.0",          # [20260302_FEATURE] Go language support
 ]
 dev = [
     "pytest>=7.0.0",

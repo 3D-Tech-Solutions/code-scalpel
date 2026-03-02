@@ -120,7 +120,7 @@ class ComplianceReportBuilder:
     def _assemble_html(self) -> str:
         parts: list[str] = []
         parts.append(self._html_head())
-        parts.append('<body>')
+        parts.append("<body>")
 
         # Cover page
         parts.append(self._cover_page())
@@ -142,7 +142,7 @@ class ComplianceReportBuilder:
         # Metadata / signature page
         parts.append(self._metadata_page())
 
-        parts.append('</body></html>')
+        parts.append("</body></html>")
         return "\n".join(parts)
 
     # ── <head> ────────────────────────────────────────────────────────────────
@@ -834,8 +834,8 @@ tr:hover td {{
         cert_html = ""
         if result.certifications:
             cert_rows = "".join(
-                f'<tr><td><strong>{html_lib.escape(c.standard)}</strong></td>'
-                f'<td>{html_lib.escape(c.certificate_id)}</td>'
+                f"<tr><td><strong>{html_lib.escape(c.standard)}</strong></td>"
+                f"<td>{html_lib.escape(c.certificate_id)}</td>"
                 f'<td>{c.issued_date.strftime("%Y-%m-%d")}</td>'
                 f'<td>{c.valid_until.strftime("%Y-%m-%d")}</td></tr>'
                 for c in result.certifications
@@ -978,7 +978,9 @@ tr:hover td {{
             badge_sev = _SEVERITY_BADGE.get(sev, sev)
             rule_id = html_lib.escape(f.get("rule_id", f.get("pattern_id", "")))
             msg = html_lib.escape(f.get("message", f.get("description", "")))
-            fix = html_lib.escape(f.get("suggestion", f.get("recommendation", "")) or "")
+            fix = html_lib.escape(
+                f.get("suggestion", f.get("recommendation", "")) or ""
+            )
             file_ref = html_lib.escape(f.get("file", ""))
             line_ref = f.get("line", "")
             std = html_lib.escape(f.get("_standard", ""))

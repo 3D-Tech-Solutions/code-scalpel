@@ -32,6 +32,19 @@ def analyze_file(
             ".mts": "typescript",
             ".cts": "typescript",
             ".java": "java",
+            # [20260302_FEATURE] C/C++/C# extensions added in v2.0.0
+            ".c": "c",
+            ".h": "c",
+            ".cpp": "cpp",
+            ".cc": "cpp",
+            ".cxx": "cpp",
+            ".c++": "cpp",
+            ".hpp": "cpp",
+            ".hxx": "cpp",
+            ".hh": "cpp",
+            ".h++": "cpp",
+            ".inl": "cpp",
+            ".cs": "csharp",
         }
         if ext in extension_map:
             language = extension_map[ext]
@@ -557,7 +570,6 @@ def check_configuration(
         label: str,
         entries: list[tuple[str, str]],
         present: list[str],
-        missing: list[str],
         missing_icon: str,
     ) -> None:
         print(f"{label}")
@@ -581,9 +593,9 @@ def check_configuration(
                 print(f"         {desc_map[name]}")
         print()
 
-    _print_group("Required files:", REQUIRED, req_present, req_missing, "❌")
-    _print_group("Recommended files:", RECOMMENDED, rec_present, rec_missing, "⚠️ ")
-    _print_group("Optional files:", OPTIONAL, opt_present, opt_missing, "○ ")
+    _print_group("Required files:", REQUIRED, req_present, "❌")
+    _print_group("Recommended files:", RECOMMENDED, rec_present, "⚠️ ")
+    _print_group("Optional files:", OPTIONAL, opt_present, "○ ")
 
     # ------------------------------------------------------------------ #
     # Integrity warnings                                                   #

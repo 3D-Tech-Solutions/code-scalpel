@@ -33,7 +33,8 @@ For AI agent integrations:
 # [20260224_RELEASE] v2.0.0 - Polyglot Expansion: full C, C++, C# support (tree-sitter parsers, IR normalizers, MCP adapters)
 # [20260225_RELEASE] v2.0.1 - Patch: documentation updates, wiki changelog backfill, packaging fix
 # [20260225_RELEASE] v2.0.2 - C/C++/C# capabilities extended to unified_sink_detect, generate_unit_tests, code_policy_check, scan_dependencies
-__version__ = "2.0.2"
+# [20260302_RELEASE] v2.1.0 - Go language support (GoNormalizer, GoVisitor, GoParserAdapter, tree-sitter-go)
+__version__ = "2.1.0"
 __author__ = "Timmothy Escolopio"
 __email__ = "time@3dtechsolutions.us"
 

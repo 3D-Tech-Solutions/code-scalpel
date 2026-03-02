@@ -42,6 +42,7 @@ class Language(Enum):
     C = "c"  # [20260224_FEATURE] C language support
     CPP = "cpp"  # [20260224_FEATURE] C++ language support
     CSHARP = "csharp"  # [20260224_FEATURE] C# language support
+    GO = "go"  # [20260302_FEATURE] Go language support
     AUTO = "auto"  # Auto-detect from file extension
 
 
@@ -73,6 +74,8 @@ EXTENSION_MAP: dict[str, Language] = {
     ".inl": Language.CPP,
     # [20260224_FEATURE] C# extension
     ".cs": Language.CSHARP,
+    # [20260302_FEATURE] Go extension
+    ".go": Language.GO,
 }
 
 
@@ -149,6 +152,14 @@ def detect_language(file_path: str | None, code: str | None = None) -> Language:
             and "#include" not in code
         ):
             return Language.CSHARP
+
+        # [20260302_FEATURE] Go indicators — check BEFORE Java because "package " appears
+        # in both languages; "func " and "package main" are unambiguous Go keywords.
+        if any(
+            kw in code
+            for kw in ["package main", "func ", "import (", "fmt.Println", "fmt.Printf"]
+        ):
+            return Language.GO
 
         # Java indicators
         if "public class " in code or "private class " in code or "package " in code:
@@ -288,6 +299,8 @@ class PolyglotExtractor:
             self._parse_cpp()  # [20260224_FEATURE]
         elif self.language == Language.CSHARP:
             self._parse_csharp()  # [20260224_FEATURE]
+        elif self.language == Language.GO:
+            self._parse_go()  # [20260302_FEATURE]
         else:
             raise ValueError(f"Unsupported language: {self.language}")
 
@@ -404,6 +417,18 @@ class PolyglotExtractor:
         from code_scalpel.ir.normalizers.csharp_normalizer import CSharpNormalizer
 
         normalizer = CSharpNormalizer()
+        self._ir_module = normalizer.normalize(self.code)
+
+    def _parse_go(self) -> None:
+        """
+        Parse Go code using tree-sitter-go.
+
+        [20260302_FEATURE] Go language support for extracting functions, methods,
+        structs, and interfaces from .go files.
+        """
+        from code_scalpel.ir.normalizers.go_normalizer import GoNormalizer
+
+        normalizer = GoNormalizer()
         self._ir_module = normalizer.normalize(self.code)
 
     def extract(

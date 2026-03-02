@@ -30,6 +30,7 @@ languages = [
     "c",
     "cpp",
     "csharp",
+    "go",
 ]
 
 [community.get_file_context]
@@ -88,6 +89,8 @@ languages = [
     "java",
     "c",
     "cpp",
+    "csharp",
+    "go",
 ]
 max_sinks = 50
 
@@ -158,6 +161,7 @@ languages = [
     "c",
     "cpp",
     "csharp",
+    "go",
 ]
 
 [pro.get_file_context]
@@ -202,6 +206,8 @@ languages = [
     "java",
     "c",
     "cpp",
+    "csharp",
+    "go",
 ]
 max_sinks = -1               # Unlimited (match Enterprise)
 
@@ -366,6 +372,8 @@ languages = [
     "java",
     "c",
     "cpp",
+    "csharp",
+    "go",
 ]
 max_sinks = -1               # Fixed: was 50 (same as Community)
 

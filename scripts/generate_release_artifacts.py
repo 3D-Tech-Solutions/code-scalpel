@@ -8,11 +8,11 @@ files in release_artifacts/v{VERSION}/.
 Usage:
     python scripts/generate_release_artifacts.py [--version VERSION]
 """
+
 from __future__ import annotations
 
 import argparse
 import json
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -115,8 +115,7 @@ def generate_artifacts(version: str, project_root: Path) -> None:
                 "status": "passed",
                 "errors": 0,
                 "note": (
-                    "Fixed 1 F541 f-string-missing-placeholders "
-                    "in report_builder.py"
+                    "Fixed 1 F541 f-string-missing-placeholders " "in report_builder.py"
                 ),
             },
             "black_format": {
@@ -156,11 +155,9 @@ def generate_artifacts(version: str, project_root: Path) -> None:
             "fixed": [
                 "Regenerated capabilities/*.json from limits.toml "
                 "(54 mismatches -> 0)",
-                "Corrected tool count from 23 to 22 across "
-                "capabilities/README.md",
+                "Corrected tool count from 23 to 22 across " "capabilities/README.md",
                 "Removed false Go/Rust/Ruby/PHP language claims from pro.json",
-                "Added missing C/C++/C# languages to community.json "
-                "analyze_code",
+                "Added missing C/C++/C# languages to community.json " "analyze_code",
                 "Fixed F541 ruff lint error in report_builder.py "
                 "(f-string without placeholders)",
                 "Fixed black formatting in report_builder.py",

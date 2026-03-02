@@ -452,13 +452,23 @@ def _code_policy_check_sync(
     generate_report: bool,
     tier: str,
     capabilities: dict[str, Any],
+    report_config: dict[str, Any] | None = None,
 ) -> CodePolicyCheckResult:
     """Synchronous implementation of code_policy_check."""
     from code_scalpel.policy_engine.code_policy_check import CodePolicyChecker
+    from code_scalpel.policy_engine.code_policy_check.models import ReportConfig
+
+    rc: ReportConfig | None = None
+    if report_config and tier == "enterprise":
+        try:
+            rc = ReportConfig.from_dict(report_config)
+        except Exception:
+            rc = None
 
     checker = CodePolicyChecker(
         tier=tier,
         compliance_standards=compliance_standards,
+        report_config=rc,
     )
 
     result = checker.check_files(

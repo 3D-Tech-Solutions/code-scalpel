@@ -214,6 +214,8 @@ async def extract_code(
 | Ruby | `tree-sitter-ruby` | AST parsing |
 | PHP | `tree-sitter-php` | AST parsing |
 
+**Adding a new language?** See [Adding-A-Language.md](Adding-A-Language.md) for the complete integration checklist. Language-specific guides are available for [Kotlin](Adding-Kotlin.md), [Ruby](Adding-Ruby.md), [Rust](Adding-Rust.md), and [Swift](Adding-Swift.md).
+
 **Parser Architecture:**
 ```python
 # src/code_scalpel/ast_tools/parser.py

@@ -46,7 +46,7 @@ async def unified_sink_detect(
     **Args:**
         code (str): Source code to scan for sinks.
         language (str): Programming language. Default: "auto" (auto-detect).
-                       Supported: python, javascript, typescript, java
+                       Supported: python, javascript, typescript, java, c, cpp, csharp, go
         confidence_threshold (float): Minimum confidence score (0.0-1.0). Default: 0.7 (70%).
 
     **Returns:**
