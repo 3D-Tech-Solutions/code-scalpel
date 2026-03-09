@@ -6,6 +6,7 @@ import asyncio
 import difflib
 import os
 import time
+from typing import Any
 from importlib import import_module
 from pathlib import Path
 
@@ -19,76 +20,240 @@ from code_scalpel.mcp.v1_1_kernel_adapter import get_adapter
 mcp = import_module("code_scalpel.mcp.protocol").mcp
 
 
-_ENTERPRISE_EXEC_TOOLS = {"coverity", "sonarqube", "sonar", "sonar-cpp"}
-_COMMUNITY_MAX_TOOL_FINDINGS = 50
+# [20260305_REFACTOR] Polyglot dispatch extracted to shared helper.
+# Import with distinct names to avoid shadowing by the thin wrapper defs below.
+from code_scalpel.mcp.helpers.polyglot_dispatch import (
+    ENTERPRISE_EXEC_TOOLS as _ENTERPRISE_EXEC_TOOLS,
+    COMMUNITY_MAX_TOOL_FINDINGS as _COMMUNITY_MAX_TOOL_FINDINGS,
+    call_parser_method as _call_parser_method,
+    dispatch_tools as _polyglot_dispatch_tools,
+    run_static_tools as _polyglot_run_static_tools,
+)
+
 
 
 def _run_static_tools(file_path: str, tools: list[str], tier: str) -> list[dict]:
     """Synchronously dispatch to language tool parsers and return merged findings.
 
     [20260303_REFACTOR] Moved from standalone run_static_analysis tool into analyze_code.
-    Supports C++ tools via CppParserRegistry.  Language determined from file extension.
-    Enterprise-only tools (coverity, sonarqube) are skipped unless tier == 'enterprise'.
+    [20260304_FEATURE] Added C# dispatch alongside C++ — language determined from extension.
+    [20260304_FEATURE] Added Go dispatch (gofmt, golint, govet, staticcheck, golangci, gosec).
+    [20260304_FEATURE] Full polyglot: Python, JS/TS, Java, Ruby, Swift, Kotlin, PHP dispatch.
+    Enterprise-only tools (coverity, sonarqube, resharper) skipped unless tier == 'enterprise'.
     Community tier caps total findings at 50.
     """
     import dataclasses
     from pathlib import Path as _Path
 
     ext = _Path(file_path).suffix.lower()
+
+    # ── Extension sets for every supported language ────────────────────────────
     cpp_exts = {".cpp", ".cc", ".cxx", ".c++", ".c", ".h", ".hpp", ".hxx", ".hh", ".inl"}
-    if ext not in cpp_exts:
-        # No tool parsers wired for non-C++ languages yet.
+    cs_exts = {".cs"}
+    go_exts = {".go"}
+    py_exts = {".py", ".pyw"}
+    js_exts = {".js", ".jsx", ".mjs", ".cjs"}
+    ts_exts = {".ts", ".tsx"}
+    java_exts = {".java"}
+    rb_exts = {".rb", ".rake", ".gemspec"}
+    swift_exts = {".swift"}
+    kotlin_exts = {".kt", ".kts"}
+    php_exts = {".php", ".php3", ".php4", ".php5", ".phtml"}
+
+    _all_known = (
+        cpp_exts | cs_exts | go_exts | py_exts | js_exts | ts_exts
+        | java_exts | rb_exts | swift_exts | kotlin_exts | php_exts
+    )
+    if ext not in _all_known:
         return []
 
-    from code_scalpel.code_parsers.cpp_parsers import CppParserRegistry
-
-    registry = CppParserRegistry()
     all_findings: list[dict] = []
-    _TOOL_EXEC_METHODS = {
-        "cppcheck": "execute_cppcheck",
-        "clang-tidy": "execute_clang_tidy",
-        "clang_tidy": "execute_clang_tidy",
-        "clang-sa": "execute_scan_build",
-        "clang-static-analyzer": "execute_scan_build",
-        "cpplint": "execute_cpplint",
-        "coverity": "execute_coverity",
-        "sonarqube": "execute_sonarqube",
-        "sonar": "execute_sonarqube",
-    }
 
-    for tool in tools:
-        tool_key = tool.lower()
-        if tool_key in _ENTERPRISE_EXEC_TOOLS and tier != "enterprise":
-            all_findings.append({
-                "tool": tool_key,
-                "skipped": True,
-                "reason": f"Executing '{tool_key}' requires Enterprise tier.",
-            })
-            continue
-        try:
-            parser = registry.get_parser(tool_key)
-        except (ValueError, Exception):
-            continue
-        method_name = _TOOL_EXEC_METHODS.get(tool_key)
-        if not method_name or not hasattr(parser, method_name):
-            continue
-        try:
-            raw = getattr(parser, method_name)([file_path]) or []
-        except (NotImplementedError, Exception):
-            continue
-        for f in raw:
-            if hasattr(f, "__dataclass_fields__"):
-                all_findings.append(dataclasses.asdict(f))
-            elif hasattr(f, "model_dump"):
-                all_findings.append(f.model_dump())
-            elif hasattr(f, "__dict__"):
-                all_findings.append({k: v for k, v in f.__dict__.items() if not k.startswith("_")})
-            else:
-                all_findings.append({"value": str(f)})
+    # ── C++ ──────────────────────────────────────────────────────────────────
+    if ext in cpp_exts:
+        from code_scalpel.code_parsers.cpp_parsers import CppParserRegistry
+
+        registry = CppParserRegistry()
+        _TOOL_EXEC_METHODS: dict[str, str] = {
+            "cppcheck": "execute_cppcheck",
+            "clang-tidy": "execute_clang_tidy",
+            "clang_tidy": "execute_clang_tidy",
+            "clang-sa": "execute_scan_build",
+            "clang-static-analyzer": "execute_scan_build",
+            "cpplint": "execute_cpplint",
+            "coverity": "execute_coverity",
+            "sonarqube": "execute_sonarqube",
+            "sonar": "execute_sonarqube",
+            "sonar-cpp": "execute_sonarqube",
+        }
+        all_findings.extend(_dispatch_tools(tools, registry, _TOOL_EXEC_METHODS, file_path, tier))
+
+    # ── C# ────────────────────────────────────────��──────────────────────────
+    elif ext in cs_exts:
+        from code_scalpel.code_parsers.csharp_parsers import CSharpParserRegistry
+
+        registry = CSharpParserRegistry()  # type: ignore[assignment]
+        _TOOL_EXEC_METHODS = {
+            "roslyn": "execute_roslyn",
+            "stylecop": "execute_stylecop",
+            "scs": "execute_scs",
+            "security-code-scan": "execute_scs",
+            "fxcop": "execute_fxcop",
+            "resharper": "execute_resharper",
+            "sonarqube": "execute_sonarqube",
+            "sonar": "execute_sonarqube",
+        }
+        all_findings.extend(_dispatch_tools(tools, registry, _TOOL_EXEC_METHODS, file_path, tier))
+
+    # ── Go ───────────────────────────────────────────────────────────────────
+    elif ext in go_exts:
+        from code_scalpel.code_parsers.go_parsers import GoParserRegistry
+
+        registry = GoParserRegistry()  # type: ignore[assignment]
+        _TOOL_EXEC_METHODS = {
+            "gofmt": "execute_gofmt",
+            "golint": "execute_golint",
+            "govet": "execute_govet",
+            "staticcheck": "execute_staticcheck",
+            "golangci": "execute_golangci_lint",
+            "golangci-lint": "execute_golangci_lint",
+            "gosec": "execute_gosec",
+        }
+        all_findings.extend(_dispatch_tools(tools, registry, _TOOL_EXEC_METHODS, file_path, tier))
+
+    # ── Python ───────────────────────────────────────────────────────────────
+    elif ext in py_exts:
+        from code_scalpel.code_parsers.python_parsers import PythonParserRegistry
+
+        registry = PythonParserRegistry()  # type: ignore[assignment]
+        _TOOL_EXEC_METHODS = {
+            "vulture": "execute_vulture",
+            "isort": "execute_isort",
+            "radon": "execute_radon_cc",
+            "radon-cc": "execute_radon_cc",
+            "radon-mi": "execute_radon_mi",
+            "pip-audit": "execute_pip_audit",
+            "safety": "execute_pip_audit",
+            "interrogate": "execute_interrogate",
+        }
+        all_findings.extend(
+            _dispatch_tools(tools, registry, _TOOL_EXEC_METHODS, file_path, tier, call_style="single_str")
+        )
+
+    # ── JavaScript (JS tools operate on the project directory, not the file) ─
+    elif ext in js_exts:
+        from code_scalpel.code_parsers.javascript_parsers import JavaScriptParserRegistry
+
+        registry = JavaScriptParserRegistry()  # type: ignore[assignment]
+        _TOOL_EXEC_METHODS = {
+            "npm-audit": "execute_npm_audit",
+            "npm_audit": "execute_npm_audit",
+        }
+        project_dir = str(_Path(file_path).parent)
+        all_findings.extend(
+            _dispatch_tools(tools, registry, _TOOL_EXEC_METHODS, project_dir, tier, call_style="single_str")
+        )
+
+    # ── TypeScript (shares JS tools and project-dir convention) ──────────────
+    elif ext in ts_exts:
+        from code_scalpel.code_parsers.javascript_parsers import JavaScriptParserRegistry
+
+        registry = JavaScriptParserRegistry()  # type: ignore[assignment]
+        _TOOL_EXEC_METHODS = {
+            "npm-audit": "execute_npm_audit",
+            "npm_audit": "execute_npm_audit",
+        }
+        project_dir = str(_Path(file_path).parent)
+        all_findings.extend(
+            _dispatch_tools(tools, registry, _TOOL_EXEC_METHODS, project_dir, tier, call_style="single_str")
+        )
+
+    # ── Java ─────────────────────────────────────────────────────────────────
+    elif ext in java_exts:
+        from code_scalpel.code_parsers.java_parsers import JavaParserRegistry
+
+        registry = JavaParserRegistry()  # type: ignore[assignment]
+        _TOOL_EXEC_METHODS = {
+            "semgrep": "execute_semgrep",
+        }
+        all_findings.extend(
+            _dispatch_tools(tools, registry, _TOOL_EXEC_METHODS, file_path, tier, call_style="single_str")
+        )
+
+    # ── Ruby ─────────────────────────────────────────────────────────────────
+    elif ext in rb_exts:
+        from code_scalpel.code_parsers.ruby_parsers import RubyParserRegistry
+
+        registry = RubyParserRegistry()  # type: ignore[assignment]
+        _TOOL_EXEC_METHODS = {
+            "rubocop": "execute_rubocop",
+            "reek": "execute_reek",
+            "brakeman": "execute_brakeman",
+            "fasterer": "execute_fasterer",
+        }
+        all_findings.extend(
+            _dispatch_tools(tools, registry, _TOOL_EXEC_METHODS, file_path, tier, call_style="list_path")
+        )
+
+    # ── Swift ────────────────────────────────────────────────────────────────
+    elif ext in swift_exts:
+        from code_scalpel.code_parsers.swift_parsers import SwiftParserRegistry
+
+        registry = SwiftParserRegistry()  # type: ignore[assignment]
+        _TOOL_EXEC_METHODS = {
+            "swiftlint": "execute_swiftlint",
+            "tailor": "execute_tailor",
+            "sourcekitten": "execute_sourcekitten",
+            "swiftformat": "execute_swiftformat",
+        }
+        all_findings.extend(
+            _dispatch_tools(tools, registry, _TOOL_EXEC_METHODS, file_path, tier, call_style="list_path")
+        )
+
+    # ── Kotlin ───────────────────────────────────────────────────────────────
+    elif ext in kotlin_exts:
+        from code_scalpel.code_parsers.kotlin_parsers import KotlinParserRegistry
+
+        registry = KotlinParserRegistry()  # type: ignore[assignment]
+        _TOOL_EXEC_METHODS = {
+            "diktat": "execute_diktat",
+            "compose": "execute_compiler_analysis",
+        }
+        all_findings.extend(
+            _dispatch_tools(tools, registry, _TOOL_EXEC_METHODS, file_path, tier, call_style="single_path")
+        )
+
+    # ── PHP ──────────────────────────────────────────────────────────────────
+    elif ext in php_exts:
+        from code_scalpel.code_parsers.php_parsers import PHPParserRegistry
+
+        registry = PHPParserRegistry()  # type: ignore[assignment]
+        _TOOL_EXEC_METHODS = {
+            "phpcs": "execute_phpcs",
+            "phpstan": "execute_phpstan",
+            "psalm": "execute_psalm",
+            "phpmd": "execute_phpmd",
+            "exakat": "execute_exakat",
+        }
+        all_findings.extend(
+            _dispatch_tools(tools, registry, _TOOL_EXEC_METHODS, file_path, tier, call_style="single_str")
+        )
 
     if tier == "community" and len(all_findings) > _COMMUNITY_MAX_TOOL_FINDINGS:
         all_findings = all_findings[:_COMMUNITY_MAX_TOOL_FINDINGS]
     return all_findings
+
+
+def _dispatch_tools(
+    tools: list[str],
+    registry: Any,
+    exec_map: dict[str, str],
+    file_path: str,
+    tier: str,
+    call_style: str = "list_str",
+) -> list[dict]:
+    """[20260305_REFACTOR] Thin wrapper — delegates to polyglot_dispatch.dispatch_tools."""
+    return _polyglot_dispatch_tools(tools, registry, exec_map, file_path, tier, call_style)
 
 
 def _get_project_files(project_root: str | Path, max_files: int = 1000) -> list[str]:
@@ -240,7 +405,7 @@ async def analyze_code(
     **Args:**
         code (str, optional): Source code to analyze. Either code or file_path required.
         language (str): Programming language for analysis. Default: "auto" (auto-detect).
-                       Supported: python, javascript, typescript, java, c, cpp, csharp, go
+                       Supported: python, javascript, typescript, java, c, cpp, csharp, go, kotlin, php, ruby, swift, rust
         file_path (str, optional): Path to file to analyze. Either code or file_path required.
         static_tools (list[str], optional): External static-analysis tools to run against
             file_path in addition to AST analysis.  Requires file_path.

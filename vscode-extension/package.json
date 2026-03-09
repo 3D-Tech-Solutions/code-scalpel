@@ -1,132 +1,135 @@
 {
-  "name": "code-scalpel",
-  "displayName": "Code Scalpel",
-  "description": "MCP server toolkit for AI agents - surgical code analysis for Python, JS, TS, Java, C, C++, and C# with security scanning and intelligent refactoring",
-  "version": "2.0.2",
-  "publisher": "3DTechus",
-  "icon": "images/icon.png",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/3D-Tech-Solutions/code-scalpel.git"
-  },
-  "engines": {
-    "vscode": "^1.85.0"
-  },
-  "extensionKind": ["workspace"],
-  "categories": [
-    "Programming Languages",
-    "Linters",
-    "Other"
-  ],
-  "keywords": [
-    "mcp",
-    "mcp-server",
-    "code-analysis",
-    "refactoring",
-    "security",
-    "agent",
-    "ai-agents",
-    "llm",
-    "tool-use",
-    "ast",
-    "static-analysis"
-  ],
-  "activationEvents": [
-    "onStartupFinished"
-  ],
-  "main": "./out/extension.js",
-  "contributes": {
-    "commands": [
-      {
-        "command": "codeScalpel.startServer",
-        "title": "Code Scalpel: Start MCP Server"
-      },
-      {
-        "command": "codeScalpel.stopServer",
-        "title": "Code Scalpel: Stop MCP Server"
-      },
-      {
-        "command": "codeScalpel.analyzeFile",
-        "title": "Code Scalpel: Analyze Current File"
-      },
-      {
-        "command": "codeScalpel.securityScan",
-        "title": "Code Scalpel: Security Scan Project"
-      },
-      {
-        "command": "codeScalpel.showStatus",
-        "title": "Code Scalpel: Show Server Status"
-      }
-    ],
-    "configuration": {
-      "title": "Code Scalpel",
-      "properties": {
-        "codeScalpel.pythonPath": {
-          "type": "string",
-          "default": "python",
-          "description": "Path to Python executable (requires Python 3.10+)"
-        },
-        "codeScalpel.serverPort": {
-          "type": "number",
-          "default": 8765,
-          "description": "Port for the MCP server"
-        },
-        "codeScalpel.autoStart": {
-          "type": "boolean",
-          "default": false,
-          "description": "Automatically start MCP server when VS Code opens"
-        },
-        "codeScalpel.tier": {
-          "type": "string",
-          "enum": ["community", "pro", "enterprise"],
-          "default": "community",
-          "description": "License tier (community is free)"
-        },
-        "codeScalpel.licensePath": {
-          "type": "string",
-          "default": "",
-          "description": "Path to license file (for Pro/Enterprise tiers)"
-        }
-      }
+    "name": "code-scalpel",
+    "displayName": "Code Scalpel",
+    "description": "22-core-tool MCP server toolkit for AI agents with surgical code analysis, security scanning, and intelligent refactoring across Python, JS, TS, Java, C, C++, and C#",
+    "version": "2.1.1",
+    "publisher": "3DTechus",
+    "icon": "images/icon.png",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/3D-Tech-Solutions/code-scalpel.git"
     },
-    "menus": {
-      "editor/context": [
-        {
-          "command": "codeScalpel.analyzeFile",
-          "group": "codeScalpel"
+    "engines": {
+        "vscode": "^1.85.0"
+    },
+    "extensionKind": [
+        "workspace"
+    ],
+    "categories": [
+        "Programming Languages",
+        "Linters",
+        "Other"
+    ],
+    "keywords": [
+        "mcp",
+        "mcp-server",
+        "code-analysis",
+        "refactoring",
+        "security",
+        "agent",
+        "ai-agents",
+        "llm",
+        "tool-use",
+        "ast",
+        "static-analysis"
+    ],
+    "activationEvents": [
+        "onStartupFinished"
+    ],
+    "main": "./out/extension.js",
+    "contributes": {
+        "commands": [
+            {
+                "command": "codeScalpel.startServer",
+                "title": "Code Scalpel: Start MCP Server"
+            },
+            {
+                "command": "codeScalpel.stopServer",
+                "title": "Code Scalpel: Stop MCP Server"
+            },
+            {
+                "command": "codeScalpel.analyzeFile",
+                "title": "Code Scalpel: Analyze Current File"
+            },
+            {
+                "command": "codeScalpel.securityScan",
+                "title": "Code Scalpel: Security Scan Project"
+            },
+            {
+                "command": "codeScalpel.showStatus",
+                "title": "Code Scalpel: Show Server Status"
+            }
+        ],
+        "configuration": {
+            "title": "Code Scalpel",
+            "properties": {
+                "codeScalpel.pythonPath": {
+                    "type": "string",
+                    "default": "python",
+                    "description": "Path to Python executable (requires Python 3.10+)"
+                },
+                "codeScalpel.serverPort": {
+                    "type": "number",
+                    "default": 8765,
+                    "description": "Port for the MCP server"
+                },
+                "codeScalpel.autoStart": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Automatically start MCP server when VS Code opens"
+                },
+                "codeScalpel.tier": {
+                    "type": "string",
+                    "enum": [
+                        "community",
+                        "pro",
+                        "enterprise"
+                    ],
+                    "default": "community",
+                    "description": "License tier (community is free)"
+                },
+                "codeScalpel.licensePath": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Path to license file (for Pro/Enterprise tiers)"
+                }
+            }
+        },
+        "menus": {
+            "editor/context": [
+                {
+                    "command": "codeScalpel.analyzeFile",
+                    "group": "codeScalpel"
+                }
+            ],
+            "explorer/context": [
+                {
+                    "command": "codeScalpel.securityScan",
+                    "group": "codeScalpel"
+                }
+            ]
         }
-      ],
-      "explorer/context": [
-        {
-          "command": "codeScalpel.securityScan",
-          "group": "codeScalpel"
-        }
-      ]
+    },
+    "scripts": {
+        "vscode:prepublish": "echo 'Using pre-built extension'",
+        "compile": "tsc -p ./ 2>/dev/null || echo 'Skipping TypeScript compilation'",
+        "watch": "tsc -watch -p ./",
+        "pretest": "npm run compile && npm run lint",
+        "lint": "eslint src --ext ts",
+        "test": "node ./out/test/runTest.js",
+        "package": "vsce package",
+        "publish": "vsce publish"
+    },
+    "devDependencies": {
+        "@types/node": "^20.0.0",
+        "@types/vscode": "^1.85.0",
+        "@typescript-eslint/eslint-plugin": "^8.56.0",
+        "@typescript-eslint/parser": "^8.56.0",
+        "@vscode/vsce": "^3.7.1",
+        "eslint": "^9.0.0",
+        "typescript": "^5.3.0"
+    },
+    "overrides": {
+        "minimatch": "3"
     }
-  },
-  "scripts": {
-    "vscode:prepublish": "echo 'Using pre-built extension'",
-    "compile": "tsc -p ./ 2>/dev/null || echo 'Skipping TypeScript compilation'",
-    "watch": "tsc -watch -p ./",
-    "pretest": "npm run compile && npm run lint",
-    "lint": "eslint src --ext ts",
-    "test": "node ./out/test/runTest.js",
-    "package": "vsce package",
-    "publish": "vsce publish"
-  },
-  "devDependencies": {
-    "@types/node": "^20.0.0",
-    "@types/vscode": "^1.85.0",
-    "@typescript-eslint/eslint-plugin": "^8.56.0",
-    "@typescript-eslint/parser": "^8.56.0",
-    "@vscode/vsce": "^3.7.1",
-    "eslint": "^9.0.0",
-    "typescript": "^5.3.0"
-  },
-  "overrides": {
-    "minimatch": "3"
-  },
-  "dependencies": {
-    "@anthropic-ai/sdk": "^0.30.0"
-  }
 }

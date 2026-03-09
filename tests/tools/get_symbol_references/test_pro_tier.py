@@ -107,3 +107,61 @@ def target():
     assert result.success is True
     assert all(ref.file.startswith("src/feature") for ref in result.references)
     assert all("tests/" not in ref.file for ref in result.references)
+
+
+@pytest.mark.asyncio
+async def test_pro_jsts_test_file_filtering(
+    make_project, patch_tier, patch_capabilities
+):
+    """[20260307_TEST] Pro filtering should exclude JS/TS test files when include_tests is false."""
+    import code_scalpel.mcp.tools.context as server
+
+    project = make_project(
+        {
+            "src/feature/use-target.ts": """
+import { target } from "../shared/target"
+
+export function run() {
+    return target()
+}
+""",
+            "src/feature/use-target.spec.ts": """
+import { target } from "../shared/target"
+
+describe("target", () => {
+    it("calls target", () => {
+        target()
+    })
+})
+""",
+            "src/shared/target.ts": """
+export function target() {
+    return 1
+}
+""",
+        }
+    )
+
+    patch_tier("pro")
+    patch_capabilities(
+        {
+            "limits": {},
+            "capabilities": [
+                "usage_categorization",
+                "scope_filtering",
+                "test_file_filtering",
+                "import_classification",
+            ],
+        }
+    )
+
+    result = await server.get_symbol_references(
+        symbol_name="target",
+        project_root=str(project),
+        scope_prefix="src/feature",
+        include_tests=False,
+    )
+
+    assert result.success is True
+    assert any(ref.file == "src/feature/use-target.ts" for ref in result.references)
+    assert all(not ref.file.endswith(".spec.ts") for ref in result.references)

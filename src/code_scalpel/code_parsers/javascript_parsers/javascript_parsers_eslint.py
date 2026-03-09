@@ -565,6 +565,18 @@ class ESLintParser:
         """
         return [v for v in result.violations if v.is_fixable]
 
+    def execute_eslint(self, file_path: str) -> list["ESLintViolation"]:
+        """Run ESLint on *file_path* and return all violations as a flat list.
+
+        [20260304_FEATURE] execute_* wrapper for polyglot_dispatch integration.
+        Returns an empty list if ESLint is not installed or execution fails.
+        """
+        try:
+            result = self.analyze_file(file_path)
+            return result.violations
+        except Exception:
+            return []
+
     def get_errors(self, result: ESLintFileResult) -> list[ESLintViolation]:
         """
         Get only error-severity violations.

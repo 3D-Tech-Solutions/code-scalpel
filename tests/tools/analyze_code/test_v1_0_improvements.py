@@ -7,14 +7,20 @@ Tests added for v1.0 pre-release:
 3. Configuration alignment verification
 """
 
+from importlib.util import find_spec
+
 from code_scalpel.mcp.server import _analyze_code_sync
+
+
+def _parser_module_available(module_name: str) -> bool:
+    return find_spec(module_name) is not None
 
 
 class TestLanguageValidation:
     """Test explicit language validation added in v1.0."""
 
-    def test_unsupported_language_rejected_go(self):
-        """Go should be explicitly rejected with helpful error (not yet implemented)."""
+    def test_supported_language_accepted_go(self):
+        """Go should be analyzed through the shared language dispatch."""
         code = """
 package main
 
@@ -24,13 +30,18 @@ func main() {
 """
         result = _analyze_code_sync(code=code, language="go")
 
-        assert result.success is False
-        assert result.error is not None
-        assert "unsupported language" in result.error.lower()
-        assert "go" in result.error.lower()
+        if _parser_module_available("tree_sitter_go"):
+            assert result.success is True
+            assert result.language_detected == "go"
+            assert "main" in result.functions
+        else:
+            assert result.success is False
+            assert result.error is not None
+            assert "unsupported language" not in result.error.lower()
+            assert "tree_sitter_go" in result.error
 
-    def test_unsupported_language_rejected_rust(self):
-        """Rust should be explicitly rejected with helpful error until Q1 2026."""
+    def test_supported_language_accepted_rust(self):
+        """Rust should be analyzed through the shared language dispatch."""
         code = """
 fn main() {
     println!("Hello");
@@ -38,19 +49,26 @@ fn main() {
 """
         result = _analyze_code_sync(code=code, language="rust")
 
-        assert result.success is False
-        assert result.error is not None
-        assert "unsupported language" in result.error.lower()
-        assert "rust" in result.error.lower()
+        if _parser_module_available("tree_sitter_rust"):
+            assert result.success is True
+            assert result.language_detected == "rust"
+            assert "main" in result.functions
+        else:
+            assert result.success is False
+            assert result.error is not None
+            assert "unsupported language" not in result.error.lower()
+            assert "tree_sitter_rust" in result.error
 
     def test_unsupported_language_lists_supported(self):
         """Error message should list actually supported languages."""
-        result = _analyze_code_sync(code="fn main() {}", language="rust")
+        result = _analyze_code_sync(code="object Main extends App", language="scala")
 
         assert "python" in result.error.lower()
         assert "javascript" in result.error.lower()
         assert "typescript" in result.error.lower()
         assert "java" in result.error.lower()
+        assert "rust" in result.error.lower()
+        assert "swift" in result.error.lower()
 
     def test_supported_language_python_accepted(self):
         """Python should still be accepted."""
@@ -123,6 +141,20 @@ class TestOutputMetadata:
         assert result.success is True
         assert result.language_detected == "python"
 
+    def test_rust_analysis_populates_language_detected(self):
+        """Rust analysis should populate language_detected field."""
+        code = "fn add(a: i32, b: i32) -> i32 { a + b }"
+        result = _analyze_code_sync(code=code, language="rust")
+
+        if _parser_module_available("tree_sitter_rust"):
+            assert result.success is True
+            assert result.language_detected == "rust"
+        else:
+            assert result.success is False
+            assert result.error is not None
+            assert "unsupported language" not in result.error.lower()
+            assert "tree_sitter_rust" in result.error
+
 
 class TestConfigurationAlignment:
     """Test that configuration and implementation are aligned."""
@@ -149,14 +181,12 @@ class TestConfigurationAlignment:
             limits.get("pro", {}).get("analyze_code", {}).get("languages", [])
         )
 
-        # Should NOT contain rust (not yet implemented)
-        assert (
-            "rust" not in pro_langs
-        ), "Pro tier should not advertise Rust until implemented"
-
-        # Should only contain implemented languages
-        # [20260302_FEATURE] Go wired up in v2.1.0 — added to expected set
-        assert pro_langs == {"python", "javascript", "typescript", "java", "c", "cpp", "csharp", "go"}
+        # [20260305_FEATURE] Rust and Swift implemented in v2.1.0 — added to expected set
+        assert pro_langs == {
+            "python", "javascript", "typescript", "java",
+            "c", "cpp", "csharp", "go",
+            "kotlin", "php", "ruby", "swift", "rust",
+        }
 
     def test_community_tier_languages_match_pro(self):
         """Community and Pro should have same languages (Pro differs only in limits)."""

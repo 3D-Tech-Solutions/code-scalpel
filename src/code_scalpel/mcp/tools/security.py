@@ -46,7 +46,7 @@ async def unified_sink_detect(
     **Args:**
         code (str): Source code to scan for sinks.
         language (str): Programming language. Default: "auto" (auto-detect).
-                       Supported: python, javascript, typescript, java, c, cpp, csharp, go
+                       Supported: python, javascript, typescript, java, c, cpp, csharp, go, kotlin, php, ruby, swift, rust
         confidence_threshold (float): Minimum confidence score (0.0-1.0). Default: 0.7 (70%).
 
     **Returns:**
@@ -81,11 +81,22 @@ async def unified_sink_detect(
             from code_scalpel.surgery.unified_extractor import Language, detect_language
 
             detected = detect_language(None, code)
+            # [20260304_FEATURE] Full Language enum coverage — no longer defaults to "python"
+            # for go/c/cpp/csharp/kotlin/ruby/swift/php inputs.
             lang_map = {
                 Language.PYTHON: "python",
                 Language.JAVASCRIPT: "javascript",
                 Language.TYPESCRIPT: "typescript",
                 Language.JAVA: "java",
+                Language.GO: "go",
+                Language.C: "c",
+                Language.CSHARP: "csharp",
+                Language.CPP: "cpp",
+                Language.KOTLIN: "kotlin",
+                Language.RUBY: "ruby",
+                Language.SWIFT: "swift",
+                Language.PHP: "php",
+                Language.RUST: "rust",  # [20260305_FEATURE]
             }
             language = lang_map.get(detected, "python")
 

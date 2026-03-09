@@ -6,6 +6,7 @@ Tests for Resource Template feature.
 
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -175,6 +176,68 @@ def calculate_tax(amount):
             finally:
                 server.PROJECT_ROOT = original_root
                 server.ALLOWED_ROOTS = original_allowed_roots
+
+
+class TestScalpelResourceTemplates:
+    """Tests for scalpel://analysis and scalpel://symbol resources."""
+
+    @pytest.mark.asyncio
+    async def test_analysis_resource_detects_javascript(self):
+        # [20260306_TEST] scalpel://analysis should not force JavaScript files through Python analysis.
+        """File analysis resources should route JavaScript through the JS analyzer."""
+        import json
+
+        import code_scalpel.mcp.server as server_module
+        from code_scalpel.mcp.resources import get_analysis_resource
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            file_path = Path(tmpdir) / "calculator.js"
+            file_path.write_text(
+                """
+function add(a, b) {
+  return a + b;
+}
+""",
+                encoding="utf-8",
+            )
+
+            with patch.object(server_module, "PROJECT_ROOT", Path(tmpdir)):
+                server_module._PROJECT_ROOT_HOLDER[0] = Path(tmpdir)
+                result_json = await get_analysis_resource("calculator.js")
+
+            result = json.loads(result_json)
+            assert result["analysis"]["success"] is True
+            assert result["analysis"]["language_detected"] == "javascript"
+            assert "add" in result["analysis"]["functions"]
+
+    @pytest.mark.asyncio
+    async def test_symbol_resource_extracts_javascript_function(self):
+        # [20260306_TEST] scalpel://symbol should use polyglot extraction for non-Python files.
+        """Symbol resource should use polyglot extraction instead of Python AST fallback."""
+        import json
+
+        import code_scalpel.mcp.server as server_module
+        from code_scalpel.mcp.resources import get_symbol_resource
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            file_path = Path(tmpdir) / "calculator.js"
+            file_path.write_text(
+                """
+function add(a, b) {
+  return a + b;
+}
+""",
+                encoding="utf-8",
+            )
+
+            with patch.object(server_module, "PROJECT_ROOT", Path(tmpdir)):
+                server_module._PROJECT_ROOT_HOLDER[0] = Path(tmpdir)
+                result_json = await get_symbol_resource("calculator.js", "add")
+
+            result = json.loads(result_json)
+            assert result["success"] is True
+            assert result["language_detected"] == "javascript"
+            assert "function add" in result["target_code"]
 
     @pytest.mark.asyncio
     async def test_code_resource_typescript(self):

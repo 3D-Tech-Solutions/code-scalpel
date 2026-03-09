@@ -17,6 +17,64 @@ class TestTierTransitions:
     """Test transitions between tiers."""
 
     @pytest.mark.asyncio
+    async def test_typescript_runtime_slice_preserves_tier_metadata(
+        self, community_server, pro_server, tmp_path
+    ):
+        """[20260307_TEST] TypeScript dependency slices should preserve tier metadata and depth limits."""
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+
+        (src_dir / "leaf.ts").write_text(
+            "export function leaf(): number {\n    return 1\n}\n",
+            encoding="utf-8",
+        )
+        (src_dir / "mid.ts").write_text(
+            'import { leaf } from "./leaf"\n\n'
+            "export function mid(): number {\n    return leaf()\n}\n",
+            encoding="utf-8",
+        )
+        (src_dir / "util.ts").write_text(
+            'import { mid } from "./mid"\n\n'
+            "export function helper(): number {\n    return mid()\n}\n",
+            encoding="utf-8",
+        )
+        target_file = src_dir / "main.ts"
+        target_file.write_text(
+            'import { helper } from "./util"\n\n'
+            "export function entry(): number {\n    return helper()\n}\n",
+            encoding="utf-8",
+        )
+
+        community_result = await community_server.get_cross_file_dependencies(
+            target_file=str(target_file),
+            target_symbol="entry",
+            project_root=str(tmp_path),
+            max_depth=10,
+            include_code=False,
+            include_diagram=False,
+        )
+        pro_result = await pro_server.get_cross_file_dependencies(
+            target_file=str(target_file),
+            target_symbol="entry",
+            project_root=str(tmp_path),
+            max_depth=10,
+            include_code=False,
+            include_diagram=False,
+        )
+
+        assert community_result.success is True
+        assert community_result.tier_applied == "community"
+        assert community_result.max_depth_applied == 3
+        assert community_result.max_files_applied == 200
+        assert community_result.transitive_depth == 3
+
+        assert pro_result.success is True
+        assert pro_result.tier_applied == "pro"
+        assert pro_result.max_depth_applied is None
+        assert pro_result.max_files_applied is None
+        assert pro_result.transitive_depth == 10
+
+    @pytest.mark.asyncio
     async def test_community_to_pro_increased_depth(
         self, community_server, pro_server, simple_two_file_project
     ):

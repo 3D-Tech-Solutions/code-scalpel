@@ -147,12 +147,13 @@ class TestUnifiedSinkDetectCommunityTier:
 
     def test_unsupported_language_error_code(self, community_tier):
         """Verify unsupported language returns correct error_code."""
+        # [20260305_FEATURE] Rust is now supported — use a genuinely unsupported language
         code = "some code"
         result = _unified_sink_detect_sync(
-            code=code, language="rust", confidence_threshold=0.0, tier="community"
+            code=code, language="lua", confidence_threshold=0.0, tier="community"
         )
 
-        # Community should not support Rust
+        # Lua is not a supported language
         assert not result.success
         assert result.error_code == "UNIFIED_SINK_DETECT_UNSUPPORTED_LANGUAGE"
 

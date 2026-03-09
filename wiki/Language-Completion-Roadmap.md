@@ -52,7 +52,7 @@ If none of the above apply, **extend an existing tool**.
 
 ---
 
-### Python — `python_parsers/` (10/15 complete)
+### Python — `python_parsers/` (15/15 complete) ✅ COMPLETE [20260303_FEATURE]
 
 Phase 1: ✅ Complete | Adapter: ✅ Complete | Registry: ✅ Working (lazy-load `__getattr__`)
 
@@ -68,13 +68,13 @@ Phase 1: ✅ Complete | Adapter: ✅ Complete | Registry: ✅ Working (lazy-load
 | `python_parsers_pydocstyle.py` | 1,435 | ✅ COMPLETE |
 | `python_parsers_pycodestyle.py` | 599 | ✅ COMPLETE |
 | `python_parsers_prospector.py` | 1,089 | ✅ COMPLETE |
-| `python_parsers_safety.py` | 199 | ⚠️ PARTIAL — CVSSScore/Vulnerability dataclasses only; no parser logic |
-| `python_parsers_isort.py` | 270 | ❌ STUB — docstrings and dataclass outlines only; marked "NOT IMPLEMENTED" |
-| `python_parsers_vulture.py` | 157 | ❌ STUB — dataclasses only; marked "NOT IMPLEMENTED" |
-| `python_parsers_radon.py` | 446 | ❌ STUB — dataclasses and docs only; marked "NOT IMPLEMENTED" |
-| `python_parsers_interrogate.py` | 435 | ❌ STUB — dataclasses only; marked "NOT IMPLEMENTED" |
+| `python_parsers_safety.py` | 324 | ✅ COMPLETE [20260303_FEATURE] |
+| `python_parsers_isort.py` | 394 | ✅ COMPLETE [20260303_FEATURE] |
+| `python_parsers_vulture.py` | 319 | ✅ COMPLETE [20260303_FEATURE] |
+| `python_parsers_radon.py` | 568 | ✅ COMPLETE [20260303_FEATURE] |
+| `python_parsers_interrogate.py` | 523 | ✅ COMPLETE [20260303_FEATURE] |
 
-**Gap**: 5 files to implement (safety, isort, vulture, radon, interrogate)
+**Gap**: None — all 15 parsers complete. [20260303_FEATURE]
 
 ---
 
@@ -212,7 +212,10 @@ Phase 1: ✅ Complete | Adapter: ✅ Complete (`go_adapter.py`) | Registry: ✅ 
 
 **Tests**: `tests/languages/test_go_tool_parsers.py` — 48 tests passing [20260303_FEATURE]
 
-**Gap**: None — all 6 parsers + registry complete.
+> **Integration note**: Go tool-parser results are accessed via `analyze_code(file_path=..., static_tools=["gofmt", "golint", "govet", "staticcheck", "golangci", "gosec"])`. All 6 Go tools are free/CLI — no enterprise gating.
+> Wiring added to `_run_static_tools` in [20260304_FEATURE].
+
+**Gap**: None — all 6 parsers + registry + `analyze_code` wiring complete.
 
 ---
 
@@ -258,21 +261,23 @@ Phase 1: ✅ Complete (`php_normalizer.py` — [20260303_FEATURE]) | Adapter: �
 
 ---
 
-### Ruby — `ruby_parsers/` (0/7 complete)
+### Ruby — `ruby_parsers/` (7/7 complete) ✅ COMPLETE [20260304_FEATURE]
 
-Phase 1: ❌ Not started | Adapter: ❌ STUB (`ruby_adapter.py`) | Registry: ❌ STUB (29 lines)
+Phase 1: ✅ `ruby_normalizer.py` | Adapter: ✅ `ruby_adapter.py` | Registry: ✅ `ruby_parsers/__init__.py`
 
 | File | Lines | Status |
 |------|-------|--------|
-| `ruby_parsers_RuboCop.py` | 94 | ⚠️ PARTIAL — RuboCopViolation/RuboCopConfig dataclasses; `NotImplementedError` |
-| `ruby_parsers_Reek.py` | 85 | ⚠️ PARTIAL — ReekSmell dataclass; `NotImplementedError` |
-| `ruby_parsers_brakeman.py` | 77 | ⚠️ PARTIAL — dataclasses; `NotImplementedError` |
-| `ruby_parsers_ast.py` | 84 | ⚠️ PARTIAL — AST analysis; incomplete |
-| `ruby_parsers_bundler.py` | 70 | ⚠️ PARTIAL — dependency management; incomplete |
-| `ruby_parsers_simplecov.py` | 70 | ⚠️ PARTIAL — coverage analysis; incomplete |
-| `ruby_parsers_fasterer.py` | 60 | ⚠️ PARTIAL — performance analysis; incomplete |
+| `ruby_parsers_RuboCop.py` | ~230 | ✅ Full implementation — parse_json_output, execute_rubocop, generate_report |
+| `ruby_parsers_Reek.py` | ~200 | ✅ Full implementation — parse_json_output, execute_reek, generate_report |
+| `ruby_parsers_brakeman.py` | ~200 | ✅ Full implementation — parse_json_output, execute_brakeman, generate_report |
+| `ruby_parsers_ast.py` | ~240 | ✅ Full implementation — RubyASTParser wrapping RubyNormalizer |
+| `ruby_parsers_bundler.py` | ~230 | ✅ Full implementation — parse_text_output, execute_bundler_audit, generate_report |
+| `ruby_parsers_simplecov.py` | ~200 | ✅ Full implementation — parse_resultset_json, coverage metrics |
+| `ruby_parsers_fasterer.py` | ~180 | ✅ Full implementation — parse_text_output, performance metrics |
 
-**Gap**: 7 files + registry + Phase 1 IR layer (not yet started)
+**Gap**: 0 — DONE
+
+**Tests**: `tests/languages/test_ruby_tool_parsers.py` (49 tests) + `tests/languages/test_ruby_parser.py` (14 IR tests) — 63 passing
 
 ---
 
@@ -293,9 +298,31 @@ Phase 1: ❌ Not started | Adapter: ❌ STUB (`swift_adapter.py`) | Registry: �
 
 ### Rust
 
-Phase 1: ❌ Not started | No `rust_parsers/` directory exists yet
+Phase 1: ✅ `rust_normalizer.py` | Adapter: ✅ `rust_adapter.py` | Registry: ✅ `rust_parsers/__init__.py`
 
-**Gap**: `rust_parsers/` directory and all files must be created from scratch. See [Adding-Rust.md](Adding-Rust.md) for the tool list (Clippy, cargo-audit, cargo-deny, rustfmt, Semgrep).
+| File | Status |
+|------|--------|
+| `rust_parsers_clippy.py` | ✅ Full implementation — parse compiler JSON, execute CLI, categorize findings [20260305_FEATURE] |
+| `rust_parsers_rustfmt.py` | ✅ Full implementation — parse check output, execute CLI [20260305_FEATURE] |
+| `rust_parsers_cargo_audit.py` | ✅ Full implementation — parse advisory JSON, execute CLI [20260305_FEATURE] |
+| `rust_parsers_cargo_check.py` | ✅ Full implementation — parse compiler diagnostics, execute CLI [20260305_FEATURE] |
+| `rust_parsers_rust_analyzer.py` | ✅ Full implementation — parse LSP diagnostics, documented enterprise-style execute stub [20260305_FEATURE] |
+
+**Gap**: 0 — DONE for Phase 1 + current Phase 2 parser set.
+
+---
+
+## MCP Integration Surface Status
+
+> [20260306_DOCS] Language completion is not the same thing as complete MCP-surface parity. This section tracks the runtime integration layer separately so docs do not overstate support.
+
+| MCP Surface | Current Status |
+|-------------|----------------|
+| `analyze_code` / `extract_code` / `unified_sink_detect` | Broad polyglot support: Python, JavaScript, TypeScript, Java, C, C++, C#, Go, Kotlin, PHP, Ruby, Swift, Rust |
+| `run_static_analysis` / shared static-tool dispatch | Polyglot dispatch present for C++, C#, Go, Python, JavaScript, TypeScript, Java, Ruby, Swift, Kotlin, PHP |
+| `scalpel://analysis/...` and `scalpel://symbol/...` resources | Language-aware routing for the broad polyglot set; no longer Python-only for JS and similar files |
+| `code:///{language}/{module}/{symbol}` resource templates | File-backed module resolution now covers Python, JavaScript, TypeScript, Java, C, C++, C#, Go, Kotlin, PHP, Ruby, Swift, Rust |
+| Graph helpers (`get_call_graph`, `get_graph_neighborhood`, `get_cross_file_dependencies`) | Still Python-first overall. `get_call_graph` now has dedicated JavaScript, TypeScript, and Java runtime slices. `get_graph_neighborhood` supports local JS/TS function nodes, JS/TS method nodes when advanced resolution is available, and canonical Java method nodes via the shared call-graph runtime. `get_cross_file_dependencies` now exposes narrow graph-backed slices for JS/TS plus Java method dependencies. Next graph-runtime work should stay narrow and tool-specific rather than broadening cross-language claims. |
 
 ---
 
@@ -304,7 +331,7 @@ Phase 1: ❌ Not started | No `rust_parsers/` directory exists yet
 | Language | Phase 1 | Adapter | Registry | Complete/Total | Files to write | Priority |
 |----------|---------|---------|----------|----------------|---------------|----------|
 | **TypeScript** | ✅ | ✅ | ✅ | 6/6 | **0 — DONE** | — |
-| **Python** | ✅ | ✅ | ✅ | 10/15 | 5 | Quick win |
+| **Python** | ✅ | ✅ | ✅ | 15/15 | **0 — DONE** [20260303_FEATURE] | — |
 | **JavaScript** | ✅ | ✅ | ✅ | 15/15 | 0 | Complete |
 | **Java** | ✅ | ✅ | ✅ | 16/16 | 0 | Complete |
 | **C++** | ✅ | ✅ | ✅ | 6/6 | **0 — DONE** | — |
@@ -312,9 +339,9 @@ Phase 1: ❌ Not started | No `rust_parsers/` directory exists yet
 | **Go** | ✅ | ✅ | ✅ | 6/6 | **0 — DONE** [20260303_FEATURE] | — |
 | **Kotlin** | ✅ | ✅ | ✅ | 7/7 | **0 — DONE** [20260303_FEATURE] | — |
 | **PHP** | ✅ | ✅ | ✅ | 7/7 | **0 — DONE** [20260304_FEATURE] | — |
-| **Ruby** | ❌ | ❌ STUB | ❌ STUB | 0/7 | 7 + Phase 1 + registry | Stage 7 |
-| **Swift** | ❌ | ❌ STUB | ❌ STUB | 0/4 | 4 + Phase 1 + registry | Stage 8 |
-| **Rust** | ❌ | ❌ | none | 0/5 | 5 + dir + Phase 1 | After Swift |
+| **Ruby** | ✅ | ✅ | ✅ | 7/7 | **0 — DONE** [20260304_FEATURE] | — |
+| **Swift** | ✅ | ✅ | ✅ | 4/4 | **0 — DONE** [20260304_FEATURE] | — |
+| **Rust** | ✅ | ✅ | ✅ | 5/5 | **0 — DONE** [20260305_FEATURE] | — |
 | **C** | ✅ | ✅ | n/a | n/a | 0 (served by C++ tools) | — |
 
 ---
@@ -369,7 +396,7 @@ All C# tool parsers, adapter, registry, shared SARIF 2.1 helper, and `analyze_co
 
 ### Stage 3 — Go Tool Parsers ✅ COMPLETE [20260303_FEATURE]
 
-All Go tool parsers and registry are fully implemented. 48 tests passing in `tests/languages/test_go_tool_parsers.py`.
+All Go tool parsers, registry, and `analyze_code` MCP wiring are fully implemented. 48 tests passing in `tests/languages/test_go_tool_parsers.py`.
 
 **Why third**: Cloud-native ecosystem. Go adapter is already done. Registry stub exists but is empty. golangci-lint aggregates 50+ linters into one JSON output — implementing it well provides coverage over govet, staticcheck, and many others. gosec provides built-in CWE IDs.
 
@@ -409,36 +436,124 @@ PHP Phase 1 (IR normalizer, extractor, adapter, 32 tests) and Phase 2 (7 tool pa
 
 ---
 
-### Stage 7 — Ruby Phase 2 + Phase 1
+### Stage 7 — Ruby Phase 2 + Phase 1 ✅ COMPLETE [20260304_FEATURE]
 
-Ruby has 7 partials and a stub registry. Registry needs implementing first, then all 7 execution logic bodies. Then Ruby Phase 1 IR layer. See [Adding-Ruby.md](Adding-Ruby.md).
-
----
-
-### Stage 8 — Swift Phase 2 + Phase 1
-
-Swift has 4 partials and a stub registry. macOS-primary with graceful Linux degradation pattern. See [Adding-Swift.md](Adding-Swift.md).
+All Ruby tool parsers (7/7), registry, adapter, and Phase 1 IR normalizer are fully implemented. 63 tests passing across `test_ruby_tool_parsers.py` (49 tests) and `test_ruby_parser.py` (14 IR tests). `test_polyglot_support.py` updated to include Ruby in all extension/detection/matrix rows.
 
 ---
 
-### Stage 9 — Rust Phase 1 + Phase 2
+### Stage 8 — Swift Phase 2 + Phase 1 ✅ COMPLETE [20260304_FEATURE]
 
-Rust has no `rust_parsers/` directory. Create from scratch: directory + 5 tool files + registry + Phase 1 IR layer. See [Adding-Rust.md](Adding-Rust.md).
+Swift Phase 1 (`swift_normalizer.py`), adapter, registry, and all 4 Swift tool parsers are present in the repo. Resource-template and extraction layers can route Swift files, but graph tooling does not yet offer full language-parity semantics.
 
 ---
 
-## Adapter Stubs to Fix (track alongside tool parsers)
+### Stage 9 — Rust Phase 2 + Phase 1 ✅ COMPLETE [20260305_FEATURE]
 
-Six adapters raise `NotImplementedError` and must be implemented as thin wrappers over the language's normalizer:
+Rust Phase 1 (`rust_normalizer.py`), adapter, registry, and the current 5 Rust tool parsers are present in the repo. Resource-template and extraction layers can route Rust files, but graph tooling remains Python-first.
 
-| Adapter file | Fix alongside |
-|-------------|--------------|
-| `cpp_adapter.py` | ✅ Done — [20260303_FEATURE] |
-| `csharp_adapter.py` | Stage 2 (C#) |
-| `kotlin_adapter.py` | Stage 5 (Kotlin) |
-| `php_adapter.py` | Stage 6 (PHP) |
-| `ruby_adapter.py` | Stage 7 (Ruby) |
-| `swift_adapter.py` | Stage 8 (Swift) |
+---
+
+### Stage 10 — Graph Runtime Parity (Current Active Track) [20260306_FEATURE]
+
+Graph-runtime parity should continue as targeted vertical slices, not broad language claims.
+
+**Completed in the current slice**:
+
+| Tool | Current JS/TS Status |
+|------|----------------------|
+| `get_call_graph` | Initial local JS/TS parity slice present |
+| `get_graph_neighborhood` | Local JS/TS function nodes supported; JS/TS method nodes supported when advanced resolution is available |
+| `get_cross_file_dependencies` | Initial local JS/TS graph-backed parity slice present; narrow Java method dependency slice landed |
+| `get_symbol_references` | Initial local JS/TS definition/import/call/reference slice present; narrow Java definition/import/call/reference slice landed |
+| `get_project_map` | Initial local JS/TS module discovery and import-derived relationship slice present; narrow Java module/relationship slice landed |
+
+**Stage 10.1 hardening status**:
+
+- [20260307_TEST] Tier/metadata coverage now explicitly exercises the JS/TS runtime slices for `get_call_graph`, `get_graph_neighborhood`, `get_cross_file_dependencies`, `get_symbol_references`, and `get_project_map`.
+- [20260308_TEST] Focused graph-runtime coverage now also exercises the narrow Java slices for `get_graph_neighborhood`, `get_cross_file_dependencies`, `get_project_map`, and `get_symbol_references`.
+- [20260308_TEST] `get_project_map` now has explicit JavaScript relationship and dependency-diagram fixtures, not just shared JS/TS path coverage via TypeScript cases.
+- [20260308_TEST] Java override dispatch is now explicitly covered for `get_call_graph`, `get_graph_neighborhood`, and `get_cross_file_dependencies`, proving the landed Java slices prefer child overrides over superclass fallbacks.
+- [20260308_BUGFIX] Java `get_symbol_references` now clears singular `definition_file` and `definition_line` metadata when overloads or overrides make the symbol identity ambiguous.
+- [20260308_TEST] Java ambiguity guidance is now directly covered for `get_cross_file_dependencies`, and Java Mermaid/path metadata is explicitly covered for `get_call_graph`, `get_graph_neighborhood`, and `get_cross_file_dependencies`.
+- [20260308_FEATURE] Java `get_symbol_references` now emits neutral ambiguity warnings when multiple Java definitions match, instead of only clearing singular definition metadata.
+- [20260308_TEST] Java `get_call_graph` now has direct path-query fixtures, and Java `get_graph_neighborhood` now has direct enterprise path-query capability validation for canonical Java method nodes.
+- [20260308_FEATURE] Java `get_symbol_references` now exposes structured ambiguity candidates for overload and override collisions, rather than warning-only disambiguation.
+- [20260308_FEATURE] The shared Java call-graph runtime now emits signature-qualified selectors for overloaded methods, keeps non-overloaded Java IDs stable, and resolves exact signature then arity fallback through static-import and OO dispatch paths.
+- [20260308_TEST] `get_cross_file_dependencies` now accepts structured Java selectors like `Helper.tool(int)`, and `get_graph_neighborhood` now directly validates signature-qualified Java method node IDs such as `java::demo/Helper::method::Helper:tool(int)`.
+- [20260307_DOCS] Graph runtime docstrings were audited and corrected where the published tier limits had drifted from `limits.toml`.
+
+**Java reassessment and follow-through**:
+
+> [20260307_DOCS] Reassessed Java as the next graph-runtime candidate after Stage 10.1. Conclusion at that point: not yet a clean next parity slice. Java parser/IR support is mature, but the shared graph runtime was not Java-ready enough to repeat the narrow JS/TS playbook.
+
+> [20260307_FEATURE] Follow-through landed in the shared call-graph stack: `.java` now enters shared file discovery, canonical Java callable nodes are emitted, and `get_call_graph` now has an initial Java runtime slice. Community sees local canonical Java nodes/calls; Pro/Enterprise additionally resolve cross-file Java type/static imports, typed imported instance calls, superclass method dispatch, and field-backed instance calls when the field type is statically declared.
+
+- `get_call_graph` was the blocking prerequisite; that builder/file-discovery gap is now closed for `.java`.
+- `get_graph_neighborhood` now accepts canonical Java method node IDs and reuses the shared Java call-graph runtime for local Community neighborhoods plus Pro/Enterprise cross-file neighborhoods.
+- `get_cross_file_dependencies` now has a narrow Java method slice: Community resolves local method dependencies, while Pro/Enterprise reuse shared Java call-graph edges for cross-file dependency chains and accept exact structured selectors like `Helper.tool(int)`.
+- `get_symbol_references` now includes a narrow Java runtime slice for parser-backed class/method definitions plus conservative import, static-import, call-site, and reference discovery, with structured ambiguity candidates when Java definition identity is ambiguous.
+- `get_project_map` now scans `.java` files for class/method inventory and, in Pro/Enterprise, derives file relationships from explicit Java imports and static imports.
+- Overloaded Java methods now flow through the shared graph runtime with signature-qualified selectors, which gives `get_call_graph`, `get_cross_file_dependencies`, and `get_graph_neighborhood` a common overload-aware identity model instead of helper-only string matching.
+
+**Current decision**:
+
+- Java is now a real Stage 10 presence across `get_call_graph`, `get_symbol_references`, `get_graph_neighborhood`, `get_cross_file_dependencies`, and `get_project_map`, but still not full graph-runtime parity.
+- Keep the remaining Java graph/runtime work narrow and tool-specific, with stronger argument-type inference, constructor overload handling, and broader selector-hardening now the main adjacent work.
+
+**Next roadmap steps**:
+
+| Priority | Scope | Why |
+|----------|-------|-----|
+| 1 | Harden Java graph/runtime slices around stronger argument typing and selector resolution | The narrow Java slices now share overload-aware identities, but broader parity still depends on sharper call-site typing and selector choice |
+| 2 | Extend overload-aware hardening to constructor cases and remaining ambiguous Java edges | Preserves accuracy without over-claiming parity |
+
+**Tracked checklist**:
+
+- [x] `get_call_graph`: initial local JS/TS parity slice landed.
+- [x] `get_graph_neighborhood`: local JS/TS function support landed.
+- [x] `get_graph_neighborhood`: JS/TS method-node support landed when advanced resolution is available.
+- [x] `get_cross_file_dependencies`: initial local JS/TS graph-backed parity slice landed.
+- [x] `get_symbol_references`: initial local JS/TS parity slice landed and validated for definitions/imports/calls/reference categories.
+- [x] `get_project_map`: initial local JS/TS module discovery and graph-derived relationship slice landed and validated.
+- [x] Tier coverage: extend JS/TS metadata-limit tests for all touched runtime surfaces.
+- [x] Candidate expansion: reassess Java as the next graph-runtime candidate.
+- [x] Java foundation: extend shared call-graph file discovery and canonical node emission to `.java` inputs.
+- [x] Java slice viability: reassess and land a narrow Java `get_call_graph`-first runtime slice.
+- [x] Java `get_call_graph`: local canonical Java callable nodes/calls plus Pro/Enterprise cross-file type/static-import resolution, typed imported instance calls, superclass method dispatch, and field-backed instance calls.
+- [x] Java `get_graph_neighborhood`: canonical Java method-node acceptance plus local Community and cross-file Pro/Enterprise neighborhood extraction via the shared call-graph runtime.
+- [x] Java `get_cross_file_dependencies`: narrow Java method dependency slice with local Community behavior and shared-runtime Pro/Enterprise cross-file chains.
+- [x] Java `get_project_map`: narrow Java module discovery plus Pro/Enterprise file relationships from explicit imports and static imports.
+- [x] Java `get_symbol_references`: narrow Java class/method definition plus import/static-import/call/reference slice landed and validated.
+- [x] Java hardening: override-dispatch coverage now explicitly exercises child-over-base resolution for `get_call_graph`, `get_graph_neighborhood`, and `get_cross_file_dependencies`.
+- [x] Java hardening: `get_symbol_references` now clears singular definition metadata when overloads or overrides make Java symbol identity ambiguous.
+- [x] Java hardening: `get_symbol_references` now emits neutral warnings when Java definition identity is ambiguous.
+- [x] Java hardening: ambiguity guidance is explicitly covered for `get_cross_file_dependencies`, and Mermaid/path metadata is explicitly covered for the landed Java graph-runtime slices.
+- [x] Java hardening: `get_call_graph` now has direct Java path-query fixtures, and `get_graph_neighborhood` now has direct Java enterprise path-query capability validation.
+- [x] Java hardening: `get_symbol_references` now exposes structured ambiguity candidates for overload and override collisions.
+- [x] Java hardening: overload-aware selector identities now flow through the shared runtime, `get_cross_file_dependencies` accepts structured selectors like `Helper.tool(int)`, and `get_graph_neighborhood` validates signature-qualified Java method node IDs.
+- [x] JavaScript `get_project_map`: direct JavaScript relationship and dependency-diagram fixtures now back the import-derived parity claim.
+
+---
+
+## Adapter Status
+
+> [20260307_DOCS] The earlier adapter-stub table is obsolete. The currently tracked languages already have adapters wired; the active remaining gap is runtime parity in graph/context MCP surfaces.
+
+| Adapter scope | Status |
+|-------------|--------|
+| `cpp_adapter.py` | ✅ Implemented |
+| `csharp_adapter.py` | ✅ Implemented |
+| `go_adapter.py` | ✅ Implemented |
+| `java_adapter.py` | ✅ Implemented |
+| `javascript_adapter.py` | ✅ Implemented |
+| `kotlin_adapter.py` | ✅ Implemented |
+| `php_adapter.py` | ✅ Implemented |
+| `python_adapter.py` | ✅ Implemented |
+| `ruby_adapter.py` | ✅ Implemented |
+| `rust_adapter.py` | ✅ Implemented |
+| `swift_adapter.py` | ✅ Implemented |
+| `typescript` adapter path | ✅ Covered via JavaScript/TypeScript wiring |
 
 ---
 

@@ -374,6 +374,288 @@ main();
         )
 
 
+async def test_get_call_graph_pro_resolves_java_static_imports_cross_file(
+    tmp_path: Path,
+    hs256_test_secret,
+    write_hs256_license_jwt,
+):
+    project_root = tmp_path / "proj"
+    package_dir = project_root / "demo"
+    package_dir.mkdir(parents=True, exist_ok=True)
+
+    (package_dir / "Helper.java").write_text(
+        """
+package demo;
+
+public class Helper {
+  public static void tool() {
+  }
+}
+""",
+        encoding="utf-8",
+    )
+    (package_dir / "App.java").write_text(
+        """
+package demo;
+
+import static demo.Helper.tool;
+
+public class App {
+  public static void main(String[] args) {
+    tool();
+  }
+}
+""",
+        encoding="utf-8",
+    )
+
+    async with _stdio_session(project_root=project_root) as session:
+        payload = await session.call_tool(
+            "get_call_graph",
+            arguments={
+                "project_root": str(project_root),
+                "entry_point": None,
+                "depth": 10,
+                "include_circular_import_check": False,
+            },
+            read_timeout_seconds=timedelta(seconds=20),
+        )
+        env_json = _tool_json(payload)
+        data = _assert_envelope(env_json, tool_name="get_call_graph")
+        _assert_tier(env_json, "community")
+        assert data is not None
+        edges = data.get("edges") or []
+        assert not any(
+            (e.get("callee") == "demo/Helper.java:Helper.tool")
+            for e in edges
+            if isinstance(e, dict)
+        )
+
+    license_path = write_hs256_license_jwt(
+        jti="lic-java-call-graph",
+        base_dir=tmp_path,
+        filename="license.jwt",
+    )
+
+    async with _stdio_session(
+        project_root=project_root,
+        extra_env={
+            "CODE_SCALPEL_ALLOW_HS256": "1",
+            "CODE_SCALPEL_SECRET_KEY": hs256_test_secret,
+            "CODE_SCALPEL_LICENSE_PATH": str(license_path),
+        },
+    ) as session:
+        payload = await session.call_tool(
+            "get_call_graph",
+            arguments={
+                "project_root": str(project_root),
+                "entry_point": None,
+                "depth": 10,
+                "include_circular_import_check": False,
+            },
+            read_timeout_seconds=timedelta(seconds=20),
+        )
+        env_json = _tool_json(payload)
+        data = _assert_envelope(env_json, tool_name="get_call_graph")
+        _assert_tier(env_json, "pro")
+        assert data is not None
+        edges = data.get("edges") or []
+        assert any(
+            (e.get("callee") == "demo/Helper.java:Helper.tool")
+            for e in edges
+            if isinstance(e, dict)
+        )
+
+
+async def test_get_call_graph_pro_resolves_java_imported_instance_calls_cross_file(
+    tmp_path: Path,
+    hs256_test_secret,
+    write_hs256_license_jwt,
+):
+    project_root = tmp_path / "proj"
+    package_dir = project_root / "demo"
+    package_dir.mkdir(parents=True, exist_ok=True)
+
+    (package_dir / "Helper.java").write_text(
+        """
+package demo;
+
+public class Helper {
+  public void tool() {
+  }
+}
+""",
+        encoding="utf-8",
+    )
+    (package_dir / "App.java").write_text(
+        """
+package demo;
+
+import demo.Helper;
+
+public class App {
+  public static void main(String[] args) {
+    Helper helper = new Helper();
+    helper.tool();
+  }
+}
+""",
+        encoding="utf-8",
+    )
+
+    async with _stdio_session(project_root=project_root) as session:
+        payload = await session.call_tool(
+            "get_call_graph",
+            arguments={
+                "project_root": str(project_root),
+                "entry_point": None,
+                "depth": 10,
+                "include_circular_import_check": False,
+            },
+            read_timeout_seconds=timedelta(seconds=20),
+        )
+        env_json = _tool_json(payload)
+        data = _assert_envelope(env_json, tool_name="get_call_graph")
+        _assert_tier(env_json, "community")
+        assert data is not None
+        edges = data.get("edges") or []
+        assert not any(
+            (e.get("callee") == "demo/Helper.java:Helper.tool")
+            for e in edges
+            if isinstance(e, dict)
+        )
+
+    license_path = write_hs256_license_jwt(
+        jti="lic-java-instance-call-graph",
+        base_dir=tmp_path,
+        filename="license.jwt",
+    )
+
+    async with _stdio_session(
+        project_root=project_root,
+        extra_env={
+            "CODE_SCALPEL_ALLOW_HS256": "1",
+            "CODE_SCALPEL_SECRET_KEY": hs256_test_secret,
+            "CODE_SCALPEL_LICENSE_PATH": str(license_path),
+        },
+    ) as session:
+        payload = await session.call_tool(
+            "get_call_graph",
+            arguments={
+                "project_root": str(project_root),
+                "entry_point": None,
+                "depth": 10,
+                "include_circular_import_check": False,
+            },
+            read_timeout_seconds=timedelta(seconds=20),
+        )
+        env_json = _tool_json(payload)
+        data = _assert_envelope(env_json, tool_name="get_call_graph")
+        _assert_tier(env_json, "pro")
+        assert data is not None
+        edges = data.get("edges") or []
+        assert any(
+            (e.get("callee") == "demo/Helper.java:Helper.tool")
+            for e in edges
+            if isinstance(e, dict)
+        )
+
+
+async def test_get_call_graph_pro_resolves_java_inherited_methods_cross_file(
+    tmp_path: Path,
+    hs256_test_secret,
+    write_hs256_license_jwt,
+):
+    project_root = tmp_path / "proj"
+    package_dir = project_root / "demo"
+    package_dir.mkdir(parents=True, exist_ok=True)
+
+    (package_dir / "Base.java").write_text(
+        """
+package demo;
+
+public class Base {
+  protected void helper() {
+  }
+}
+""",
+        encoding="utf-8",
+    )
+    (package_dir / "Child.java").write_text(
+        """
+package demo;
+
+public class Child extends Base {
+  public void run() {
+    helper();
+    this.helper();
+  }
+}
+""",
+        encoding="utf-8",
+    )
+
+    async with _stdio_session(project_root=project_root) as session:
+        payload = await session.call_tool(
+            "get_call_graph",
+            arguments={
+                "project_root": str(project_root),
+                "entry_point": None,
+                "depth": 10,
+                "include_circular_import_check": False,
+            },
+            read_timeout_seconds=timedelta(seconds=20),
+        )
+        env_json = _tool_json(payload)
+        data = _assert_envelope(env_json, tool_name="get_call_graph")
+        _assert_tier(env_json, "community")
+        assert data is not None
+        edges = data.get("edges") or []
+        assert not any(
+            (e.get("callee") == "demo/Base.java:Base.helper")
+            for e in edges
+            if isinstance(e, dict)
+        )
+
+    license_path = write_hs256_license_jwt(
+        jti="lic-java-inheritance-call-graph",
+        base_dir=tmp_path,
+        filename="license.jwt",
+    )
+
+    async with _stdio_session(
+        project_root=project_root,
+        extra_env={
+            "CODE_SCALPEL_ALLOW_HS256": "1",
+            "CODE_SCALPEL_SECRET_KEY": hs256_test_secret,
+            "CODE_SCALPEL_LICENSE_PATH": str(license_path),
+        },
+    ) as session:
+        payload = await session.call_tool(
+            "get_call_graph",
+            arguments={
+                "project_root": str(project_root),
+                "entry_point": None,
+                "depth": 10,
+                "include_circular_import_check": False,
+            },
+            read_timeout_seconds=timedelta(seconds=20),
+        )
+        env_json = _tool_json(payload)
+        data = _assert_envelope(env_json, tool_name="get_call_graph")
+        _assert_tier(env_json, "pro")
+        assert data is not None
+        edges = data.get("edges") or []
+        matching = [
+            e
+            for e in edges
+            if isinstance(e, dict)
+            and e.get("caller") == "demo/Child.java:Child.run"
+            and e.get("callee") == "demo/Base.java:Base.helper"
+        ]
+        assert len(matching) >= 2
+
+
 @pytest.mark.parametrize("requested_sinks", [60, 120])
 async def test_unified_sink_detect_max_sinks_differs_by_tier(
     tmp_path: Path,

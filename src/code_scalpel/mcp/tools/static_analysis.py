@@ -1,16 +1,21 @@
-"""C++ (and future polyglot) static-analysis tool MCP registration.
+"""Polyglot static-analysis tool MCP registration.
 
 [20260303_FEATURE] New MCP tool ``run_static_analysis`` wires the C++ tool
 parser registry (Cppcheck, clang-tidy, Clang-SA, cpplint, Coverity, SonarQube)
 to the MCP surface and, via tool_bridge, to the CLI.
 
+[20260305_REFACTOR] Language dispatch delegated to the shared
+``polyglot_dispatch.run_static_tools`` helper so that ALL supported languages
+(C++, C#, Go, Python, JS/TS, Java, Ruby, Swift, Kotlin, PHP) are available
+via the same MCP endpoint – language is detected automatically from the file
+extension of each path in ``paths``.
+
 Design notes
 ------------
-- Free/open tools (Cppcheck, clang-tidy, Clang-SA, cpplint) are available at
-  Community tier and above.
-- Enterprise-only tools (Coverity, SonarQube) require Enterprise tier for
-  execution; all tiers can *parse* a pre-existing report file.
-- Community: max 50 findings returned.
+- Free/open tools are available at Community tier and above.
+- Enterprise-only tools (Coverity, SonarQube, ReSharper) require Enterprise tier for
+  execution; all tiers can *parse* a pre-existing report file (C++ only at present).
+- Community: max 50 total findings returned.
 - Pro / Enterprise: unlimited findings returned.
 """
 
@@ -24,36 +29,11 @@ from code_scalpel import __version__ as _pkg_version
 from code_scalpel.mcp.contract import ToolError, ToolResponseEnvelope, make_envelope
 from code_scalpel.mcp.protocol import _get_current_tier, mcp
 
-# ---------------------------------------------------------------------------
-# Tier / capability helpers
-# ---------------------------------------------------------------------------
-
-# Tools that raise NotImplementedError for execution (server/enterprise required).
-_ENTERPRISE_EXEC_TOOLS = {"coverity", "sonarqube", "sonar", "sonar-cpp"}
-
-# Max findings returned at Community tier.
-_COMMUNITY_MAX_FINDINGS = 50
-
-
-def _get_max_findings(tier: str) -> int:
-    """Return the findings cap for the given tier."""
-    return _COMMUNITY_MAX_FINDINGS if tier == "community" else -1
-
-
-def _check_enterprise_exec(tool_key: str, tier: str) -> Optional[ToolError]:
-    """Return a ToolError if a non-enterprise user attempts to *execute*
-    an enterprise-only tool without providing a pre-existing report_path."""
-    if tool_key in _ENTERPRISE_EXEC_TOOLS and tier != "enterprise":
-        return ToolError(
-            error=(
-                f"Executing '{tool_key}' requires Enterprise tier. "
-                "Provide a pre-existing 'report_path' to parse an existing "
-                "report at your current tier, or upgrade to Enterprise."
-            ),
-            error_code="upgrade_required",
-            error_details={"required_tier": "enterprise"},
-        )
-    return None
+# [20260305_REFACTOR] Shared polyglot dispatch replaces the old C++-only dispatch
+from code_scalpel.mcp.helpers.polyglot_dispatch import (
+    COMMUNITY_MAX_TOOL_FINDINGS as _COMMUNITY_MAX_FINDINGS,
+    run_static_tools as _run_static_tools_for_file,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -71,47 +51,37 @@ def _run_static_analysis_sync(
     """Run the appropriate tool parser and return structured findings.
 
     [20260303_FEATURE] Core sync implementation dispatched via asyncio.to_thread.
+    [20260305_REFACTOR] Execution path delegates to polyglot_dispatch.run_static_tools
+    so all 11 supported languages are automatically available.  The ``language``
+    parameter is accepted for backward compatibility but execution now relies on
+    file-extension detection inside run_static_tools.
+    ``report_path`` triggers C++ report-file parsing (all tiers allowed).
     """
-    language_lower = language.lower()
+    tool_key = tool.lower()
 
     # -----------------------------------------------------------------------
-    # C++ dispatch
+    # Report-file parsing path (C++ only; all tiers may parse existing reports)
     # -----------------------------------------------------------------------
-    if language_lower in ("cpp", "c++", "cxx"):
+    if report_path is not None:
         from code_scalpel.code_parsers.cpp_parsers import CppParserRegistry
 
         registry = CppParserRegistry()
         try:
-            parser = registry.get_parser(tool)
+            parser = registry.get_parser(tool_key)
         except ValueError as exc:
             raise ValueError(str(exc)) from exc
 
-        tool_key = tool.lower()
-        findings: List[Any] = []
+        findings_raw = _parse_report(parser, tool_key, Path(report_path))
+        findings_dicts = [_finding_to_dict(f) for f in findings_raw]
 
-        if report_path is not None:
-            # Parse a pre-existing report file — allowed at all tiers.
-            findings = _parse_report(parser, tool_key, Path(report_path))
-        else:
-            # Execute the tool CLI — enterprise-only tools raise UpgradeRequired.
-            exec_err = _check_enterprise_exec(tool_key, tier)
-            if exec_err is not None:
-                raise _UpgradeRequired(exec_err)
-            findings = _execute_tool(parser, tool_key, paths)
-
-        # Apply community cap.
-        max_findings = _get_max_findings(tier)
+        max_findings = _COMMUNITY_MAX_FINDINGS if tier == "community" else -1
         truncated = False
-        if max_findings > 0 and len(findings) > max_findings:
-            findings = findings[:max_findings]
+        if max_findings > 0 and len(findings_dicts) > max_findings:
+            findings_dicts = findings_dicts[:max_findings]
             truncated = True
 
-        # Convert dataclass findings to dicts for serialisation.
-        findings_dicts = [_finding_to_dict(f) for f in findings]
-
-        # Attempt to generate a structured report via the parser.
         try:
-            report_json = parser.generate_report(findings, format="json")
+            report_json = parser.generate_report(findings_raw, format="json")
             import json as _json
             report_data = _json.loads(report_json)
         except Exception:
@@ -129,43 +99,59 @@ def _run_static_analysis_sync(
             "tier_applied": tier,
         }
 
-    raise ValueError(
-        f"Language '{language}' is not supported by run_static_analysis. "
-        "Supported: cpp"
-    )
+    # -----------------------------------------------------------------------
+    # Tool-execution path — polyglot dispatch via run_static_tools
+    # [20260305_REFACTOR] One call per path; community cap applied globally.
+    # -----------------------------------------------------------------------
+    all_findings: List[Dict[str, Any]] = []
+    for path_str in paths:
+        # run_static_tools auto-detects language from extension and applies
+        # its own community cap per file; we re-apply globally below.
+        per_file = _run_static_tools_for_file(path_str, [tool_key], tier)
+        all_findings.extend(per_file)
 
+    max_findings = _COMMUNITY_MAX_FINDINGS if tier == "community" else -1
+    truncated = False
+    if max_findings > 0 and len(all_findings) > max_findings:
+        all_findings = all_findings[:max_findings]
+        truncated = True
 
-# ---------------------------------------------------------------------------
-# Parser dispatch helpers
-# ---------------------------------------------------------------------------
+    # Best-effort language detection from first path with a known extension.
+    detected_language = language.lower()
+    if paths:
+        ext = Path(paths[0]).suffix.lower()
+        _ext_lang_map = {
+            ".cpp": "cpp", ".cc": "cpp", ".cxx": "cpp", ".c": "cpp",
+            ".h": "cpp", ".hpp": "cpp", ".hxx": "cpp",
+            ".cs": "csharp",
+            ".go": "go",
+            ".py": "python", ".pyw": "python",
+            ".js": "javascript", ".jsx": "javascript",
+            ".ts": "typescript", ".tsx": "typescript",
+            ".java": "java",
+            ".rb": "ruby",
+            ".swift": "swift",
+            ".kt": "kotlin", ".kts": "kotlin",
+            ".php": "php",
+        }
+        detected_language = _ext_lang_map.get(ext, language.lower())
 
-
-def _execute_tool(parser: Any, tool_key: str, paths: List[str]) -> List[Any]:
-    """Dispatch to the correct execute_* method based on tool key."""
-    methods = {
-        "cppcheck": "execute_cppcheck",
-        "clang-tidy": "execute_clang_tidy",
-        "clang_tidy": "execute_clang_tidy",
-        "clangtidy": "execute_clang_tidy",
-        "clang-sa": "execute_scan_build",
-        "clang-static-analyzer": "execute_scan_build",
-        "clangsa": "execute_scan_build",
-        "cpplint": "execute_cpplint",
-        "coverity": "execute_coverity",
-        "sonarqube": "execute_sonarqube",
-        "sonar": "execute_sonarqube",
-        "sonar-cpp": "execute_sonarqube",
+    return {
+        "success": True,
+        "language": detected_language,
+        "tool": tool_key,
+        "finding_count": len(all_findings),
+        "findings": all_findings,
+        "truncated": truncated,
+        "max_findings_applied": max_findings if max_findings > 0 else None,
+        "report": {"tool": tool_key, "findings": all_findings},
+        "tier_applied": tier,
     }
-    method_name = methods.get(tool_key)
-    if method_name and hasattr(parser, method_name):
-        method = getattr(parser, method_name)
-        # Most execute methods take a list of paths.
-        try:
-            return method(paths) or []
-        except TypeError:
-            # Some take a single path.
-            return method(paths[0] if paths else ".") or []
-    return []
+
+
+# ---------------------------------------------------------------------------
+# Report parsing helpers (used only when report_path is provided — C++ only)
+# ---------------------------------------------------------------------------
 
 
 def _parse_report(parser: Any, tool_key: str, report_path: Path) -> List[Any]:
@@ -204,27 +190,20 @@ def _finding_to_dict(finding: Any) -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Sentinel exception for upgrade-required signalling
-# ---------------------------------------------------------------------------
-
-
-class _UpgradeRequired(Exception):
-    """Carries a ToolError for tier-upgrade scenarios."""
-
-    def __init__(self, tool_error: ToolError) -> None:
-        super().__init__(tool_error.error)
-        self.tool_error = tool_error
-
-
-# ---------------------------------------------------------------------------
 # MCP tool registration
 # ---------------------------------------------------------------------------
 
 
 @mcp.tool(
     description=(
-        "Run C++ static-analysis tools (Cppcheck, clang-tidy, Clang-SA, cpplint, "
-        "Coverity, SonarQube) against source files or pre-existing report files."
+        "Run static-analysis tools against source files or pre-existing C++ report files. "
+        "Language is auto-detected from file extensions: C++ (Cppcheck, clang-tidy, Clang-SA, cpplint, "
+        "Coverity, SonarQube), C# (Roslyn, StyleCop, SCS, FxCop, ReSharper), "
+        "Go (gofmt, golint, govet, staticcheck, golangci-lint, gosec), "
+        "Python (vulture, isort, radon, pip-audit, interrogate), "
+        "JavaScript/TypeScript (npm-audit), Java (semgrep), "
+        "Ruby (rubocop, reek, brakeman), Swift (swiftlint), "
+        "Kotlin (diktat), PHP (phpcs, phpstan, psalm, phpmd)."
     )
 )
 async def run_static_analysis(
@@ -233,41 +212,50 @@ async def run_static_analysis(
     language: str = "cpp",
     report_path: Optional[str] = None,
 ) -> ToolResponseEnvelope:
-    """Run C++ static-analysis tools and return structured findings.
+    """Run polyglot static-analysis tools and return structured findings.
 
-    Dispatches to the appropriate tool parser from ``CppParserRegistry``.
-    When a tool CLI binary is not installed the parser returns an empty
-    findings list (no error).  Provide ``report_path`` to parse a
-    pre-existing report file instead of executing the tool.
+    Language is auto-detected from the file extension of each path in
+    ``paths``.  When a tool CLI binary is not installed the parser returns an
+    empty findings list (no error).  Provide ``report_path`` to parse a
+    pre-existing C++ report file instead of executing the tool.
 
     **Tier Behavior:**
-    - Community: Free tools (cppcheck, clang-tidy, clang-sa, cpplint) — max 50
-      findings.  Parse-only for enterprise tools.
-    - Pro: Free tools — unlimited findings.  Parse-only for enterprise tools.
-    - Enterprise: All tools including Coverity and SonarQube — unlimited
-      findings.
+    - Community: Free tools — max 50 total findings.
+      Enterprise-only tools (Coverity, SonarQube, ReSharper) are skipped.
+    - Pro: Free tools — unlimited findings.
+    - Enterprise: All tools including Coverity, SonarQube and ReSharper —
+      unlimited findings.
 
-    **Supported tools (``tool`` parameter):**
-    - ``cppcheck``             — Cppcheck open-source static analyser
-    - ``clang-tidy``           — LLVM clang-tidy modernisation checks
-    - ``clang-sa``             — Clang Static Analyzer (scan-build)
-    - ``cpplint``              — Google C++ style-guide linter
-    - ``coverity``             — Synopsys Coverity (Enterprise; exec only)
-    - ``sonarqube``            — SonarQube platform (Enterprise; exec only)
+    **Supported tools (``tool`` parameter) by language:**
+    - C++  : ``cppcheck``, ``clang-tidy``, ``clang-sa``, ``cpplint``,
+             ``coverity``\* (Enterprise), ``sonarqube``\* (Enterprise)
+    - C#   : ``roslyn``, ``stylecop``, ``scs``, ``fxcop``,
+             ``resharper``\* (Enterprise), ``sonarqube``\* (Enterprise)
+    - Go     : ``gofmt``, ``golint``, ``govet``, ``staticcheck``,
+               ``golangci-lint``, ``gosec``
+    - Python : ``vulture``, ``isort``, ``radon``, ``radon-cc``, ``radon-mi``,
+               ``pip-audit``, ``safety``, ``interrogate``
+    - JS/TS  : ``npm-audit``
+    - Java   : ``semgrep``
+    - Ruby   : ``rubocop``, ``reek``, ``brakeman``, ``fasterer``
+    - Swift  : ``swiftlint``, ``tailor``, ``sourcekitten``, ``swiftformat``
+    - Kotlin : ``diktat``, ``compose``
+    - PHP    : ``phpcs``, ``phpstan``, ``psalm``, ``phpmd``, ``exakat``
 
     **Args:**
         paths (List[str]): Source files or directories to analyse.
         tool (str): Static analysis tool to run. Default: ``cppcheck``.
-        language (str): Source language. Currently only ``cpp`` is supported.
-            Default: ``cpp``.
-        report_path (str, optional): Path to a pre-existing report file.
+        language (str): Hint for the source language (used for backward
+            compatibility and report metadata).  Execution now relies on
+            file-extension auto-detection.
+        report_path (str, optional): Path to a pre-existing C++ report file.
             When provided the tool CLI is *not* executed; the report is parsed
             instead.  All tiers may parse enterprise tool reports.
 
     **Returns:**
         ToolResponseEnvelope with a dict containing:
         - success (bool): True if analysis completed without fatal errors.
-        - language (str): Language analysed (``cpp``).
+        - language (str): Detected or provided language.
         - tool (str): Canonical tool name used.
         - finding_count (int): Number of findings returned.
         - findings (list[dict]): Structured findings.
@@ -299,16 +287,6 @@ async def run_static_analysis(
             tool_version=_pkg_version,
             tier=tier,
             duration_ms=duration_ms,
-        )
-    except _UpgradeRequired as exc:
-        duration_ms = int((time.perf_counter() - started) * 1000)
-        return make_envelope(
-            data=None,
-            tool_id="run_static_analysis",
-            tool_version=_pkg_version,
-            tier=tier,
-            duration_ms=duration_ms,
-            error=exc.tool_error,
         )
     except Exception as exc:
         duration_ms = int((time.perf_counter() - started) * 1000)

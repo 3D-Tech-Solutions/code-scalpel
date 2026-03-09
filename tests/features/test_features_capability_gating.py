@@ -67,21 +67,19 @@ class TestAnalyzeCodeLanguageGating:
             set(languages)
         ), f"Community missing languages: {expected - set(languages)}"
 
-    def test_analyze_code_community_no_rust(self, community_tier):
-        """Community should not have Rust support (not yet implemented)."""
+    def test_analyze_code_community_has_rust(self, community_tier):
+        """Community should have Rust support (implemented in v2.1.0)."""
+        # [20260305_FEATURE] Rust implemented — assertion updated
         caps = get_tool_capabilities("analyze_code", "community")
         limits = caps.get("limits", {})
         languages = limits.get("languages", [])
+        lower = [lang.lower() for lang in languages]
 
         # Go is now implemented (v2.1.0) and should be present
-        assert "go" in [
-            lang.lower() for lang in languages
-        ], "Go should be in Community tier (implemented in v2.1.0)"
+        assert "go" in lower, "Go should be in Community tier (implemented in v2.1.0)"
 
-        # Rust is not yet implemented
-        assert "rust" not in [
-            lang.lower() for lang in languages
-        ], "Rust should not be in Community tier (not yet implemented)"
+        # Rust is now implemented (v2.1.0)
+        assert "rust" in lower, "Rust should be in Community tier (implemented in v2.1.0)"
 
     def test_analyze_code_pro_extended_languages(self, pro_tier):
         """Pro tier may extend language support beyond Community."""

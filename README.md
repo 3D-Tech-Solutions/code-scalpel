@@ -1,23 +1,40 @@
 # Code Scalpel: Reduce AI Costs by 200x
 
-**Latest Release: v2.1.0 | March 3, 2026**
+**Latest Release: v2.1.1 | March 9, 2026**
 
 **Stop copy-pasting entire files into Claude.** Give your AI assistant surgical code analysis tools and reduce costs by 200x.
 
 **Result:** $450/month → $22/month. Same quality answers, 95% lower cost, 10x faster responses.
 
-![Free Forever](https://img.shields.io/badge/Free-Forever-brightgreen) ![Setup Time](https://img.shields.io/badge/Setup-2%20Minutes-blue) ![Local Execution](https://img.shields.io/badge/Runs-Locally-orange) ![Tools](https://img.shields.io/badge/Tools-23-purple) ![Languages](https://img.shields.io/badge/Languages-8-blue)
+![Free Forever](https://img.shields.io/badge/Free-Forever-brightgreen) ![Setup Time](https://img.shields.io/badge/Setup-2%20Minutes-blue) ![Local Execution](https://img.shields.io/badge/Runs-Locally-orange) ![Core Tools](https://img.shields.io/badge/Core%20Tools-22-purple) ![Languages](https://img.shields.io/badge/Languages-8-blue) [![Governed by Aegis-OS](https://img.shields.io/badge/Governed%20by-Aegis--OS-blueviolet?logo=github)](https://github.com/tescolopio/aegis-os) [![GitHub release](https://img.shields.io/github/v/release/tescolopio/aegis-os)](https://github.com/tescolopio/aegis-os/releases)
+
+> **Enterprise governance for Code Scalpel is now available via [Aegis-OS](https://github.com/tescolopio/aegis-os).** Code Scalpel ships as the default MCP toolkit inside Aegis-OS — one `docker-compose up` gives you a fully governed, policy-enforced agent environment.
+> ```bash
+> git clone https://github.com/tescolopio/aegis-os && cd aegis-os && docker-compose up
+> # Code Scalpel available at http://localhost:18090/sse
+> ```
 
 ---
 
+## What's New in v2.1.1 — Metadata Sync
+
+This patch release refreshes public packaging metadata so PyPI and Marketplace copy match the current 22-core-tool product framing.
+
 ## What's New in v2.1.0 — Full Go Support
 
-Code Scalpel now supports **8 languages** with production-quality parsers. All **23 MCP tools** work across every language.
+Code Scalpel now supports **8 languages** with production-quality parsers.
+
+> [20260306_DOCS] Core parsing, extraction, and analysis surfaces span the full
+> language set. Graph-oriented MCP tools such as `get_call_graph`,
+> `get_graph_neighborhood`, and `get_cross_file_dependencies` remain
+> Python-first today, with an initial JavaScript/TypeScript function-node parity
+> slice now available in `get_call_graph` and `get_graph_neighborhood`, plus
+> partial awareness in some shared JS/TS/Java paths.
 
 | Language | Extensions | Highlights |
 |----------|-----------|----------|
 | **Python** | `.py` | Full AST + PDG + symbolic execution |
-| **JavaScript** | `.js`, `.jsx` | AST, call graphs, extraction |
+| **JavaScript** | `.js`, `.jsx` | AST, extraction, partial graph/dependency awareness |
 | **TypeScript** | `.ts`, `.tsx` | Full type analysis, React components |
 | **Java** | `.java` | AST parsing and analysis |
 | **Go** *(new in v2.1)* | `.go` | Functions, methods, structs, interfaces, imports, goroutines |
@@ -26,6 +43,25 @@ Code Scalpel now supports **8 languages** with production-quality parsers. All *
 | **C#** *(new in v2.0)* | `.cs` | Classes, records, interfaces, generics, async/await |
 
 285 new language tests added (v2.0: 262; v2.1: +23 Go tests). Zero breaking changes to existing APIs. See [CHANGELOG](CHANGELOG.md) for full details.
+
+---
+
+## Standalone By Default, Enterprise-Compatible By Design
+
+Code Scalpel delivers **first-party parsing and analysis out of the box**. Core value does **not** depend on licensed third-party scanners or external platforms.
+
+- **Standalone core:** syntax parsing, structural analysis, IR normalization, taint analysis, symbolic execution, and baseline security findings work as native Code Scalpel capabilities.
+- **Open-tool support:** license-free local CLI tools can be executed directly when practical.
+- **Enterprise adapters:** tools like Coverity, SonarQube, ReSharper, Exakat, and similar platforms can be ingested through exported JSON, XML, SARIF, or API payloads and normalized into one internal analysis model.
+- **No hard dependency boundary:** third-party scanners can extend enterprise workflows, but they are not required for basic product value.
+
+This gives teams the right split:
+
+- **Standalone enough to work immediately** in local and self-managed environments.
+- **Enterprise-friendly enough to plug into existing AppSec, compliance, and governance stacks.**
+- **Architecturally honest** about what Code Scalpel analyzes natively versus what it federates from external systems.
+
+In short: **Code Scalpel is standalone by default, enterprise-compatible by design.**
 
 ---
 
@@ -243,7 +279,7 @@ You apply the change. File had 48 lines. Now your code is broken.
 
 ## The Solution: Surgical Tools, Not Text Parsing
 
-Code Scalpel gives AI agents **23 specialized tools** to interact with code as structured data (AST + PDG), not text:
+Code Scalpel gives AI agents **22 core tools** to interact with code as structured data (AST + PDG), not text, plus a separate capability-introspection surface for tier/license discovery:
 
 | Problem | Without Code Scalpel | With Code Scalpel |
 |---------|---------------------|-------------------|
@@ -309,18 +345,20 @@ def execute_search(query):
 
 ---
 
-## 22 Specialized Tools (All Free in Community Edition)
+## 22 Core Tools (All Free in Community Edition)
 
-Code Scalpel provides **20 development tools** + **3 system tools** = **23 total tools**.
+Code Scalpel provides **20 development tools** + **2 core system tools** = **22 core tools**.
 
-**All tools available in free Community Edition.** Pro/Enterprise tiers add enhanced limits and team features.
+**All 22 core tools are available in free Community Edition.** Pro/Enterprise tiers add enhanced limits and team features.
+
+Agent clients can also call **`get_capabilities`** to inspect the current tier/license limits. We treat that as capability introspection rather than part of the 22-core-tool product count.
 
 ### 1. Surgical Extraction & Analysis (6 Tools)
 Stop grepping. Start understanding.
 *   **`extract_code`**: Surgically extract functions/classes by name, including necessary imports.
 *   **`analyze_code`**: Parse structure, complexity, imports, and definitions.
 *   **`get_project_map`**: Instant high-level cognitive map of the project structure.
-*   **`get_call_graph`**: Trace execution flow and relationships across files.
+*   **`get_call_graph`**: Trace Python-first execution flow, with initial local JS/TS parity.
 *   **`get_symbol_references`**: Find all usages of a symbol across the project.
 *   **`get_file_context`**: Get surrounding context and metadata for any code location.
 
@@ -331,7 +369,7 @@ Real security analysis, not just regex matching.
 *   **`cross_file_security_scan`**: Track dirty data even when it passes through multiple modules.
 *   **`scan_dependencies`**: Check package dependencies for known vulnerabilities (CVEs).
 *   **`type_evaporation_scan`**: Detect TypeScript type system vulnerabilities at I/O boundaries.
-*   **`get_graph_neighborhood`**: Extract k-hop security context around specific nodes.
+*   **`get_graph_neighborhood`**: Extract Python-first k-hop security context, with initial local JS/TS function parity and JS/TS method neighborhoods when advanced resolution is available.
 
 ### 3. Safe Modification (4 Tools)
 *   **`update_symbol`**: Atomic replacement of code blocks with safety checks.
@@ -339,19 +377,17 @@ Real security analysis, not just regex matching.
 *   **`simulate_refactor`**: "Dry run" tool that verifies changes before application (safety/build).
 *   **`validate_paths`**: Pre-flight path validation for file operations (Docker-aware).
 
-### 4. Verification & Testing (4 Tools)
+### 4. Verification & Testing (3 Tools)
 Trust, but verify.
 *   **`symbolic_execute`**: Uses the Z3 theorem prover to mentally explore code paths.
 *   **`generate_unit_tests`**: Auto-creates mathematical proof-of-correctness tests from execution paths.
 *   **`crawl_project`**: Project-wide analysis of code structure and metrics.
-*   **`verify_policy_integrity`**: Cryptographically verify policy files haven't been tampered with.
 
 ### 5. Advanced Analysis (1 Tool)
-*   **`get_cross_file_dependencies`**: Analyze complex dependency chains across files.
+*   **`get_cross_file_dependencies`**: Analyze Python-first dependency chains across files.
 
-### 6. System & Infrastructure (3 Tools)
+### 6. System & Infrastructure (2 Tools)
 Infrastructure and governance tools for agent orchestration and policy enforcement.
-*   **`get_capabilities`**: Discover available tools and tier-specific limits (for agent self-discovery).
 *   **`code_policy_check`**: Evaluate code against organizational compliance standards and security policies.
 *   **`verify_policy_integrity`**: Verify policy file integrity using cryptographic signatures.
 
@@ -425,7 +461,7 @@ claude mcp add codescalpel uvx codescalpel mcp
 
 **What happens:**
 1. Claude runs `uvx codescalpel mcp` when you ask for code analysis
-2. All 20 development tools + 3 system tools become available in your AI assistant
+2. All 22 core tools become available in your AI assistant, with capability introspection available separately for tier/license discovery
 3. Your code is analyzed locally; no data sent to external servers
 
 <details>
@@ -718,7 +754,7 @@ codescalpel capabilities
 
 ## Release Information
 **Launch Date**: January 2026
-**Version**: v2.1.0
+**Version**: v2.1.1
 **License**: MIT (Community)
 
 Code Scalpel is built for the new era of **Agentic Engineering**. It is not just a linter; it is the sensory and actuator system for the next generation of AI developers.

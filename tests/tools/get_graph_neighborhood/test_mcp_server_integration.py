@@ -244,6 +244,578 @@ class TestInputValidation:
         assert not result.success or (result.success and result.min_confidence == 1.5)
 
     @pytest.mark.asyncio
+    async def test_unsupported_language_node_id_returns_guidance_error(self):
+        """Unsupported non-JS/TS language node IDs should fail with guidance."""
+        # [20260306_TEST] Keep unsupported language behavior explicit after the JS/TS parity slice.
+        from code_scalpel.mcp.server import get_graph_neighborhood
+
+        result = await get_graph_neighborhood(
+            center_node_id="java::app.routes::function::handleRequest",
+            k=1,
+            max_nodes=20,
+        )
+
+        assert not result.success
+        assert result.error is not None
+        assert "java method-node" in result.error.lower() or "java::demo/app::method::app:main" in result.error.lower()
+        assert "currently" in result.error.lower()
+
+    @pytest.mark.asyncio
+    async def test_java_method_node_extracts_local_neighborhood(self, tmp_path):
+        """[20260308_TEST] Java method node IDs should participate in local neighborhood extraction."""
+        from code_scalpel.mcp.server import get_graph_neighborhood
+
+        (tmp_path / "App.java").write_text(
+            "public class App {\n"
+            "  public static void main(String[] args) {\n"
+            "    helper();\n"
+            "  }\n\n"
+            "  private static void helper() {\n"
+            "  }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        with patch(
+            "code_scalpel.mcp.helpers.graph_helpers._get_current_tier",
+            return_value="community",
+        ):
+            result = await get_graph_neighborhood(
+                center_node_id="java::App::method::App:main",
+                project_root=str(tmp_path),
+                k=1,
+                max_nodes=20,
+            )
+
+        assert result.success
+        assert result.tier_applied == "community"
+        assert result.advanced_resolution_enabled is False
+        node_ids = {node.id for node in result.nodes}
+        assert "java::App::method::App:main" in node_ids
+        assert "java::App::method::App:helper" in node_ids
+        edge_ids = {(edge.from_id, edge.to_id) for edge in result.edges}
+        assert ("java::App::method::App:main", "java::App::method::App:helper") in edge_ids
+
+    @pytest.mark.asyncio
+    async def test_java_method_node_extracts_cross_file_neighborhood_with_pro_tier(
+        self, tmp_path
+    ):
+        """[20260308_TEST] Pro Java method neighborhoods should reuse cross-file call-graph edges."""
+        from code_scalpel.mcp.server import get_graph_neighborhood
+
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+        (package_dir / "Helper.java").write_text(
+            "package demo;\n\n"
+            "public class Helper {\n"
+            "  public static void tool() {\n"
+            "  }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        (package_dir / "App.java").write_text(
+            "package demo;\n\n"
+            "import static demo.Helper.tool;\n\n"
+            "public class App {\n"
+            "  public static void main(String[] args) {\n"
+            "    tool();\n"
+            "  }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        with patch(
+            "code_scalpel.mcp.helpers.graph_helpers._get_current_tier",
+            return_value="pro",
+        ):
+            result = await get_graph_neighborhood(
+                center_node_id="java::demo/App::method::App:main",
+                project_root=str(tmp_path),
+                k=1,
+                max_nodes=20,
+            )
+
+        assert result.success
+        assert result.tier_applied == "pro"
+        assert result.advanced_resolution_enabled is True
+        node_ids = {node.id for node in result.nodes}
+        assert "java::demo/App::method::App:main" in node_ids
+        assert "java::demo/Helper::method::Helper:tool" in node_ids
+        edge_ids = {(edge.from_id, edge.to_id) for edge in result.edges}
+        assert (
+            "java::demo/App::method::App:main",
+            "java::demo/Helper::method::Helper:tool",
+        ) in edge_ids
+
+    @pytest.mark.asyncio
+    async def test_java_method_node_prefers_overridden_child_method_with_pro_tier(
+        self, tmp_path
+    ):
+        """[20260308_TEST] Pro Java method neighborhoods should prefer overridden child methods over superclass fallbacks."""
+        from code_scalpel.mcp.server import get_graph_neighborhood
+
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+        (package_dir / "Base.java").write_text(
+            "package demo;\n\n"
+            "public class Base {\n"
+            "  protected void helper() {\n"
+            "  }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        (package_dir / "Child.java").write_text(
+            "package demo;\n\n"
+            "public class Child extends Base {\n"
+            "  @Override\n"
+            "  protected void helper() {\n"
+            "  }\n\n"
+            "  public void run() {\n"
+            "    helper();\n"
+            "    this.helper();\n"
+            "  }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        with patch(
+            "code_scalpel.mcp.helpers.graph_helpers._get_current_tier",
+            return_value="pro",
+        ):
+            result = await get_graph_neighborhood(
+                center_node_id="java::demo/Child::method::Child:run",
+                project_root=str(tmp_path),
+                k=1,
+                max_nodes=20,
+            )
+
+        assert result.success
+        node_ids = {node.id for node in result.nodes}
+        assert "java::demo/Child::method::Child:run" in node_ids
+        assert "java::demo/Child::method::Child:helper" in node_ids
+        assert "java::demo/Base::method::Base:helper" not in node_ids
+        edge_ids = {(edge.from_id, edge.to_id) for edge in result.edges}
+        assert (
+            "java::demo/Child::method::Child:run",
+            "java::demo/Child::method::Child:helper",
+        ) in edge_ids
+
+    @pytest.mark.asyncio
+    async def test_java_method_node_preserves_relative_path_metadata_and_mermaid(
+        self, tmp_path
+    ):
+        """[20260308_TEST] Java neighborhoods should preserve relative file metadata and method labels in Mermaid output."""
+        from code_scalpel.mcp.server import get_graph_neighborhood
+
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+        (package_dir / "Helper.java").write_text(
+            "package demo;\n\n"
+            "public class Helper {\n"
+            "  public static void tool() {\n"
+            "  }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        (package_dir / "App.java").write_text(
+            "package demo;\n\n"
+            "import static demo.Helper.tool;\n\n"
+            "public class App {\n"
+            "  public static void main(String[] args) {\n"
+            "    tool();\n"
+            "  }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        with patch(
+            "code_scalpel.mcp.helpers.graph_helpers._get_current_tier",
+            return_value="pro",
+        ):
+            result = await get_graph_neighborhood(
+                center_node_id="java::demo/App::method::App:main",
+                project_root=str(tmp_path),
+                k=1,
+                max_nodes=20,
+            )
+
+        assert result.success
+        nodes_by_id = {node.id: node for node in result.nodes}
+        assert (
+            nodes_by_id["java::demo/App::method::App:main"].metadata["file"]
+            == "demo/App.java"
+        )
+        assert (
+            nodes_by_id["java::demo/Helper::method::Helper:tool"].metadata["file"]
+            == "demo/Helper.java"
+        )
+        assert result.mermaid.startswith("graph TD")
+        assert '"App:main"' in result.mermaid
+        assert '"Helper:tool"' in result.mermaid
+
+    @pytest.mark.asyncio
+    async def test_java_method_node_reports_path_query_capabilities_with_enterprise_tier(
+        self, tmp_path
+    ):
+        """[20260308_TEST] Enterprise Java neighborhoods should advertise query and path-constraint capability metadata for canonical method nodes."""
+        from code_scalpel.mcp.server import get_graph_neighborhood
+
+        (tmp_path / "App.java").write_text(
+            "public class App {\n"
+            "  public static void main(String[] args) {\n"
+            "    helper();\n"
+            "  }\n\n"
+            "  private static void helper() {\n"
+            "  }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        with patch(
+            "code_scalpel.mcp.helpers.graph_helpers._get_current_tier",
+            return_value="enterprise",
+        ):
+            result = await get_graph_neighborhood(
+                center_node_id="java::App::method::App:main",
+                project_root=str(tmp_path),
+                k=1,
+                max_nodes=20,
+            )
+
+        assert result.success
+        assert result.query_supported is True
+        assert result.path_constraints_supported is True
+        assert result.traversal_rules_available is True
+        assert result.center_node_id == "java::App::method::App:main"
+
+    @pytest.mark.asyncio
+    async def test_java_overloaded_method_node_accepts_signature_selector(
+        self, tmp_path
+    ):
+        """[20260308_TEST] Java neighborhood validation should accept signature-qualified method node IDs for overloads."""
+        from code_scalpel.mcp.server import get_graph_neighborhood
+
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+        (package_dir / "Helper.java").write_text(
+            "package demo;\n\n"
+            "public class Helper {\n"
+            "  public static void tool(int value) {\n"
+            "  }\n\n"
+            "  public static void tool(String value) {\n"
+            "  }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        (package_dir / "App.java").write_text(
+            "package demo;\n\n"
+            "import static demo.Helper.tool;\n\n"
+            "public class App {\n"
+            "  public static void main(String[] args) {\n"
+            "    tool(1);\n"
+            "  }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        with patch(
+            "code_scalpel.mcp.helpers.graph_helpers._get_current_tier",
+            return_value="pro",
+        ):
+            result = await get_graph_neighborhood(
+                center_node_id="java::demo/Helper::method::Helper:tool(int)",
+                project_root=str(tmp_path),
+                k=1,
+                max_nodes=20,
+            )
+
+        assert result.success
+        node_ids = {node.id for node in result.nodes}
+        assert "java::demo/Helper::method::Helper:tool(int)" in node_ids
+
+    @pytest.mark.asyncio
+    async def test_java_method_node_uses_static_fluent_builder_chain_for_overloaded_targets(
+        self, tmp_path
+    ):
+        """[20260308_TEST] Pro Java neighborhoods should carry static builder entrypoints and longer fluent chains into signature-qualified overloaded method nodes."""
+        from code_scalpel.mcp.server import get_graph_neighborhood
+
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+        (package_dir / "Builder.java").write_text(
+            "package demo;\n\n"
+            "public class Builder {\n"
+            "  public static Builder start() {\n"
+            "    return new Builder();\n"
+            "  }\n\n"
+            "  public Builder step() {\n"
+            "    return this;\n"
+            "  }\n\n"
+            "  public String make() {\n"
+            "    return \"ok\";\n"
+            "  }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        (package_dir / "Helper.java").write_text(
+            "package demo;\n\n"
+            "public class Helper {\n"
+            "  public static void tool(int value) {\n"
+            "  }\n\n"
+            "  public static void tool(String value) {\n"
+            "  }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        (package_dir / "App.java").write_text(
+            "package demo;\n\n"
+            "import static demo.Helper.tool;\n\n"
+            "public class App {\n"
+            "  public static void main(String[] args) {\n"
+            "    tool(Builder.start().step().make());\n"
+            "  }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        with patch(
+            "code_scalpel.mcp.helpers.graph_helpers._get_current_tier",
+            return_value="pro",
+        ):
+            result = await get_graph_neighborhood(
+                center_node_id="java::demo/App::method::App:main",
+                project_root=str(tmp_path),
+                k=1,
+                max_nodes=40,
+            )
+
+        assert result.success
+        node_ids = {node.id for node in result.nodes}
+        assert "java::demo/App::method::App:main" in node_ids
+        assert "java::demo/Builder::method::Builder:start" in node_ids
+        assert "java::demo/Builder::method::Builder:step" in node_ids
+        assert "java::demo/Builder::method::Builder:make" in node_ids
+        assert "java::demo/Helper::method::Helper:tool(String)" in node_ids
+        assert "java::demo/Helper::method::Helper:tool(int)" not in node_ids
+        edge_ids = {(edge.from_id, edge.to_id) for edge in result.edges}
+        assert (
+            "java::demo/App::method::App:main",
+            "java::demo/Helper::method::Helper:tool(String)",
+        ) in edge_ids
+
+    @pytest.mark.asyncio
+    async def test_java_method_node_uses_static_fluent_builder_chain_for_overloaded_constructors(
+        self, tmp_path
+    ):
+        """[20260308_TEST] Pro Java neighborhoods should carry static builder entrypoints and longer fluent chains into signature-qualified constructor nodes."""
+        from code_scalpel.mcp.server import get_graph_neighborhood
+
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+        (package_dir / "Builder.java").write_text(
+            "package demo;\n\n"
+            "public class Builder {\n"
+            "  public static Builder start() {\n"
+            "    return new Builder();\n"
+            "  }\n\n"
+            "  public Builder step() {\n"
+            "    return this;\n"
+            "  }\n\n"
+            "  public String make() {\n"
+            "    return \"ok\";\n"
+            "  }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        (package_dir / "Helper.java").write_text(
+            "package demo;\n\n"
+            "public class Helper {\n"
+            "  public Helper(int value) {\n"
+            "  }\n\n"
+            "  public Helper(String value) {\n"
+            "  }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        (package_dir / "App.java").write_text(
+            "package demo;\n\n"
+            "public class App {\n"
+            "  public static void main(String[] args) {\n"
+            "    new Helper(Builder.start().step().make());\n"
+            "  }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        with patch(
+            "code_scalpel.mcp.helpers.graph_helpers._get_current_tier",
+            return_value="pro",
+        ):
+            result = await get_graph_neighborhood(
+                center_node_id="java::demo/App::method::App:main",
+                project_root=str(tmp_path),
+                k=1,
+                max_nodes=40,
+            )
+
+        assert result.success
+        node_ids = {node.id for node in result.nodes}
+        assert "java::demo/Builder::method::Builder:start" in node_ids
+        assert "java::demo/Builder::method::Builder:step" in node_ids
+        assert "java::demo/Builder::method::Builder:make" in node_ids
+        assert "java::demo/Helper::method::Helper:Helper(String)" in node_ids
+        assert "java::demo/Helper::method::Helper:Helper(int)" not in node_ids
+        edge_ids = {(edge.from_id, edge.to_id) for edge in result.edges}
+        assert (
+            "java::demo/App::method::App:main",
+            "java::demo/Helper::method::Helper:Helper(String)",
+        ) in edge_ids
+
+    @pytest.mark.asyncio
+    async def test_typescript_node_id_extracts_neighborhood(self, tmp_path):
+        """TypeScript local function nodes should participate in neighborhood extraction."""
+        # [20260306_TEST] Initial JS/TS graph-neighborhood parity slice.
+        from code_scalpel.mcp.server import get_graph_neighborhood
+
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        (src_dir / "util.ts").write_text(
+            "export function helper() {\n"
+            "  return 1;\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        (src_dir / "main.ts").write_text(
+            'import { helper } from "./util";\n\n'
+            "export function entry() {\n"
+            "  return helper();\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        with patch(
+            "code_scalpel.mcp.helpers.graph_helpers._get_current_tier",
+            return_value="community",
+        ):
+            result = await get_graph_neighborhood(
+                center_node_id="typescript::src/main::function::entry",
+                project_root=str(tmp_path),
+                k=1,
+                max_nodes=20,
+            )
+
+        assert result.success
+        assert result.tier_applied == "community"
+        assert result.max_k_applied == 2
+        assert result.max_nodes_applied == 100
+        assert result.advanced_resolution_enabled is False
+        node_ids = {node.id for node in result.nodes}
+        assert "typescript::src/main::function::entry" in node_ids
+        assert "external::external::function::helper" in node_ids
+        edge_ids = {(edge.from_id, edge.to_id) for edge in result.edges}
+        assert (
+            "typescript::src/main::function::entry",
+            "external::external::function::helper",
+        ) in edge_ids
+
+    @pytest.mark.asyncio
+    async def test_typescript_method_node_extracts_neighborhood_with_pro_tier(
+        self, tmp_path
+    ):
+        """TypeScript method node IDs should work when advanced resolution is enabled."""
+        # [20260306_TEST] JS/TS method-node neighborhood parity uses the advanced builder path.
+        from code_scalpel.mcp.server import get_graph_neighborhood
+
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        (src_dir / "service.ts").write_text(
+            "export class Service {\n"
+            "  helper(): number {\n"
+            "    return 1;\n"
+            "  }\n\n"
+            "  run(): number {\n"
+            "    return this.helper();\n"
+            "  }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        with patch(
+            "code_scalpel.mcp.helpers.graph_helpers._get_current_tier",
+            return_value="pro",
+        ):
+            result = await get_graph_neighborhood(
+                center_node_id="typescript::src/service::method::Service:run",
+                project_root=str(tmp_path),
+                k=1,
+                max_nodes=20,
+            )
+
+        assert result.success
+        assert result.tier_applied == "pro"
+        assert result.max_k_applied is None
+        assert result.max_nodes_applied is None
+        assert result.advanced_resolution_enabled is True
+        node_ids = {node.id for node in result.nodes}
+        assert "typescript::src/service::method::Service:run" in node_ids
+        assert "typescript::src/service::method::Service:helper" in node_ids
+        edge_ids = {(edge.from_id, edge.to_id) for edge in result.edges}
+        assert (
+            "typescript::src/service::method::Service:run",
+            "typescript::src/service::method::Service:helper",
+        ) in edge_ids
+
+    @pytest.mark.asyncio
+    async def test_typescript_neighborhood_clamps_to_community_limits(self, tmp_path):
+        """[20260307_TEST] TypeScript neighborhood slices should honor Community k/node limits."""
+        from code_scalpel.mcp.server import get_graph_neighborhood
+
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        (src_dir / "leaf.ts").write_text(
+            "export function leaf(): number {\n  return 1;\n}\n",
+            encoding="utf-8",
+        )
+        (src_dir / "mid.ts").write_text(
+            'import { leaf } from "./leaf";\n\n'
+            "export function mid(): number {\n  return leaf();\n}\n",
+            encoding="utf-8",
+        )
+        (src_dir / "util.ts").write_text(
+            'import { mid } from "./mid";\n\n'
+            "export function helper(): number {\n  return mid();\n}\n",
+            encoding="utf-8",
+        )
+        (src_dir / "main.ts").write_text(
+            'import { helper } from "./util";\n\n'
+            "export function entry(): number {\n  return helper();\n}\n",
+            encoding="utf-8",
+        )
+
+        with patch(
+            "code_scalpel.mcp.helpers.graph_helpers._get_current_tier",
+            return_value="community",
+        ):
+            result = await get_graph_neighborhood(
+                center_node_id="typescript::src/main::function::entry",
+                project_root=str(tmp_path),
+                k=10,
+                max_nodes=500,
+            )
+
+        assert result.success
+        assert result.tier_applied == "community"
+        assert result.k == 2
+        assert result.max_k_applied == 2
+        assert result.max_nodes_applied == 100
+        node_ids = {node.id for node in result.nodes}
+        assert "typescript::src/main::function::entry" in node_ids
+        assert "external::external::function::helper" in node_ids
+        assert "typescript::src/util::function::helper" not in node_ids
+        assert "typescript::src/mid::function::mid" not in node_ids
+        assert "typescript::src/leaf::function::leaf" not in node_ids
+
+    @pytest.mark.asyncio
     async def test_missing_required_parameter_center_node_id(self):
         """Missing center_node_id handled gracefully."""
         # [20260104_TEST] Missing required parameter handling

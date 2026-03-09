@@ -161,6 +161,20 @@ class PMDParser:
             print(f"XML parse error: {e}")
         return violations
 
+    def execute_pmd(self, file_path: str) -> list[PMDViolation]:
+        """Run PMD on *file_path* and return violations.
+
+        [20260304_FEATURE] execute_* wrapper for polyglot_dispatch integration.
+        Returns an empty list if PMD is not installed or fails.
+        """
+        try:
+            xml_output = self.run_pmd(file_path)
+            if not xml_output:
+                return []
+            return self.parse_xml(xml_output)
+        except Exception:
+            return []
+
     def parse_file(self, xml_file: str) -> list[PMDViolation]:
         """
         Parse PMD XML output from file.

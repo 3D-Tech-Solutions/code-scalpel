@@ -60,6 +60,7 @@ class Language(Enum):
     RUBY = "ruby"
     SWIFT = "swift"
     PHP = "php"
+    RUST = "rust"  # [20260305_FEATURE] Rust language support
 
 
 @dataclass

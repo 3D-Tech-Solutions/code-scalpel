@@ -4,7 +4,11 @@ Comprehensive tests for get_call_graph MCP tool.
 Tests the MCP interface, Pydantic models, and async wrapper.
 """
 
+from importlib.util import find_spec
+from pathlib import Path
+
 import pytest
+from unittest.mock import patch
 
 from code_scalpel.mcp.server import (
     CallEdgeModel,
@@ -13,6 +17,134 @@ from code_scalpel.mcp.server import (
     _get_call_graph_sync,
     get_call_graph,
 )
+from code_scalpel.ir.nodes import (
+    IRAttribute,
+    IRCall,
+    IRFunctionDef,
+    IRImport,
+    IRModule,
+    IRName,
+    SourceLocation,
+)
+
+
+def _tree_sitter_available(module_name: str) -> bool:
+    return find_spec(module_name) is not None
+
+
+GENERIC_POLYGLOT_GET_CALL_GRAPH_CASES = [
+    pytest.param(
+        "main.go",
+        "package main\n\nfunc helper() {}\n\nfunc main() {\n    helper()\n}\n",
+        "main",
+        "helper",
+        marks=pytest.mark.skipif(
+            not _tree_sitter_available("tree_sitter_go"),
+            reason="tree_sitter_go not installed",
+        ),
+        id="go",
+    ),
+    pytest.param(
+        "main.rs",
+        "fn helper() {}\n\nfn main() {\n    helper();\n}\n",
+        "main",
+        "helper",
+        marks=pytest.mark.skipif(
+            not _tree_sitter_available("tree_sitter_rust"),
+            reason="tree_sitter_rust not installed",
+        ),
+        id="rust",
+    ),
+    pytest.param(
+        "main.rb",
+        "def helper\nend\n\ndef main\n  helper\nend\n",
+        "main",
+        "helper",
+        marks=pytest.mark.skipif(
+            not _tree_sitter_available("tree_sitter_ruby"),
+            reason="tree_sitter_ruby not installed",
+        ),
+        id="ruby",
+    ),
+    pytest.param(
+        "main.php",
+        "<?php\nfunction helper() {}\nfunction main() { helper(); }\n",
+        "main",
+        "helper",
+        marks=pytest.mark.skipif(
+            not _tree_sitter_available("tree_sitter_php"),
+            reason="tree_sitter_php not installed",
+        ),
+        id="php",
+    ),
+    pytest.param(
+        "main.swift",
+        "func helper() {}\n\nfunc main() {\n    helper()\n}\n",
+        "main",
+        "helper",
+        marks=pytest.mark.skipif(
+            not _tree_sitter_available("tree_sitter_swift"),
+            reason="tree_sitter_swift not installed",
+        ),
+        id="swift",
+    ),
+    pytest.param(
+        "main.kt",
+        "fun helper() {}\n\nfun main() {\n    helper()\n}\n",
+        "main",
+        "helper",
+        marks=pytest.mark.skipif(
+            not _tree_sitter_available("tree_sitter_kotlin"),
+            reason="tree_sitter_kotlin not installed",
+        ),
+        id="kotlin",
+    ),
+    pytest.param(
+        "main.c",
+        "void helper(void) {}\n\nint main(void) {\n    helper();\n    return 0;\n}\n",
+        "main",
+        "helper",
+        marks=pytest.mark.skipif(
+            not _tree_sitter_available("tree_sitter_c"),
+            reason="tree_sitter_c not installed",
+        ),
+        id="c",
+    ),
+    pytest.param(
+        "main.cpp",
+        "void helper() {}\n\nint main() {\n    helper();\n    return 0;\n}\n",
+        "main",
+        "helper",
+        marks=pytest.mark.skipif(
+            not _tree_sitter_available("tree_sitter_cpp"),
+            reason="tree_sitter_cpp not installed",
+        ),
+        id="cpp",
+    ),
+    pytest.param(
+        "Program.cs",
+        "public class Program {\n    public static void Helper() { }\n\n    public static void Main(string[] args) {\n        Helper();\n    }\n}\n",
+        "Program.Main",
+        "Program.Helper",
+        marks=pytest.mark.skipif(
+            not _tree_sitter_available("tree_sitter_c_sharp"),
+            reason="tree_sitter_c_sharp not installed",
+        ),
+        id="csharp",
+    ),
+]
+
+GENERIC_FALLBACK_EXTENSION_CASES = [
+    "main.go",
+    "main.rs",
+    "main.rb",
+    "main.php",
+    "main.swift",
+    "main.kt",
+    "main.c",
+    "main.cpp",
+    "Program.cs",
+]
 
 # ============================================================================
 # Test Pydantic Models
@@ -116,6 +248,19 @@ class TestCallGraphResultModel:
         assert result.error == "Something went wrong"
         assert result.nodes == []
 
+    def test_result_with_polyglot_parity_metadata(self):
+        """[20260308_TEST] Call graph result exposes explicit polyglot parity metadata."""
+        result = CallGraphResultModel(
+            language_parity={"python": "advanced", "go": "method_local_slice"},
+            parity_legend={"advanced": "deep", "method_local_slice": "local"},
+            runtime_scope_summary="summary",
+        )
+
+        assert result.language_parity["python"] == "advanced"
+        assert result.language_parity["go"] == "method_local_slice"
+        assert result.parity_legend["method_local_slice"] == "local"
+        assert result.runtime_scope_summary == "summary"
+
 
 # ============================================================================
 # Test Synchronous Implementation
@@ -215,6 +360,22 @@ if __name__ == \"__main__\":
         assert result.error is None
         assert result.nodes == []
         assert result.edges == []
+
+    def test_sync_exposes_polyglot_foundation_metadata(self, sample_project):
+        """[20260308_TEST] Sync get_call_graph exposes current polyglot parity levels."""
+        result = _get_call_graph_sync(str(sample_project), None, 10, False)
+
+        assert result.error is None
+        assert result.language_parity["python"] == "advanced"
+        assert result.language_parity["javascript"] == "runtime_slice"
+        assert result.language_parity["typescript"] == "runtime_slice"
+        assert result.language_parity["java"] == "runtime_slice"
+        assert result.language_parity["go"] == "method_local_slice"
+        assert result.language_parity["rust"] == "method_local_slice"
+        assert "advanced" in result.parity_legend
+        assert "method_local_slice" in result.parity_legend
+        assert result.runtime_scope_summary is not None
+        assert "conservative import-aware edges" in result.runtime_scope_summary
 
 
 # ============================================================================
@@ -456,9 +617,12 @@ function main() {
 main();
 """)
 
-        result = await get_call_graph(
-            project_root=str(tmp_path), include_circular_import_check=False
-        )
+        with patch(
+            "code_scalpel.mcp.tools.graph._get_current_tier", return_value="community"
+        ):
+            result = await get_call_graph(
+                project_root=str(tmp_path), include_circular_import_check=False
+            )
         assert result.error is None
         assert "graph TD" in result.mermaid
 
@@ -492,12 +656,23 @@ function main(): number {
 main();
 """)
 
-        result = await get_call_graph(
-            project_root=str(tmp_path), include_circular_import_check=False
-        )
+        with patch(
+            "code_scalpel.mcp.tools.graph._get_current_tier", return_value="community"
+        ):
+            result = await get_call_graph(
+                project_root=str(tmp_path), include_circular_import_check=False
+            )
 
         assert result.error is None
         assert "graph TD" in result.mermaid
+        assert result.tier_applied == "community"
+        assert result.max_depth_applied == 10
+        assert result.max_nodes_applied == 200
+        assert result.advanced_resolution_enabled is False
+        assert result.language_parity["javascript"] == "runtime_slice"
+        assert result.language_parity["typescript"] == "runtime_slice"
+        assert result.language_parity["java"] == "runtime_slice"
+        assert result.language_parity["go"] == "method_local_slice"
 
         files = {n.file for n in result.nodes}
         assert "index.ts" in files
@@ -505,6 +680,1173 @@ main();
 
         # At minimum we should see a call from main() to foo().
         assert any(e.caller.endswith(":main") for e in result.edges)
+
+    @pytest.mark.asyncio
+    async def test_ts_project_preserves_pro_metadata(self, tmp_path):
+        """[20260307_TEST] TypeScript call graph slices should preserve Pro tier metadata."""
+        (tmp_path / "util.ts").write_text(
+            """
+export function foo(value: number): number {
+    return value + 1;
+}
+"""
+        )
+
+        (tmp_path / "index.ts").write_text(
+            """
+import { foo } from './util.ts';
+
+function main(): number {
+    return foo(1);
+}
+
+main();
+"""
+        )
+
+        with patch("code_scalpel.mcp.tools.graph._get_current_tier", return_value="pro"):
+            result = await get_call_graph(
+                project_root=str(tmp_path), include_circular_import_check=False
+            )
+
+        assert result.error is None
+        assert result.tier_applied == "pro"
+        assert result.max_depth_applied is None
+        assert result.max_nodes_applied is None
+        assert result.advanced_resolution_enabled is True
+
+
+class TestJavaSupport:
+    """Basic Java call graph foundation coverage."""
+
+    @pytest.mark.asyncio
+    async def test_java_project_generates_canonical_method_nodes(self, tmp_path):
+        """[20260307_TEST] get_call_graph should surface Java Class.method nodes once builder support exists."""
+        (tmp_path / "App.java").write_text(
+            """
+public class App {
+    public static void main(String[] args) {
+        helper();
+    }
+
+    private static void helper() {
+        utility();
+    }
+
+    private static void utility() {
+    }
+}
+"""
+        )
+
+        with patch(
+            "code_scalpel.mcp.tools.graph._get_current_tier", return_value="community"
+        ):
+            result = await get_call_graph(
+                project_root=str(tmp_path), include_circular_import_check=False
+            )
+
+        assert result.error is None
+        assert result.tier_applied == "community"
+        assert result.max_depth_applied == 10
+        assert result.max_nodes_applied == 200
+        assert result.advanced_resolution_enabled is False
+
+        names = {node.name for node in result.nodes}
+        assert "App.main" in names
+        assert "App.helper" in names
+        assert "App.utility" in names
+
+        files = {node.file for node in result.nodes}
+        assert "App.java" in files
+
+        assert any(
+            edge.caller.endswith(":App.main") and edge.callee.endswith(":App.helper")
+            for edge in result.edges
+        )
+
+    @pytest.mark.asyncio
+    async def test_java_project_preserves_pro_cross_file_resolution(self, tmp_path):
+        """[20260307_TEST] Pro Java get_call_graph should resolve static imports across files."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+
+        (package_dir / "Helper.java").write_text(
+            """
+package demo;
+
+public class Helper {
+    public static void tool() {
+    }
+}
+"""
+        )
+
+        (package_dir / "App.java").write_text(
+            """
+package demo;
+
+import static demo.Helper.tool;
+
+public class App {
+    public static void main(String[] args) {
+        tool();
+    }
+}
+"""
+        )
+
+        with patch("code_scalpel.mcp.tools.graph._get_current_tier", return_value="pro"):
+            result = await get_call_graph(
+                project_root=str(tmp_path), include_circular_import_check=False
+            )
+
+        assert result.error is None
+        assert result.tier_applied == "pro"
+        assert result.advanced_resolution_enabled is True
+        assert any(
+            edge.caller == "demo/App.java:App.main"
+            and edge.callee == "demo/Helper.java:Helper.tool"
+            for edge in result.edges
+        )
+
+    @pytest.mark.asyncio
+    async def test_java_project_mermaid_and_paths_stay_relative(self, tmp_path):
+        """[20260308_TEST] Java call graph slices should preserve relative file paths and canonical method labels in Mermaid output."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+
+        (package_dir / "Helper.java").write_text(
+            """
+package demo;
+
+public class Helper {
+    public static void tool() {
+    }
+}
+"""
+        )
+
+        (package_dir / "App.java").write_text(
+            """
+package demo;
+
+import static demo.Helper.tool;
+
+public class App {
+    public static void main(String[] args) {
+        tool();
+    }
+}
+"""
+        )
+
+        with patch("code_scalpel.mcp.tools.graph._get_current_tier", return_value="pro"):
+            result = await get_call_graph(
+                project_root=str(tmp_path), include_circular_import_check=False
+            )
+
+        assert result.error is None
+        assert {node.file for node in result.nodes} >= {"demo/App.java", "demo/Helper.java"}
+        assert result.mermaid.startswith("graph TD")
+        assert "App.main" in result.mermaid
+        assert "Helper.tool" in result.mermaid
+        assert ":L" in result.mermaid
+
+    @pytest.mark.asyncio
+    async def test_java_project_path_query_returns_canonical_method_path(self, tmp_path):
+        """[20260308_TEST] Java call graph path queries should return canonical file-backed method paths."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+
+        (package_dir / "Helper.java").write_text(
+            """
+package demo;
+
+public class Helper {
+    public static void tool() {
+    }
+}
+"""
+        )
+
+        (package_dir / "App.java").write_text(
+            """
+package demo;
+
+import static demo.Helper.tool;
+
+public class App {
+    public static void main(String[] args) {
+        tool();
+    }
+}
+"""
+        )
+
+        with patch("code_scalpel.mcp.tools.graph._get_current_tier", return_value="pro"):
+            result = await get_call_graph(
+                project_root=str(tmp_path),
+                include_circular_import_check=False,
+                paths_from="demo/App.java:App.main",
+                paths_to="demo/Helper.java:Helper.tool",
+            )
+
+        assert result.error is None
+        assert result.paths == [["demo/App.java:App.main", "demo/Helper.java:Helper.tool"]]
+
+    @pytest.mark.asyncio
+    async def test_java_project_resolves_overloaded_static_import_to_signature_node(
+        self, tmp_path
+    ):
+        """[20260308_TEST] Java call graph should route overloaded static imports to signature-qualified nodes."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+
+        (package_dir / "Helper.java").write_text(
+            """
+package demo;
+
+public class Helper {
+    public static void tool(int value) {
+    }
+
+    public static void tool(String value) {
+    }
+}
+"""
+        )
+
+        (package_dir / "App.java").write_text(
+            """
+package demo;
+
+import static demo.Helper.tool;
+
+public class App {
+    public static void main(String[] args) {
+        tool(1);
+    }
+}
+"""
+        )
+
+        with patch("code_scalpel.mcp.tools.graph._get_current_tier", return_value="pro"):
+            result = await get_call_graph(
+                project_root=str(tmp_path),
+                include_circular_import_check=False,
+                paths_from="demo/App.java:App.main",
+                paths_to="demo/Helper.java:Helper.tool(int)",
+            )
+
+        assert result.error is None
+        names = {node.name for node in result.nodes}
+        assert "Helper.tool(int)" in names
+        assert "Helper.tool(String)" in names
+        assert any(
+            edge.caller == "demo/App.java:App.main"
+            and edge.callee == "demo/Helper.java:Helper.tool(int)"
+            for edge in result.edges
+        )
+        assert not any(
+            edge.caller == "demo/App.java:App.main"
+            and edge.callee == "demo/Helper.java:Helper.tool(String)"
+            for edge in result.edges
+        )
+        assert result.paths == [["demo/App.java:App.main", "demo/Helper.java:Helper.tool(int)"]]
+
+    @pytest.mark.asyncio
+    async def test_java_project_infers_method_return_types_for_overloaded_calls(
+        self, tmp_path
+    ):
+        """[20260308_TEST] Java call graph should use method return types when resolving overloaded call targets."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+
+        (package_dir / "Factory.java").write_text(
+            """
+package demo;
+
+public class Factory {
+    public static String make() {
+        return "ok";
+    }
+}
+"""
+        )
+
+        (package_dir / "Helper.java").write_text(
+            """
+package demo;
+
+public class Helper {
+    public static void tool(int value) {
+    }
+
+    public static void tool(String value) {
+    }
+}
+"""
+        )
+
+        (package_dir / "App.java").write_text(
+            """
+package demo;
+
+import static demo.Factory.make;
+import static demo.Helper.tool;
+
+public class App {
+    public static void main(String[] args) {
+        tool(make());
+    }
+}
+"""
+        )
+
+        with patch("code_scalpel.mcp.tools.graph._get_current_tier", return_value="pro"):
+            result = await get_call_graph(
+                project_root=str(tmp_path),
+                include_circular_import_check=False,
+                paths_from="demo/App.java:App.main",
+                paths_to="demo/Helper.java:Helper.tool(String)",
+            )
+
+        assert result.error is None
+        assert any(
+            edge.caller == "demo/App.java:App.main"
+            and edge.callee == "demo/Factory.java:Factory.make"
+            for edge in result.edges
+        )
+        assert any(
+            edge.caller == "demo/App.java:App.main"
+            and edge.callee == "demo/Helper.java:Helper.tool(String)"
+            for edge in result.edges
+        )
+        assert not any(
+            edge.caller == "demo/App.java:App.main"
+            and edge.callee == "demo/Helper.java:Helper.tool(int)"
+            for edge in result.edges
+        )
+        assert result.paths == [["demo/App.java:App.main", "demo/Helper.java:Helper.tool(String)"]]
+
+    @pytest.mark.asyncio
+    async def test_java_project_infers_method_return_types_for_overloaded_constructors(
+        self, tmp_path
+    ):
+        """[20260308_TEST] Java call graph should use method return types when resolving overloaded constructors."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+
+        (package_dir / "Factory.java").write_text(
+            """
+package demo;
+
+public class Factory {
+    public static String make() {
+        return "ok";
+    }
+}
+"""
+        )
+
+        (package_dir / "Helper.java").write_text(
+            """
+package demo;
+
+public class Helper {
+    public Helper(int value) {
+    }
+
+    public Helper(String value) {
+    }
+
+    public void run() {
+    }
+}
+"""
+        )
+
+        (package_dir / "App.java").write_text(
+            """
+package demo;
+
+import static demo.Factory.make;
+
+public class App {
+    public static void main(String[] args) {
+        Helper helper = new Helper(make());
+        helper.run();
+    }
+}
+"""
+        )
+
+        with patch("code_scalpel.mcp.tools.graph._get_current_tier", return_value="pro"):
+            result = await get_call_graph(
+                project_root=str(tmp_path),
+                include_circular_import_check=False,
+                paths_from="demo/App.java:App.main",
+                paths_to="demo/Helper.java:Helper.Helper(String)",
+            )
+
+        assert result.error is None
+        assert any(
+            edge.caller == "demo/App.java:App.main"
+            and edge.callee == "demo/Factory.java:Factory.make"
+            for edge in result.edges
+        )
+        assert any(
+            edge.caller == "demo/App.java:App.main"
+            and edge.callee == "demo/Helper.java:Helper.Helper(String)"
+            for edge in result.edges
+        )
+        assert not any(
+            edge.caller == "demo/App.java:App.main"
+            and edge.callee == "demo/Helper.java:Helper.Helper(int)"
+            for edge in result.edges
+        )
+        assert result.paths == [["demo/App.java:App.main", "demo/Helper.java:Helper.Helper(String)"]]
+
+    @pytest.mark.asyncio
+    async def test_java_project_infers_chained_builder_return_types_for_overloaded_calls(
+        self, tmp_path
+    ):
+        """[20260308_TEST] Java call graph should follow chained builder-style method returns into overloaded call targets."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+
+        (package_dir / "Builder.java").write_text(
+            """
+package demo;
+
+public class Builder {
+    public String make() {
+        return "ok";
+    }
+}
+"""
+        )
+
+        (package_dir / "Helper.java").write_text(
+            """
+package demo;
+
+public class Helper {
+    public static void tool(int value) {
+    }
+
+    public static void tool(String value) {
+    }
+}
+"""
+        )
+
+        (package_dir / "App.java").write_text(
+            """
+package demo;
+
+import static demo.Helper.tool;
+
+public class App {
+    public static void main(String[] args) {
+        tool(new Builder().make());
+    }
+}
+"""
+        )
+
+        with patch("code_scalpel.mcp.tools.graph._get_current_tier", return_value="pro"):
+            result = await get_call_graph(
+                project_root=str(tmp_path),
+                include_circular_import_check=False,
+                paths_from="demo/App.java:App.main",
+                paths_to="demo/Helper.java:Helper.tool(String)",
+            )
+
+        assert result.error is None
+        assert any(
+            edge.caller == "demo/App.java:App.main"
+            and edge.callee == "demo/Builder.java:Builder.make"
+            for edge in result.edges
+        )
+        assert any(
+            edge.caller == "demo/App.java:App.main"
+            and edge.callee == "demo/Helper.java:Helper.tool(String)"
+            for edge in result.edges
+        )
+        assert not any(
+            edge.caller == "demo/App.java:App.main"
+            and edge.callee == "demo/Helper.java:Helper.tool(int)"
+            for edge in result.edges
+        )
+
+    @pytest.mark.asyncio
+    async def test_java_project_infers_cast_types_for_overloaded_constructors(
+        self, tmp_path
+    ):
+        """[20260308_TEST] Java call graph should use explicit casts when resolving overloaded constructors."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+
+        (package_dir / "Helper.java").write_text(
+            """
+package demo;
+
+public class Helper {
+    public Helper(int value) {
+    }
+
+    public Helper(String value) {
+    }
+}
+"""
+        )
+
+        (package_dir / "App.java").write_text(
+            """
+package demo;
+
+public class App {
+    public static void main(String[] args) {
+        Object raw = "ok";
+        new Helper((String) raw);
+    }
+}
+"""
+        )
+
+        with patch("code_scalpel.mcp.tools.graph._get_current_tier", return_value="pro"):
+            result = await get_call_graph(
+                project_root=str(tmp_path),
+                include_circular_import_check=False,
+                paths_from="demo/App.java:App.main",
+                paths_to="demo/Helper.java:Helper.Helper(String)",
+            )
+
+        assert result.error is None
+        assert any(
+            edge.caller == "demo/App.java:App.main"
+            and edge.callee == "demo/Helper.java:Helper.Helper(String)"
+            for edge in result.edges
+        )
+        assert not any(
+            edge.caller == "demo/App.java:App.main"
+            and edge.callee == "demo/Helper.java:Helper.Helper(int)"
+            for edge in result.edges
+        )
+
+    @pytest.mark.asyncio
+    async def test_java_project_infers_static_fluent_builder_return_types_for_overloaded_calls(
+        self, tmp_path
+    ):
+        """[20260308_TEST] Java call graph should use static builder entrypoints and longer fluent chains when selecting overloaded call targets."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+
+        (package_dir / "Builder.java").write_text(
+            """
+package demo;
+
+public class Builder {
+    public static Builder start() {
+        return new Builder();
+    }
+
+    public Builder step() {
+        return this;
+    }
+
+    public String make() {
+        return "ok";
+    }
+}
+"""
+        )
+
+        (package_dir / "Helper.java").write_text(
+            """
+package demo;
+
+public class Helper {
+    public static void tool(int value) {
+    }
+
+    public static void tool(String value) {
+    }
+}
+"""
+        )
+
+        (package_dir / "App.java").write_text(
+            """
+package demo;
+
+import static demo.Helper.tool;
+
+public class App {
+    public static void main(String[] args) {
+        tool(Builder.start().step().make());
+    }
+}
+"""
+        )
+
+        with patch("code_scalpel.mcp.tools.graph._get_current_tier", return_value="pro"):
+            result = await get_call_graph(
+                project_root=str(tmp_path),
+                include_circular_import_check=False,
+                paths_from="demo/App.java:App.main",
+                paths_to="demo/Helper.java:Helper.tool(String)",
+            )
+
+        assert result.error is None
+        assert any(
+            edge.caller == "demo/App.java:App.main"
+            and edge.callee == "demo/Builder.java:Builder.start"
+            for edge in result.edges
+        )
+        assert any(
+            edge.caller == "demo/App.java:App.main"
+            and edge.callee == "demo/Builder.java:Builder.step"
+            for edge in result.edges
+        )
+        assert any(
+            edge.caller == "demo/App.java:App.main"
+            and edge.callee == "demo/Builder.java:Builder.make"
+            for edge in result.edges
+        )
+        assert any(
+            edge.caller == "demo/App.java:App.main"
+            and edge.callee == "demo/Helper.java:Helper.tool(String)"
+            for edge in result.edges
+        )
+        assert not any(
+            edge.caller == "demo/App.java:App.main"
+            and edge.callee == "demo/Helper.java:Helper.tool(int)"
+            for edge in result.edges
+        )
+
+    @pytest.mark.asyncio
+    async def test_java_project_infers_static_fluent_builder_return_types_for_overloaded_constructors(
+        self, tmp_path
+    ):
+        """[20260308_TEST] Java call graph should use static builder entrypoints and longer fluent chains when selecting overloaded constructors."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+
+        (package_dir / "Builder.java").write_text(
+            """
+package demo;
+
+public class Builder {
+    public static Builder start() {
+        return new Builder();
+    }
+
+    public Builder step() {
+        return this;
+    }
+
+    public String make() {
+        return "ok";
+    }
+}
+"""
+        )
+
+        (package_dir / "Helper.java").write_text(
+            """
+package demo;
+
+public class Helper {
+    public Helper(int value) {
+    }
+
+    public Helper(String value) {
+    }
+}
+"""
+        )
+
+        (package_dir / "App.java").write_text(
+            """
+package demo;
+
+public class App {
+    public static void main(String[] args) {
+        new Helper(Builder.start().step().make());
+    }
+}
+"""
+        )
+
+        with patch("code_scalpel.mcp.tools.graph._get_current_tier", return_value="pro"):
+            result = await get_call_graph(
+                project_root=str(tmp_path),
+                include_circular_import_check=False,
+                paths_from="demo/App.java:App.main",
+                paths_to="demo/Helper.java:Helper.Helper(String)",
+            )
+
+        assert result.error is None
+        assert any(
+            edge.caller == "demo/App.java:App.main"
+            and edge.callee == "demo/Builder.java:Builder.start"
+            for edge in result.edges
+        )
+        assert any(
+            edge.caller == "demo/App.java:App.main"
+            and edge.callee == "demo/Builder.java:Builder.step"
+            for edge in result.edges
+        )
+        assert any(
+            edge.caller == "demo/App.java:App.main"
+            and edge.callee == "demo/Builder.java:Builder.make"
+            for edge in result.edges
+        )
+        assert any(
+            edge.caller == "demo/App.java:App.main"
+            and edge.callee == "demo/Helper.java:Helper.Helper(String)"
+            for edge in result.edges
+        )
+        assert not any(
+            edge.caller == "demo/App.java:App.main"
+            and edge.callee == "demo/Helper.java:Helper.Helper(int)"
+            for edge in result.edges
+        )
+
+    @pytest.mark.asyncio
+    async def test_java_project_preserves_pro_imported_instance_resolution(self, tmp_path):
+        """[20260307_TEST] Pro Java get_call_graph should resolve typed imported instance calls."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+
+        (package_dir / "Helper.java").write_text(
+            """
+package demo;
+
+public class Helper {
+    public void tool() {
+    }
+}
+"""
+        )
+
+        (package_dir / "App.java").write_text(
+            """
+package demo;
+
+import demo.Helper;
+
+public class App {
+    public static void main(String[] args) {
+        Helper helper = new Helper();
+        helper.tool();
+    }
+}
+"""
+        )
+
+        with patch("code_scalpel.mcp.tools.graph._get_current_tier", return_value="pro"):
+            result = await get_call_graph(
+                project_root=str(tmp_path), include_circular_import_check=False
+            )
+
+        assert result.error is None
+        assert result.advanced_resolution_enabled is True
+        assert any(
+            edge.caller == "demo/App.java:App.main"
+            and edge.callee == "demo/Helper.java:Helper.tool"
+            for edge in result.edges
+        )
+
+    @pytest.mark.asyncio
+    async def test_java_project_preserves_pro_inherited_method_resolution(self, tmp_path):
+        """[20260307_TEST] Pro Java get_call_graph should resolve inherited superclass methods."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+
+        (package_dir / "Base.java").write_text(
+            """
+package demo;
+
+public class Base {
+    protected void helper() {
+    }
+}
+"""
+        )
+
+        (package_dir / "Child.java").write_text(
+            """
+package demo;
+
+public class Child extends Base {
+    public void run() {
+        helper();
+        this.helper();
+    }
+}
+"""
+        )
+
+        with patch("code_scalpel.mcp.tools.graph._get_current_tier", return_value="pro"):
+            result = await get_call_graph(
+                project_root=str(tmp_path), include_circular_import_check=False
+            )
+
+        assert result.error is None
+        assert result.advanced_resolution_enabled is True
+        matching_edges = [
+            edge
+            for edge in result.edges
+            if edge.caller == "demo/Child.java:Child.run"
+            and edge.callee == "demo/Base.java:Base.helper"
+        ]
+        assert len(matching_edges) >= 2
+
+    @pytest.mark.asyncio
+    async def test_java_project_preserves_pro_field_backed_instance_resolution(self, tmp_path):
+        """[20260307_TEST] Pro Java get_call_graph should resolve field-backed instance calls."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+
+        (package_dir / "Helper.java").write_text(
+            """
+package demo;
+
+public class Helper {
+    public void tool() {
+    }
+}
+"""
+        )
+
+        (package_dir / "App.java").write_text(
+            """
+package demo;
+
+public class App {
+    private final Helper helper = new Helper();
+
+    public void run() {
+        this.helper.tool();
+    }
+}
+"""
+        )
+
+        with patch("code_scalpel.mcp.tools.graph._get_current_tier", return_value="pro"):
+            result = await get_call_graph(
+                project_root=str(tmp_path), include_circular_import_check=False
+            )
+
+        assert result.error is None
+        assert result.advanced_resolution_enabled is True
+        assert any(
+            edge.caller == "demo/App.java:App.run"
+            and edge.callee == "demo/Helper.java:Helper.tool"
+            for edge in result.edges
+        )
+
+    @pytest.mark.asyncio
+    async def test_java_project_preserves_pro_imported_superclass_resolution(
+        self, tmp_path
+    ):
+        """[20260308_TEST] Pro Java get_call_graph should resolve imported superclass methods across packages."""
+        base_dir = tmp_path / "demo" / "base"
+        app_dir = tmp_path / "demo" / "app"
+        base_dir.mkdir(parents=True)
+        app_dir.mkdir(parents=True)
+
+        (base_dir / "Base.java").write_text(
+            """
+package demo.base;
+
+public class Base {
+    protected void helper() {
+    }
+}
+"""
+        )
+
+        (app_dir / "Child.java").write_text(
+            """
+package demo.app;
+
+import demo.base.Base;
+
+public class Child extends Base {
+    public void run() {
+        helper();
+        this.helper();
+    }
+}
+"""
+        )
+
+        with patch("code_scalpel.mcp.tools.graph._get_current_tier", return_value="pro"):
+            result = await get_call_graph(
+                project_root=str(tmp_path), include_circular_import_check=False
+            )
+
+        assert result.error is None
+        matches = [
+            edge
+            for edge in result.edges
+            if edge.caller == "demo/app/Child.java:Child.run"
+            and edge.callee == "demo/base/Base.java:Base.helper"
+        ]
+        assert len(matches) >= 2
+
+    @pytest.mark.asyncio
+    async def test_java_project_prefers_overridden_child_method_resolution(self, tmp_path):
+        """[20260308_TEST] Pro Java get_call_graph should prefer overridden child methods over superclass fallbacks."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+
+        (package_dir / "Base.java").write_text(
+            """
+package demo;
+
+public class Base {
+    protected void helper() {
+    }
+}
+"""
+        )
+
+        (package_dir / "Child.java").write_text(
+            """
+package demo;
+
+public class Child extends Base {
+    @Override
+    protected void helper() {
+    }
+
+    public void run() {
+        helper();
+        this.helper();
+    }
+}
+"""
+        )
+
+        with patch("code_scalpel.mcp.tools.graph._get_current_tier", return_value="pro"):
+            result = await get_call_graph(
+                project_root=str(tmp_path), include_circular_import_check=False
+            )
+
+        assert result.error is None
+        child_matches = [
+            edge
+            for edge in result.edges
+            if edge.caller == "demo/Child.java:Child.run"
+            and edge.callee == "demo/Child.java:Child.helper"
+        ]
+        base_matches = [
+            edge
+            for edge in result.edges
+            if edge.caller == "demo/Child.java:Child.run"
+            and edge.callee == "demo/Base.java:Base.helper"
+        ]
+        assert len(child_matches) >= 2
+        assert not base_matches
+
+
+class TestGenericPolyglotSupport:
+    """Generic IR-backed call graph coverage for the broader polyglot set."""
+
+    @pytest.mark.parametrize(
+        ("filename", "code", "caller_name", "callee_name"),
+        GENERIC_POLYGLOT_GET_CALL_GRAPH_CASES,
+    )
+    @pytest.mark.asyncio
+    async def test_get_call_graph_generic_languages_emit_local_edges(
+        self, tmp_path, filename, code, caller_name, callee_name
+    ):
+        """[20260307_TEST] get_call_graph should emit local nodes and edges for generic polyglot languages."""
+        (tmp_path / filename).write_text(code, encoding="utf-8")
+
+        with patch(
+            "code_scalpel.mcp.tools.graph._get_current_tier", return_value="community"
+        ):
+            result = await get_call_graph(
+                project_root=str(tmp_path), include_circular_import_check=False
+            )
+
+        assert result.error is None
+        assert result.tier_applied == "community"
+        assert result.max_depth_applied == 10
+        assert result.max_nodes_applied == 200
+        assert result.language_parity["csharp"] == "method_local_slice"
+        assert result.language_parity["swift"] == "method_local_slice"
+
+        names = {node.name for node in result.nodes}
+        assert caller_name in names
+        assert callee_name in names
+        assert any(
+            edge.caller.endswith(f":{caller_name}")
+            and edge.callee.endswith(f":{callee_name}")
+            for edge in result.edges
+        )
+
+    @pytest.mark.parametrize("filename", GENERIC_FALLBACK_EXTENSION_CASES)
+    @pytest.mark.asyncio
+    async def test_get_call_graph_generic_ir_fallback_supports_extension_matrix(
+        self, tmp_path, monkeypatch, filename
+    ):
+        """[20260307_TEST] get_call_graph should use the generic IR fallback for every mapped extension."""
+        from code_scalpel.ast_tools.call_graph import CallGraphBuilder
+
+        file_path = tmp_path / filename
+        file_path.write_text("placeholder", encoding="utf-8")
+
+        module = IRModule(
+            body=[
+                IRFunctionDef(
+                    name="helper",
+                    body=[],
+                    loc=SourceLocation(line=1, column=0, end_line=1, end_column=1),
+                ),
+                IRFunctionDef(
+                    name="main",
+                    body=[
+                        IRCall(
+                            func=IRName(id="helper"),
+                            args=[],
+                            loc=SourceLocation(
+                                line=3, column=4, end_line=3, end_column=10
+                            ),
+                        )
+                    ],
+                    loc=SourceLocation(line=2, column=0, end_line=4, end_column=1),
+                ),
+            ]
+        )
+
+        def fake_load_ir_module(self, requested_file_path, rel_path):
+            if Path(requested_file_path) == file_path:
+                self._ir_modules[rel_path] = module
+                return module
+            return None
+
+        monkeypatch.setattr(CallGraphBuilder, "_load_ir_module", fake_load_ir_module)
+
+        with patch(
+            "code_scalpel.mcp.tools.graph._get_current_tier", return_value="community"
+        ):
+            result = await get_call_graph(
+                project_root=str(tmp_path), include_circular_import_check=False
+            )
+
+        assert result.error is None
+        assert {node.name for node in result.nodes} >= {"main", "helper"}
+        assert any(
+            edge.caller.endswith(":main") and edge.callee.endswith(":helper")
+            for edge in result.edges
+        )
+
+    @pytest.mark.asyncio
+    async def test_get_call_graph_receiver_methods_emit_method_local_nodes(
+        self, tmp_path, monkeypatch
+    ):
+        """[20260308_TEST] get_call_graph should expose receiver-qualified generic method nodes."""
+        from code_scalpel.ast_tools.call_graph import CallGraphBuilder
+
+        file_path = tmp_path / "main.go"
+        file_path.write_text("placeholder", encoding="utf-8")
+
+        help_fn = IRFunctionDef(name="help", body=[], source_language="go")
+        help_fn._metadata["receiver"] = "(worker Worker)"
+
+        run_fn = IRFunctionDef(
+            name="run",
+            body=[
+                IRCall(
+                    func=IRAttribute(value=IRName(id="worker"), attr="help"),
+                    args=[],
+                )
+            ],
+            source_language="go",
+        )
+        run_fn._metadata["receiver"] = "(worker Worker)"
+
+        module = IRModule(source_language="go", body=[help_fn, run_fn])
+
+        def fake_load_ir_module(self, requested_file_path, rel_path):
+            if Path(requested_file_path) == file_path:
+                self._ir_modules[rel_path] = module
+                return module
+            return None
+
+        monkeypatch.setattr(CallGraphBuilder, "_load_ir_module", fake_load_ir_module)
+
+        with patch(
+            "code_scalpel.mcp.tools.graph._get_current_tier", return_value="community"
+        ):
+            result = await get_call_graph(
+                project_root=str(tmp_path), include_circular_import_check=False
+            )
+
+        assert result.error is None
+        assert result.language_parity["go"] == "method_local_slice"
+        assert {node.name for node in result.nodes} >= {"Worker.run", "Worker.help"}
+        assert any(
+            edge.caller.endswith(":Worker.run")
+            and edge.callee.endswith(":Worker.help")
+            for edge in result.edges
+        )
+
+    @pytest.mark.asyncio
+    async def test_get_call_graph_generic_ir_advanced_resolution_follows_imported_files(
+        self, tmp_path, monkeypatch
+    ):
+        """[20260308_TEST] Pro get_call_graph should surface conservative imported-file generic edges."""
+        from code_scalpel.ast_tools.call_graph import CallGraphBuilder
+
+        caller_path = tmp_path / "App.kt"
+        caller_path.write_text("placeholder", encoding="utf-8")
+        callee_path = tmp_path / "demo" / "Helper.kt"
+        callee_path.parent.mkdir(parents=True, exist_ok=True)
+        callee_path.write_text("placeholder", encoding="utf-8")
+
+        module_map = {
+            "App.kt": IRModule(
+                source_language="kotlin",
+                body=[
+                    IRImport(module="demo.Helper.tool"),
+                    IRFunctionDef(name="main", body=[IRCall(func=IRName(id="tool"), args=[])]),
+                ],
+            ),
+            "demo/Helper.kt": IRModule(
+                source_language="kotlin",
+                body=[IRFunctionDef(name="tool", body=[])],
+            ),
+        }
+
+        def fake_load_ir_module(self, requested_file_path, rel_path):
+            del requested_file_path
+            module = module_map.get(rel_path)
+            if module is not None:
+                self._ir_modules[rel_path] = module
+            return module
+
+        monkeypatch.setattr(CallGraphBuilder, "_load_ir_module", fake_load_ir_module)
+
+        with patch("code_scalpel.mcp.tools.graph._get_current_tier", return_value="pro"):
+            result = await get_call_graph(
+                project_root=str(tmp_path), include_circular_import_check=False
+            )
+
+        assert result.error is None
+        assert result.advanced_resolution_enabled is True
+        assert any(
+            edge.caller == "App.kt:main" and edge.callee == "demo/Helper.kt:tool"
+            for edge in result.edges
+        )
 
 
 # ============================================================================

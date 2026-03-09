@@ -9,8 +9,10 @@ This wiki is for **contributors and maintainers** of the Code Scalpel project. I
 ## Contributor Pages
 
 - **[Architecture](Architecture)** — Internal architecture: tier system, normalizer layer, polyglot IR, MCP tool pipeline, design decisions
+- **[Language Completion Roadmap](Language-Completion-Roadmap)** — Parser completion status, MCP integration-surface status by language, and the active Stage 10 graph-runtime parity track
 - **[Environment Variables](ENVIRONMENT_VARIABLES)** — Local development environment setup, dev-only env vars, test configuration
 - **[Contributing](Contributing)** — Development workflow, coding standards, PR process, pre-push hooks, test suites
+- **[Standalone by Default, Enterprise-Compatible by Design](Standalone-by-Default-Enterprise-Compatible-by-Design)** — Product positioning, standalone boundary, enterprise adapter story, and approved internal messaging
 
 ## Public Documentation
 

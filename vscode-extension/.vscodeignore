@@ -6,5 +6,6 @@ tsconfig.json
 .gitignore
 .eslintrc.json
 *.vsix
-node_modules/@types/**
+node_modules/**
 **/*.map
+out/**/*.d.ts

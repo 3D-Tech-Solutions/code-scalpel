@@ -42,12 +42,46 @@ FunctionInfo = _core_models.FunctionInfo
 ProjectCrawlResult = _core_models.ProjectCrawlResult
 SymbolReference = _core_models.SymbolReference
 SymbolReferencesResult = _core_models.SymbolReferencesResult
+SymbolDisambiguationCandidate = _core_models.SymbolDisambiguationCandidate
 
 resolve_path = import_module("code_scalpel.mcp.path_resolver").resolve_path
 
 logger = logging.getLogger("code_scalpel.mcp.context")
 
+# [20260306_REFACTOR] Canonical extension-to-language map shared across all MCP
+# helpers and server.py  Defer parser-internal / CLI-local maps unchanged.
+EXT_TO_LANGUAGE: dict[str, str] = {
+    ".py": "python",
+    ".pyw": "python",
+    ".pyi": "python",
+    ".js": "javascript",
+    ".mjs": "javascript",
+    ".cjs": "javascript",
+    ".jsx": "javascript",
+    ".ts": "typescript",
+    ".tsx": "typescript",
+    ".mts": "typescript",
+    ".cts": "typescript",
+    ".java": "java",
+    ".c": "c",
+    ".h": "c",
+    ".cpp": "cpp",
+    ".cc": "cpp",
+    ".cxx": "cpp",
+    ".hpp": "cpp",
+    ".hxx": "cpp",
+    ".cs": "csharp",
+    ".go": "go",
+    ".rb": "ruby",
+    ".rs": "rust",
+    ".kt": "kotlin",
+    ".kts": "kotlin",
+    ".swift": "swift",
+    ".php": "php",
+}
+
 __all__ = [
+    "EXT_TO_LANGUAGE",
     "_crawl_project_discovery",
     "_crawl_project_sync",
     "crawl_project",
@@ -56,6 +90,201 @@ __all__ = [
     "_get_symbol_references_sync",
     "get_symbol_references",
 ]
+
+
+# [20260307_FEATURE] Initial local JS/TS parity slice for get_symbol_references.
+_SYMBOL_REFERENCE_JS_TS_SUFFIXES = {
+    ".js",
+    ".jsx",
+    ".mjs",
+    ".cjs",
+    ".ts",
+    ".tsx",
+    ".mts",
+    ".cts",
+}
+
+_SYMBOL_REFERENCE_JAVA_SUFFIXES = {
+    ".java",
+}
+
+
+# [20260308_FEATURE] Lightweight C# file-context fallback when tree-sitter-c-sharp
+# is unavailable. This keeps get_file_context useful for .cs files in default
+# installs without claiming full parser parity.
+_CSHARP_USING_RE = re.compile(r"^\s*using\s+([A-Za-z_][\w.]*)\s*;")
+_CSHARP_NAMESPACE_RE = re.compile(r"^\s*namespace\s+([A-Za-z_][\w.]*)\s*[;{]")
+_CSHARP_TYPE_RE = re.compile(
+    r"^\s*(?:\[[^\]]+\]\s*)*(?:(?:public|private|protected|internal|abstract|sealed|static|partial|new|file)\s+)*(class|struct|interface|enum)\s+([A-Za-z_]\w*)\b"
+)
+_CSHARP_METHOD_RE = re.compile(
+    r"^\s*(?:\[[^\]]+\]\s*)*(?:(?:public|private|protected|internal|static|virtual|override|abstract|sealed|async|extern|unsafe|new|partial)\s+)*(?:[A-Za-z_][\w<>,?.\[\]\s]*\s+)?([A-Za-z_]\w*)\s*\([^;]*\)\s*(?:where\b.*)?(?:=>|\{|$)"
+)
+_CSHARP_COMPLEXITY_PATTERN = re.compile(
+    r"\b(if|for|foreach|while|switch|case|catch|when)\b|&&|\|\||\?"
+)
+_CSHARP_METHOD_SKIP_NAMES = {
+    "if",
+    "for",
+    "foreach",
+    "while",
+    "switch",
+    "catch",
+    "using",
+    "lock",
+    "return",
+    "nameof",
+}
+
+
+def _strip_csharp_line_comment(line: str) -> str:
+    """Remove trailing single-line C# comments for lightweight parsing."""
+    if "//" not in line:
+        return line
+    return line.split("//", 1)[0]
+
+
+def _build_csharp_file_context_fallback(
+    path: Path,
+    lines: list[str],
+    tier: str,
+    max_context_lines: int | None,
+    pro_features_enabled: bool,
+    enterprise_features_enabled: bool,
+    cap_set: set[str],
+    pii_redacted: bool,
+    secrets_masked: bool,
+    redaction_summary: list[str],
+) -> FileContextResult:
+    """Return a conservative FileContextResult for a C# file without tree-sitter.
+
+    [20260308_FEATURE] Extracts namespace, using directives, type names, and
+    method signatures from .cs files using line-based parsing only.
+    """
+    imports: list[str] = []
+    namespace_name: str | None = None
+    functions: list[FunctionInfo] = []
+    classes: list[ClassInfo] = []
+    class_stack: list[dict[str, Any]] = []
+    pending_type: dict[str, Any] | None = None
+    brace_depth = 0
+
+    for line_no, raw_line in enumerate(lines, start=1):
+        line = _strip_csharp_line_comment(raw_line)
+        stripped = line.strip()
+        if not stripped:
+            continue
+
+        using_match = _CSHARP_USING_RE.match(stripped)
+        if using_match:
+            imports.append(using_match.group(1))
+
+        if namespace_name is None:
+            namespace_match = _CSHARP_NAMESPACE_RE.match(stripped)
+            if namespace_match:
+                namespace_name = namespace_match.group(1)
+
+        type_match = _CSHARP_TYPE_RE.match(stripped)
+        if type_match:
+            pending_type = {
+                "name": type_match.group(2),
+                "line": line_no,
+                "methods": [],
+            }
+
+        if class_stack and not type_match:
+            method_match = _CSHARP_METHOD_RE.match(stripped)
+            if method_match:
+                method_name = method_match.group(1)
+                if method_name not in _CSHARP_METHOD_SKIP_NAMES:
+                    owner = class_stack[-1]
+                    owner["methods"].append(method_name)
+                    functions.append(
+                        FunctionInfo(
+                            name=f"{owner['name']}.{method_name}",
+                            lineno=line_no,
+                            end_lineno=None,
+                            is_async=" async " in f" {stripped} ",
+                        )
+                    )
+
+        open_braces = line.count("{")
+        close_braces = line.count("}")
+        brace_depth += open_braces
+
+        if pending_type is not None and open_braces > 0:
+            pending_type["scope_depth"] = brace_depth
+            class_stack.append(pending_type)
+            pending_type = None
+
+        brace_depth -= close_braces
+
+        while class_stack and brace_depth < class_stack[-1]["scope_depth"]:
+            finished = class_stack.pop()
+            classes.append(
+                ClassInfo(
+                    name=finished["name"],
+                    lineno=finished["line"],
+                    end_lineno=line_no,
+                    methods=finished["methods"],
+                )
+            )
+
+    while class_stack:
+        finished = class_stack.pop()
+        classes.append(
+            ClassInfo(
+                name=finished["name"],
+                lineno=finished["line"],
+                end_lineno=len(lines) or None,
+                methods=finished["methods"],
+            )
+        )
+
+    total_imports = len(imports)
+    complexity = max(0, len(_CSHARP_COMPLEXITY_PATTERN.findall("\n".join(lines))))
+    summary = (
+        f"Csharp module in namespace {namespace_name} with {len(functions)} function(s), "
+        f"{len(classes)} class(es)"
+        if namespace_name
+        else f"Csharp module with {len(functions)} function(s), {len(classes)} class(es)"
+    )
+
+    semantic_summary = None
+    if "semantic_summarization" in cap_set:
+        semantic_summary = summary
+
+    expanded_context = None
+    if "smart_context_expansion" in cap_set:
+        preview_len = min(len(lines), max_context_lines or 50, 50)
+        expanded_context = "\n".join(lines[:preview_len]) or None
+
+    return FileContextResult(
+        success=True,
+        file_path=str(path),
+        tier_applied=tier,
+        max_context_lines_applied=max_context_lines,
+        pro_features_enabled=pro_features_enabled,
+        enterprise_features_enabled=enterprise_features_enabled,
+        language="csharp",
+        line_count=len(lines),
+        functions=cast(list[FunctionInfo | str], functions),
+        classes=cast(list[ClassInfo | str], classes),
+        imports=imports[:20],
+        exports=[],
+        complexity_score=complexity,
+        has_security_issues=False,
+        summary=summary,
+        imports_truncated=total_imports > 20,
+        total_imports=total_imports,
+        semantic_summary=semantic_summary,
+        expanded_context=expanded_context,
+        pii_redacted=pii_redacted,
+        secrets_masked=secrets_masked,
+        redaction_summary=redaction_summary,
+        access_controlled="rbac_aware_retrieval" in cap_set
+        or "file_access_control" in cap_set,
+    )
 
 
 # [20260116_SECURITY] Redact secrets/PII before any analysis.
@@ -128,6 +357,534 @@ def _redact_sensitive_content(
         summary.append("Redacted email")
 
     return redacted, pii_redacted, secrets_masked, summary
+
+
+def _scan_js_ts_symbol_references(
+    file_path: Path,
+    root: Path,
+    symbol_name: str,
+    enable_categorization: bool,
+    enable_impact_analysis: bool,
+    is_test_file: bool,
+    owners: list[str] | None,
+    seen: set[tuple[str, int, int]],
+) -> tuple[list[SymbolReference], int | None, dict[str, int], int | None]:
+    """Best-effort JS/TS symbol reference scan.
+
+    [20260307_FEATURE] Initial local JS/TS parity slice for get_symbol_references.
+    Uses parser-backed definitions/imports when available, then supplements with
+    line-based call/reference detection to keep the contract narrow and stable.
+    """
+    rel_path = str(file_path.relative_to(root))
+    code = file_path.read_text(encoding="utf-8")
+    lines = code.splitlines()
+    escaped_symbol = re.escape(symbol_name)
+    references: list[SymbolReference] = []
+    category_counts: dict[str, int] = {}
+    definition_line: int | None = None
+
+    def _append_reference(
+        line_no: int,
+        column: int,
+        ref_type: str,
+        *,
+        is_definition: bool = False,
+    ) -> None:
+        nonlocal definition_line
+        if line_no <= 0 or line_no > len(lines):
+            return
+        safe_column = max(0, column)
+        loc_key = (rel_path, line_no, safe_column)
+        if loc_key in seen:
+            return
+        seen.add(loc_key)
+        if is_definition and definition_line is None:
+            definition_line = line_no
+        if enable_categorization:
+            category_counts[ref_type] = category_counts.get(ref_type, 0) + 1
+        references.append(
+            SymbolReference(
+                file=rel_path,
+                line=line_no,
+                column=safe_column,
+                context=lines[line_no - 1].strip(),
+                is_definition=is_definition,
+                reference_type=ref_type if enable_categorization else None,
+                is_test_file=is_test_file,
+                owners=owners,
+            )
+        )
+
+    def _column_for_line(line_no: int) -> int:
+           return lines[line_no - 1].find(symbol_name) if 0 < line_no <= len(lines) else 0
+
+    # Parser-backed discovery for definitions/imports where available.
+    try:
+        from code_scalpel.code_parsers.javascript_parsers.javascript_parsers_treesitter import (
+            TREE_SITTER_AVAILABLE,
+            TreeSitterJSParser,
+        )
+    except Exception:
+        TREE_SITTER_AVAILABLE = False
+        TreeSitterJSParser = None  # type: ignore[assignment]
+
+    if TREE_SITTER_AVAILABLE and TreeSitterJSParser is not None:
+        try:
+            parsed = TreeSitterJSParser().parse_file(str(file_path))
+            for sym in parsed.symbols:
+                if sym.name == symbol_name:
+                    _append_reference(
+                        sym.line,
+                        getattr(sym, "column", 0) or _column_for_line(sym.line),
+                        "definition",
+                        is_definition=True,
+                    )
+
+            for imp in parsed.imports:
+                import_matches = [
+                    getattr(imp, "default_import", None) == symbol_name,
+                    getattr(imp, "namespace_import", None) == symbol_name,
+                    any(
+                        imported == symbol_name or alias == symbol_name
+                        for imported, alias in getattr(imp, "named_imports", [])
+                    ),
+                ]
+                if any(import_matches):
+                    line_no = getattr(imp, "line", 0)
+                    if line_no:
+                        _append_reference(
+                            line_no,
+                            _column_for_line(line_no),
+                            "import",
+                        )
+        except Exception:
+            pass
+
+    definition_patterns = [
+        re.compile(rf"\bfunction\s+{escaped_symbol}\b"),
+        re.compile(rf"\bclass\s+{escaped_symbol}\b"),
+        re.compile(rf"\b(?:const|let|var)\s+{escaped_symbol}\b"),
+        re.compile(rf"\binterface\s+{escaped_symbol}\b"),
+        re.compile(rf"\btype\s+{escaped_symbol}\b"),
+        re.compile(rf"\benum\s+{escaped_symbol}\b"),
+    ]
+    import_pattern = re.compile(rf"\b(?:import|export)\b.*\b{escaped_symbol}\b")
+    call_pattern = re.compile(rf"(?:\b{escaped_symbol}\s*\(|\.{escaped_symbol}\s*\()")
+    name_pattern = re.compile(rf"\b{escaped_symbol}\b")
+    complexity_pattern = re.compile(
+        r"\b(if|for|while|switch|catch|function|class)\b|=>"
+    )
+
+    complexity_score = None
+    if enable_impact_analysis:
+        complexity_score = sum(len(complexity_pattern.findall(line)) for line in lines)
+
+    for line_no, line in enumerate(lines, start=1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith(("//", "/*", "*", "*/")):
+            continue
+
+        if import_pattern.search(line):
+            column = _column_for_line(line_no)
+            if column >= 0:
+                _append_reference(line_no, column, "import")
+
+        if any(pattern.search(line) for pattern in definition_patterns):
+            column = _column_for_line(line_no)
+            if column >= 0:
+                _append_reference(line_no, column, "definition", is_definition=True)
+            continue
+
+        if call_pattern.search(line):
+            column = _column_for_line(line_no)
+            if column >= 0:
+                _append_reference(line_no, column, "call")
+            continue
+
+        if name_pattern.search(line):
+            column = _column_for_line(line_no)
+            if column >= 0:
+                _append_reference(line_no, column, "reference")
+
+    return references, definition_line, category_counts, complexity_score
+
+
+def _scan_java_symbol_references(
+    file_path: Path,
+    root: Path,
+    symbol_name: str,
+    enable_categorization: bool,
+    enable_impact_analysis: bool,
+    is_test_file: bool,
+    owners: list[str] | None,
+    seen: set[tuple[str, int, int]],
+) -> tuple[
+    list[SymbolReference],
+    int | None,
+    dict[str, int],
+    int | None,
+    list[SymbolDisambiguationCandidate],
+]:
+    """Best-effort Java symbol reference scan.
+
+    [20260308_FEATURE] Initial local Java parity slice for get_symbol_references.
+    Uses parser-backed class and method definitions when available, then adds
+    conservative line-based import, call, and reference detection.
+    """
+    # [20260309_FEATURE] Accept structured Java selectors for exact overload lookups in get_symbol_references.
+    rel_path = str(file_path.relative_to(root))
+    code = file_path.read_text(encoding="utf-8")
+    lines = code.splitlines()
+    references: list[SymbolReference] = []
+    category_counts: dict[str, int] = {}
+    definition_line: int | None = None
+    disambiguation_candidates: dict[tuple[str, int, str], SymbolDisambiguationCandidate] = {}
+
+    def _normalize_java_type_name(type_name: str | None) -> str:
+        normalized = re.sub(r"\s+", "", type_name or "?")
+        normalized = normalized.replace("...", "[]")
+        normalized = re.sub(
+            r"([A-Za-z_$][\w$]*\.)+([A-Za-z_$][\w$]*(?:\[\])*)",
+            r"\2",
+            normalized,
+        )
+        return normalized or "?"
+
+    def _parse_structured_selector(raw_symbol: str) -> dict[str, Any] | None:
+        candidate = raw_symbol.strip()
+        if not candidate or "(" not in candidate or not candidate.endswith(")"):
+            return None
+
+        if ":" in candidate and ("." not in candidate or candidate.index(":") < candidate.index("(")):
+            owner_part, remainder = candidate.split(":", 1)
+            candidate = f"{owner_part}.{remainder}"
+
+        head, arg_block = candidate[:-1].split("(", 1)
+        if "." in head:
+            owner_name, member_name = head.rsplit(".", 1)
+        else:
+            owner_name = None
+            member_name = head
+
+        parameter_types = []
+        if arg_block.strip():
+            parameter_types = [
+                _normalize_java_type_name(part)
+                for part in arg_block.split(",")
+                if part.strip()
+            ]
+
+        return {
+            "owner_name": owner_name,
+            "member_name": member_name,
+            "parameter_types": parameter_types,
+            "normalized": f"{owner_name + '.' if owner_name else ''}{member_name}({', '.join(parameter_types)})",
+        }
+
+    structured_selector = _parse_structured_selector(symbol_name)
+    lookup_symbol = (
+        structured_selector["member_name"] if structured_selector else symbol_name
+    )
+    escaped_symbol = re.escape(lookup_symbol)
+
+    def _selector_matches_requested(selector: str) -> bool:
+        if structured_selector is None:
+            return selector == symbol_name or selector.endswith(f".{symbol_name}")
+        normalized_selector = selector.replace(":", ".")
+        return normalized_selector == structured_selector["normalized"]
+
+    def _line_call_matches_structured_selector(line: str) -> bool:
+        if structured_selector is None:
+            return True
+
+        pattern = re.compile(rf"(?:\b|\.){re.escape(lookup_symbol)}\s*\(([^()]*)\)")
+
+        def _infer_argument_type(argument: str) -> str:
+            token = argument.strip()
+            if not token:
+                return "?"
+            if re.fullmatch(r'[+-]?\d+', token):
+                return "int"
+            if re.fullmatch(r'[+-]?\d+\.\d+', token):
+                return "double"
+            if re.fullmatch(r'"(?:\\.|[^"\\])*"', token):
+                return "String"
+            if re.fullmatch(r"'(?:\\.|[^'\\])'", token):
+                return "char"
+            if token in {"true", "false"}:
+                return "boolean"
+            if token == "null":
+                return "null"
+            return "?"
+
+        for match in pattern.finditer(line):
+            arg_block = match.group(1).strip()
+            if not arg_block:
+                inferred_types: list[str] = []
+            else:
+                inferred_types = [
+                    _infer_argument_type(part)
+                    for part in arg_block.split(",")
+                    if part.strip()
+                ]
+            if inferred_types == structured_selector["parameter_types"]:
+                return True
+        return False
+
+    def _append_reference(
+        line_no: int,
+        column: int,
+        ref_type: str,
+        *,
+        is_definition: bool = False,
+    ) -> None:
+        nonlocal definition_line
+        if line_no <= 0 or line_no > len(lines):
+            return
+        safe_column = max(0, column)
+        loc_key = (rel_path, line_no, safe_column)
+        if loc_key in seen:
+            return
+        seen.add(loc_key)
+        if is_definition and definition_line is None:
+            definition_line = line_no
+        if enable_categorization:
+            category_counts[ref_type] = category_counts.get(ref_type, 0) + 1
+        references.append(
+            SymbolReference(
+                file=rel_path,
+                line=line_no,
+                column=safe_column,
+                context=lines[line_no - 1].strip(),
+                is_definition=is_definition,
+                reference_type=ref_type if enable_categorization else None,
+                is_test_file=is_test_file,
+                owners=owners,
+            )
+        )
+
+    def _column_for_line(line_no: int) -> int:
+        return lines[line_no - 1].find(lookup_symbol) if 0 < line_no <= len(lines) else 0
+
+    def _add_candidate(
+        *,
+        kind: str,
+        line_no: int,
+        owner_name: str | None,
+        selector: str,
+    ) -> None:
+        if line_no <= 0 or line_no > len(lines):
+            return
+        key = (rel_path, line_no, selector)
+        if key in disambiguation_candidates:
+            return
+        column = _column_for_line(line_no)
+        disambiguation_candidates[key] = SymbolDisambiguationCandidate(
+            kind=kind,
+            file=rel_path,
+            line=line_no,
+            column=max(0, column),
+            context=lines[line_no - 1].strip(),
+            owner_name=owner_name,
+            qualified_name=selector,
+            selector=selector,
+        )
+
+    def _format_method_selector(owner_name: str, method: object) -> str:
+        parameters = getattr(method, "parameters", []) or []
+        param_types = ", ".join(
+            _normalize_java_type_name(getattr(parameter, "param_type", "") or "?")
+            for parameter in parameters
+        )
+        member_name = getattr(method, "name", lookup_symbol)
+        if getattr(method, "is_constructor", False):
+            member_name = owner_name.split(".")[-1]
+        return f"{owner_name}.{member_name}({param_types})"
+
+    try:
+        from code_scalpel.code_parsers.java_parsers.java_parser_treesitter import (
+            JavaParser,
+        )
+
+        parsed = JavaParser().parse_detailed(code)
+        for cls in parsed.classes:
+            if structured_selector is None and cls.name == symbol_name:
+                _add_candidate(
+                    kind="class",
+                    line_no=cls.line,
+                    owner_name=cls.name,
+                    selector=cls.name,
+                )
+                _append_reference(
+                    cls.line,
+                    _column_for_line(cls.line),
+                    "definition",
+                    is_definition=True,
+                )
+            for method in cls.methods:
+                selector = _format_method_selector(cls.name, method)
+                member_name = cls.name if getattr(method, "is_constructor", False) else method.name
+                if (
+                    structured_selector is None
+                    and member_name == symbol_name
+                ) or _selector_matches_requested(selector):
+                    _add_candidate(
+                        kind="method",
+                        line_no=method.line,
+                        owner_name=cls.name,
+                        selector=selector,
+                    )
+                    _append_reference(
+                        method.line,
+                        _column_for_line(method.line),
+                        "definition",
+                        is_definition=True,
+                    )
+        for iface in parsed.interfaces:
+            if iface.name == symbol_name:
+                _add_candidate(
+                    kind="interface",
+                    line_no=iface.line,
+                    owner_name=iface.name,
+                    selector=iface.name,
+                )
+                _append_reference(
+                    iface.line,
+                    _column_for_line(iface.line),
+                    "definition",
+                    is_definition=True,
+                )
+        for enum in parsed.enums:
+            if enum.name == symbol_name:
+                _add_candidate(
+                    kind="enum",
+                    line_no=enum.line,
+                    owner_name=enum.name,
+                    selector=enum.name,
+                )
+                _append_reference(
+                    enum.line,
+                    _column_for_line(enum.line),
+                    "definition",
+                    is_definition=True,
+                )
+        for record in parsed.records:
+            if record.name == symbol_name:
+                _add_candidate(
+                    kind="record",
+                    line_no=record.line,
+                    owner_name=record.name,
+                    selector=record.name,
+                )
+                _append_reference(
+                    record.line,
+                    _column_for_line(record.line),
+                    "definition",
+                    is_definition=True,
+                )
+            for method in record.methods:
+                selector = _format_method_selector(record.name, method)
+                member_name = (
+                    record.name if getattr(method, "is_constructor", False) else method.name
+                )
+                if (
+                    structured_selector is None
+                    and member_name == symbol_name
+                ) or _selector_matches_requested(selector):
+                    _add_candidate(
+                        kind="method",
+                        line_no=method.line,
+                        owner_name=record.name,
+                        selector=selector,
+                    )
+                    _append_reference(
+                        method.line,
+                        _column_for_line(method.line),
+                        "definition",
+                        is_definition=True,
+                    )
+    except Exception:
+        pass
+
+    definition_patterns = [
+        re.compile(rf"\bclass\s+{escaped_symbol}\b"),
+        re.compile(rf"\binterface\s+{escaped_symbol}\b"),
+        re.compile(rf"\benum\s+{escaped_symbol}\b"),
+        re.compile(rf"\brecord\s+{escaped_symbol}\b"),
+        re.compile(
+            rf"\b(?:public|protected|private|static|final|abstract|synchronized|native|default|strictfp|\s)+[A-Za-z_$][\w<>\[\].,?\s]*\b{escaped_symbol}\s*\("
+        ),
+    ]
+    import_pattern = re.compile(rf"\bimport\b.*\b{escaped_symbol}\b")
+    call_pattern = re.compile(rf"(?:\b{escaped_symbol}\s*\(|\.{escaped_symbol}\s*\()")
+    name_pattern = re.compile(rf"\b{escaped_symbol}\b")
+    complexity_pattern = re.compile(
+        r"\b(if|for|while|switch|case|catch|class|interface|enum|record)\b|&&|\|\|"
+    )
+
+    complexity_score = None
+    if enable_impact_analysis:
+        complexity_score = sum(len(complexity_pattern.findall(line)) for line in lines)
+
+    for line_no, line in enumerate(lines, start=1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith(("//", "/*", "*", "*/")):
+            continue
+
+        if import_pattern.search(line):
+            column = _column_for_line(line_no)
+            if column >= 0:
+                _append_reference(line_no, column, "import")
+
+        if structured_selector is None and any(pattern.search(line) for pattern in definition_patterns):
+            column = _column_for_line(line_no)
+            if column >= 0:
+                _append_reference(line_no, column, "definition", is_definition=True)
+            continue
+
+        if call_pattern.search(line):
+            if structured_selector is not None and not _line_call_matches_structured_selector(line):
+                continue
+            column = _column_for_line(line_no)
+            if column >= 0:
+                _append_reference(line_no, column, "call")
+            continue
+
+        if name_pattern.search(line):
+            if structured_selector is not None:
+                continue
+            column = _column_for_line(line_no)
+            if column >= 0:
+                _append_reference(line_no, column, "reference")
+
+    if not disambiguation_candidates:
+        for reference in references:
+            if not reference.is_definition:
+                continue
+            fallback_selector = f"{reference.file}:{reference.line}"
+            disambiguation_candidates[(reference.file, reference.line, fallback_selector)] = (
+                SymbolDisambiguationCandidate(
+                    kind="definition",
+                    file=reference.file,
+                    line=reference.line,
+                    column=reference.column,
+                    context=reference.context,
+                    owner_name=None,
+                    qualified_name=fallback_selector,
+                    selector=fallback_selector,
+                )
+            )
+
+    return (
+        references,
+        definition_line,
+        category_counts,
+        complexity_score,
+        sorted(
+            disambiguation_candidates.values(),
+            key=lambda candidate: (candidate.file, candidate.line, candidate.selector),
+        ),
+    )
 
 
 def _crawl_project_discovery(
@@ -339,20 +1096,9 @@ def _crawl_project_discovery(
         )
 
         # Map extensions to language names for breakdown (best-effort)
-        ext_lang_map = {
-            ".py": "python",
-            ".pyw": "python",
-            ".js": "javascript",
-            ".mjs": "javascript",
-            ".cjs": "javascript",
-            ".jsx": "javascript",
-            ".ts": "typescript",
-            ".tsx": "typescript",
-            ".java": "java",
-        }
         language_breakdown: dict[str, int] = {}
         for ext, count in ext_counts.items():
-            lang = ext_lang_map.get(ext, ext.lstrip("."))
+            lang = EXT_TO_LANGUAGE.get(ext, ext.lstrip("."))
             language_breakdown[lang] = language_breakdown.get(lang, 0) + count
 
         return ProjectCrawlResult(
@@ -590,20 +1336,9 @@ def _crawl_project_sync(
 
         # Language breakdown (best-effort by file extension)
         lang_counts: dict[str, int] = {}
-        ext_lang_map = {
-            ".py": "python",
-            ".pyw": "python",
-            ".js": "javascript",
-            ".mjs": "javascript",
-            ".cjs": "javascript",
-            ".jsx": "javascript",
-            ".ts": "typescript",
-            ".tsx": "typescript",
-            ".java": "java",
-        }
         for f in files:
             suffix = Path(f.path).suffix.lower()
-            lang = ext_lang_map.get(suffix, suffix.lstrip("."))
+            lang = EXT_TO_LANGUAGE.get(suffix, suffix.lstrip("."))
             lang_counts[lang] = lang_counts.get(lang, 0) + 1
 
         compliance_summary: dict[str, Any] | None = None
@@ -1251,16 +1986,6 @@ def _get_file_context_sync(
     [20251220_FEATURE] v3.0.5 - Multi-language support via file extension detection
     [20251225_FEATURE] v3.3.0 - Tier-gated limits, enrichments, and redaction
     """
-    # Language detection by file extension
-    LANG_EXTENSIONS = {
-        ".py": "python",
-        ".js": "javascript",
-        ".jsx": "javascript",
-        ".ts": "typescript",
-        ".tsx": "typescript",
-        ".java": "java",
-    }
-
     # Tier + capability detection
     tier = tier or get_current_tier()
 
@@ -1350,11 +2075,29 @@ def _get_file_context_sync(
             )
 
         # [20251220_FEATURE] Detect language from file extension
-        detected_lang = LANG_EXTENSIONS.get(path.suffix.lower(), "unknown")
+        detected_lang = EXT_TO_LANGUAGE.get(path.suffix.lower(), "unknown")
 
         # For non-Python files, use analyze_code which handles multi-language
         if detected_lang != "python":
             analysis = _analyze_code_sync(code, detected_lang)
+            if (
+                detected_lang == "csharp"
+                and not analysis.success
+                and analysis.error
+                and "requires tree-sitter" in analysis.error
+            ):
+                return _build_csharp_file_context_fallback(
+                    path=path,
+                    lines=lines,
+                    tier=tier,
+                    max_context_lines=max_context_lines,
+                    pro_features_enabled=pro_features_enabled,
+                    enterprise_features_enabled=enterprise_features_enabled,
+                    cap_set=cap_set,
+                    pii_redacted=pii_redacted,
+                    secrets_masked=secrets_masked,
+                    redaction_summary=redaction_summary,
+                )
             total_imports = len(analysis.imports)
 
             semantic_summary = None
@@ -2282,6 +3025,10 @@ def _get_symbol_references_sync(
         references: list[SymbolReference] = []
         definition_file = None
         definition_line = None
+        java_definition_locations: set[tuple[str, int]] = set()
+        java_ambiguity_candidates: dict[
+            tuple[str, int, str], SymbolDisambiguationCandidate
+        ] = {}
         # Track seen (file, line, col) triples to avoid duplicates in single pass
         seen: set[tuple[str, int, int]] = set()
 
@@ -2290,8 +3037,17 @@ def _get_symbol_references_sync(
             name = p.rsplit("/", 1)[-1]
             return (
                 "/tests/" in f"/{p}/"
+                or "/__tests__/" in f"/{p}/"
                 or name.startswith("test_")
                 or name.endswith("_test.py")
+                or name.endswith(".test.js")
+                or name.endswith(".test.jsx")
+                or name.endswith(".test.ts")
+                or name.endswith(".test.tsx")
+                or name.endswith(".spec.js")
+                or name.endswith(".spec.jsx")
+                or name.endswith(".spec.ts")
+                or name.endswith(".spec.tsx")
             )
 
         # [20251226_FEATURE] Enterprise: Enhanced CODEOWNERS support with validation
@@ -2390,8 +3146,17 @@ def _get_symbol_references_sync(
         candidate_files: list[Path] = []
         scope_norm = (scope_prefix or "").strip().lstrip("/")
 
-        # Walk through all Python files
-        for py_file in root.rglob("*.py"):
+        # [20260308_FEATURE] Initial JS/TS/Java parity slice for symbol references.
+        # Keep Python as the primary path, but include narrow local JS/TS/Java source files.
+        for py_file in root.rglob("*"):
+            if not py_file.is_file():
+                continue
+            if py_file.suffix.lower() not in (
+                {".py"}
+                | _SYMBOL_REFERENCE_JS_TS_SUFFIXES
+                | _SYMBOL_REFERENCE_JAVA_SUFFIXES
+            ):
+                continue
             # Skip common non-source directories
             if any(
                 part.startswith(".")
@@ -2428,10 +3193,132 @@ def _get_symbol_references_sync(
 
         category_counts: dict[str, int] = {}
         owner_counts: dict[str, int] = {}
+        warnings: list[str] = []
 
         for py_file in candidate_files:
+            suffix = py_file.suffix.lower()
 
             try:
+                if suffix in _SYMBOL_REFERENCE_JS_TS_SUFFIXES:
+                    rel_path = str(py_file.relative_to(root))
+                    is_test_file = _is_test_path(rel_path)
+
+                    owners = None
+                    if enable_codeowners or enable_impact_analysis:
+                        owners, _owner_confidence = _match_owners(
+                            codeowners_rules, rel_path, default_owners
+                        )
+                    js_refs, js_definition_line, js_category_counts, js_complexity = (
+                        _scan_js_ts_symbol_references(
+                            py_file,
+                            root,
+                            symbol_name,
+                            enable_categorization,
+                            enable_impact_analysis,
+                            is_test_file,
+                            owners,
+                            seen,
+                        )
+                    )
+
+                    if js_definition_line is not None and definition_file is None:
+                        definition_file = rel_path
+                        definition_line = js_definition_line
+
+                    if enable_impact_analysis and js_complexity is not None:
+                        file_complexity[rel_path] = js_complexity
+
+                    if enable_categorization:
+                        for ref_type, count in js_category_counts.items():
+                            category_counts[ref_type] = (
+                                category_counts.get(ref_type, 0) + count
+                            )
+
+                    if owners:
+                        for ref in js_refs:
+                            if ref.owners:
+                                for owner in ref.owners:
+                                    owner_counts[owner] = owner_counts.get(owner, 0) + 1
+
+                    references.extend(js_refs)
+                    if (
+                        max_references is not None
+                        and len(references) >= max_references
+                    ):
+                        references = references[:max_references]
+                        break
+                    continue
+
+                if suffix in _SYMBOL_REFERENCE_JAVA_SUFFIXES:
+                    rel_path = str(py_file.relative_to(root))
+                    is_test_file = _is_test_path(rel_path)
+
+                    owners = None
+                    if enable_codeowners or enable_impact_analysis:
+                        owners, _owner_confidence = _match_owners(
+                            codeowners_rules, rel_path, default_owners
+                        )
+
+                    (
+                        java_refs,
+                        java_definition_line,
+                        java_category_counts,
+                        java_complexity,
+                        java_candidates,
+                    ) = _scan_java_symbol_references(
+                        py_file,
+                        root,
+                        symbol_name,
+                        enable_categorization,
+                        enable_impact_analysis,
+                        is_test_file,
+                        owners,
+                        seen,
+                    )
+
+                    for candidate in java_candidates:
+                        java_ambiguity_candidates[
+                            (candidate.file, candidate.line, candidate.selector)
+                        ] = candidate
+
+                    if java_definition_line is not None:
+                        java_definition_locations.update(
+                            (ref.file, ref.line)
+                            for ref in java_refs
+                            if ref.is_definition
+                        )
+                        if len(java_definition_locations) == 1:
+                            only_file, only_line = next(iter(java_definition_locations))
+                            definition_file = only_file
+                            definition_line = only_line
+                        else:
+                            definition_file = None
+                            definition_line = None
+
+                    if enable_impact_analysis and java_complexity is not None:
+                        file_complexity[rel_path] = java_complexity
+
+                    if enable_categorization:
+                        for ref_type, count in java_category_counts.items():
+                            category_counts[ref_type] = (
+                                category_counts.get(ref_type, 0) + count
+                            )
+
+                    if owners:
+                        for ref in java_refs:
+                            if ref.owners:
+                                for owner in ref.owners:
+                                    owner_counts[owner] = owner_counts.get(owner, 0) + 1
+
+                    references.extend(java_refs)
+                    if (
+                        max_references is not None
+                        and len(references) >= max_references
+                    ):
+                        references = references[:max_references]
+                        break
+                    continue
+
                 # [20251220_PERF] v3.0.5 - Use cached AST parsing
                 tree = parse_file_cached(py_file)
                 if tree is None:
@@ -2846,6 +3733,24 @@ def _get_symbol_references_sync(
         if refs_truncated:
             truncation_msg = "Results truncated: output reached the configured maximum reference limit."
 
+        ambiguity_kind = None
+        ambiguity_candidates: list[SymbolDisambiguationCandidate] = []
+        if len(java_definition_locations) > 1:
+            ambiguous_locations = sorted(java_definition_locations)
+            preview = ", ".join(
+                f"{file}:{line}" for file, line in ambiguous_locations[:4]
+            )
+            if len(ambiguous_locations) > 4:
+                preview += ", ..."
+            ambiguity_kind = "multiple_definitions"
+            ambiguity_candidates = sorted(
+                java_ambiguity_candidates.values(),
+                key=lambda candidate: (candidate.file, candidate.line, candidate.selector),
+            )
+            warnings.append(
+                f"Ambiguous Java definition metadata for '{symbol_name}': multiple definitions matched ({preview}). definition_file and definition_line were cleared."
+            )
+
         # [20251226_FEATURE] Enterprise: Advanced risk assessment with weighted factors
         change_risk = None
         risk_score = None
@@ -2998,6 +3903,9 @@ def _get_symbol_references_sync(
             change_risk=change_risk,
             references_truncated=refs_truncated,
             truncation_warning=truncation_msg,
+            ambiguity_kind=ambiguity_kind,
+            ambiguity_candidates=ambiguity_candidates,
+            warnings=warnings,
             # [20251226_FEATURE] Enterprise impact analysis fields
             risk_score=risk_score,
             risk_factors=risk_factors,

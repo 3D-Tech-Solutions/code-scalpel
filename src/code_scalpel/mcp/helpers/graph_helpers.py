@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import Any, TYPE_CHECKING, Set, cast
 
@@ -36,11 +37,221 @@ from code_scalpel.mcp.models.graph import (
     TaintFlowModel,
     WildcardExpansionModel,
 )
+from code_scalpel.graph_engine.node_id import NodeType, UniversalNodeID
 
 if TYPE_CHECKING:
     from code_scalpel.graph_engine.graph import UniversalGraph
 
 logger = logging.getLogger("code_scalpel.mcp.graph")
+
+
+# [20260306_FEATURE] Initial JS/TS graph-neighborhood parity slice.
+_GRAPH_LANGUAGE_EXTENSIONS: dict[str, tuple[str, ...]] = {
+    "python": (".py",),
+    "javascript": (".js", ".jsx", ".mjs", ".cjs"),
+    "typescript": (".ts", ".tsx"),
+    "java": (".java",),
+}
+
+_GRAPH_SUFFIX_TO_LANGUAGE = {
+    suffix: language
+    for language, suffixes in _GRAPH_LANGUAGE_EXTENSIONS.items()
+    for suffix in suffixes
+}
+
+# [20260307_FEATURE] Initial local JS/TS get_project_map parity slice.
+_PROJECT_MAP_JS_TS_SUFFIXES: tuple[str, ...] = (
+    ".js",
+    ".jsx",
+    ".mjs",
+    ".cjs",
+    ".ts",
+    ".tsx",
+    ".mts",
+    ".cts",
+)
+
+_PROJECT_MAP_JAVA_SUFFIXES: tuple[str, ...] = (".java",)
+
+_PROJECT_MAP_JS_TS_COMPLEXITY_PATTERN = re.compile(
+    r"\b(if|for|while|switch|catch|case|function|class)\b|=>|&&|\|\|"
+)
+
+
+def _project_map_detect_language(rel_path: str) -> str:
+    """Return the canonical project-map language for a relative path."""
+    suffix = Path(rel_path).suffix.lower()
+    if suffix == ".py":
+        return "python"
+    if suffix in _PROJECT_MAP_JS_TS_SUFFIXES:
+        return "typescript" if suffix in {".ts", ".tsx", ".mts", ".cts"} else "javascript"
+    if suffix in _PROJECT_MAP_JAVA_SUFFIXES:
+        return "java"
+    return "other"
+
+
+def _calculate_js_ts_project_map_complexity(code: str) -> int:
+    """Return a lightweight complexity heuristic for local JS/TS project-map scans."""
+    return max(1, 1 + len(_PROJECT_MAP_JS_TS_COMPLEXITY_PATTERN.findall(code)))
+
+
+def _scan_js_ts_project_map_module(
+    file_path: Path,
+    root_path: Path,
+    include_complexity: bool,
+) -> ModuleInfo | None:
+    """Build ModuleInfo for a local JS/TS source file.
+
+    [20260307_FEATURE] Narrow Stage 10 parity slice for get_project_map.
+    Uses the JS tree-sitter parser when available, then falls back to regex-free
+    line inspection via import statements already exposed by that parser.
+    """
+    rel_path = str(file_path.relative_to(root_path))
+    code = file_path.read_text(encoding="utf-8", errors="ignore")
+    lines = code.count("\n") + 1
+
+    functions: list[str] = []
+    classes: list[str] = []
+    imports: list[str] = []
+    entry_points: list[str] = []
+
+    try:
+        from code_scalpel.code_parsers.javascript_parsers.javascript_parsers_treesitter import (
+            TREE_SITTER_AVAILABLE,
+            TreeSitterJSParser,
+        )
+    except Exception:
+        TREE_SITTER_AVAILABLE = False
+        TreeSitterJSParser = None  # type: ignore[assignment]
+
+    if TREE_SITTER_AVAILABLE and TreeSitterJSParser is not None:
+        try:
+            parsed = TreeSitterJSParser().parse_file(str(file_path))
+
+            for symbol in parsed.symbols:
+                if symbol.kind == "function":
+                    functions.append(symbol.name)
+                    if symbol.is_exported or symbol.name == "main":
+                        entry_points.append(f"{rel_path}:{symbol.name}")
+                elif symbol.kind == "class":
+                    classes.append(symbol.name)
+                    if symbol.is_exported:
+                        entry_points.append(f"{rel_path}:{symbol.name}")
+
+            imports = [statement.module for statement in parsed.imports if statement.module]
+        except Exception:
+            return None
+
+    complexity = (
+        _calculate_js_ts_project_map_complexity(code) if include_complexity else 0
+    )
+
+    return ModuleInfo(
+        path=rel_path,
+        functions=sorted(set(functions)),
+        classes=sorted(set(classes)),
+        imports=sorted(set(imports)),
+        entry_points=sorted(set(entry_points)),
+        line_count=lines,
+        complexity_score=complexity,
+    )
+
+
+def _scan_java_project_map_module(
+    file_path: Path,
+    root_path: Path,
+    include_complexity: bool,
+) -> ModuleInfo | None:
+    """Build ModuleInfo for a local Java source file.
+
+    [20260308_FEATURE] Narrow Stage 10 Java slice for get_project_map.
+    Uses the tree-sitter Java parser to expose class/method/module metadata
+    and import keys that the existing relationship builder can reuse.
+    """
+    rel_path = str(file_path.relative_to(root_path))
+    code = file_path.read_text(encoding="utf-8", errors="ignore")
+    lines = code.count("\n") + 1
+
+    functions: list[str] = []
+    classes: list[str] = []
+    imports: list[str] = []
+    entry_points: list[str] = []
+
+    try:
+        from code_scalpel.code_parsers.java_parsers import TreeSitterJavaParser
+    except Exception:
+        return None
+
+    try:
+        parsed = TreeSitterJavaParser().parse_detailed(code)
+    except Exception:
+        return None
+
+    class_stack = list(parsed.classes)
+    while class_stack:
+        java_class = class_stack.pop()
+        classes.append(java_class.name)
+        for java_method in java_class.methods:
+            qualified_name = f"{java_class.name}.{java_method.name}"
+            functions.append(qualified_name)
+            if java_method.name == "main" or (
+                java_method.name == "entry"
+                and "public" in java_method.modifiers
+                and "static" in java_method.modifiers
+            ):
+                entry_points.append(f"{rel_path}:{qualified_name}")
+        class_stack.extend(java_class.inner_classes)
+
+    imports.extend(parsed.imports)
+    imports.extend(parsed.static_imports)
+
+    complexity = parsed.total_complexity if include_complexity else 0
+
+    return ModuleInfo(
+        path=rel_path,
+        functions=sorted(set(functions)),
+        classes=sorted(set(classes)),
+        imports=sorted(set(imports)),
+        entry_points=sorted(set(entry_points)),
+        line_count=lines,
+        complexity_score=complexity,
+    )
+
+
+def _resolve_project_map_import_target(
+    import_name: str,
+    source_path: str,
+    module_index: dict[str, str],
+) -> str | None:
+    """Resolve a project-map import string to a known module path.
+
+    [20260308_FEATURE] Supports Python dotted imports, local JS/TS relative imports,
+    and Java dotted/static imports.
+    """
+    source_suffix = Path(source_path).suffix.lower()
+
+    if source_suffix in _PROJECT_MAP_JS_TS_SUFFIXES and import_name.startswith("."):
+        parent_dir = Path(source_path).parent
+        normalized = (parent_dir / import_name).as_posix()
+        normalized = str(Path(normalized))
+        candidates = [
+            normalized,
+            *(normalized + suffix for suffix in _PROJECT_MAP_JS_TS_SUFFIXES),
+            *(str(Path(normalized) / f"index{suffix}") for suffix in _PROJECT_MAP_JS_TS_SUFFIXES),
+        ]
+        for candidate in candidates:
+            if candidate in module_index:
+                return module_index[candidate]
+        return None
+
+    if import_name in module_index:
+        return module_index[import_name]
+
+    for alias, path_value in module_index.items():
+        if import_name.startswith(alias):
+            return path_value
+
+    return None
 
 
 def _get_project_root() -> Path:
@@ -104,6 +315,37 @@ def _cache_graph(
 # [20251213_FEATURE] v1.5.0 - get_call_graph MCP Tool
 # [20260110_FEATURE] v3.3.0 - Pre-release: confidence, context, paths, focus
 # ============================================================================
+
+_CALL_GRAPH_PARITY_LEGEND: dict[str, str] = {
+    "advanced": "Import-aware and type-aware call graph resolution.",
+    "runtime_slice": "Dedicated non-Python runtime slice with language-specific graph logic.",
+    "method_local_slice": "Receiver-aware local callable nodes plus conservative import-aware generic edges.",
+    "local_slice": "Local callable nodes and same-file call edges via the shared IR fallback.",
+}
+
+_CALL_GRAPH_LANGUAGE_PARITY: dict[str, str] = {
+    "python": "advanced",
+    "javascript": "runtime_slice",
+    "typescript": "runtime_slice",
+    "java": "runtime_slice",
+    "c": "local_slice",
+    "cpp": "method_local_slice",
+    "csharp": "method_local_slice",
+    "go": "method_local_slice",
+    "kotlin": "method_local_slice",
+    "php": "method_local_slice",
+    "ruby": "method_local_slice",
+    "swift": "method_local_slice",
+    "rust": "method_local_slice",
+}
+
+_CALL_GRAPH_RUNTIME_SCOPE_SUMMARY = (
+    "Python currently has the deepest get_call_graph semantics. JavaScript, "
+    "TypeScript, and Java have dedicated runtime slices. C remains on basic local "
+    "callable parity. C++, C#, Go, Kotlin, PHP, Ruby, Swift, and Rust now expose "
+    "receiver-aware local callable nodes, and advanced mode adds conservative "
+    "import-aware edges through the shared IR-backed fallback."
+)
 
 
 def _get_call_graph_sync(
@@ -394,6 +636,9 @@ def _get_call_graph_sync(
             in capabilities.get("capabilities", []),
             enterprise_metrics_enabled="hot_path_identification"
             in capabilities.get("capabilities", []),
+            language_parity=dict(_CALL_GRAPH_LANGUAGE_PARITY),
+            parity_legend=dict(_CALL_GRAPH_PARITY_LEGEND),
+            runtime_scope_summary=_CALL_GRAPH_RUNTIME_SCOPE_SUMMARY,
         )
 
     except Exception as e:
@@ -447,7 +692,16 @@ def _generate_neighborhood_mermaid(
 def _normalize_graph_center_node_id(center_node_id: str) -> str:
     """Normalize common legacy node-id formats into canonical IDs.
 
-    Canonical format: python::<module>::function::<name>
+    [20260306_DOCS] Canonical IDs for get_graph_neighborhood are still Python
+    function IDs today.
+
+    Canonical formats:
+    - python::<module>::function::<name>
+    - javascript::<path/module>::function::<name>
+    - typescript::<path/module>::function::<name>
+    - java::<path/module>::method::<owner>:<name>
+    - javascript::<path/module>::method::<owner>:<name>
+    - typescript::<path/module>::method::<owner>:<name>
 
     Accepted legacy inputs:
     - routes.py:search_route
@@ -458,7 +712,11 @@ def _normalize_graph_center_node_id(center_node_id: str) -> str:
     if not raw:
         return raw
 
-    if raw.startswith("python::") and "::function::" in raw:
+    if any(
+        raw.startswith(f"{language}::")
+        and ("::function::" in raw or "::method::" in raw)
+        for language in _GRAPH_LANGUAGE_EXTENSIONS
+    ):
         return raw
 
     # Common legacy format: <file>:<symbol>
@@ -469,7 +727,9 @@ def _normalize_graph_center_node_id(center_node_id: str) -> str:
         if not name:
             return raw
 
-        # If this looks like a path, convert to module.
+        suffix = Path(file_part).suffix.lower()
+
+        # If this looks like a Python path, convert to dotted module.
         if file_part.endswith(".py"):
             module = file_part.replace("/", ".").replace("\\", ".")
             if module.endswith(".py"):
@@ -479,6 +739,24 @@ def _normalize_graph_center_node_id(center_node_id: str) -> str:
             if module:
                 return f"python::{module}::function::{name}"
 
+        # [20260308_FEATURE] Preserve slash-style module IDs for JS/TS and Java.
+        js_ts_language = _GRAPH_SUFFIX_TO_LANGUAGE.get(suffix)
+        if js_ts_language is not None:
+            module = file_part.replace("\\", "/")
+            module = module[: -len(suffix)] if module.endswith(suffix) else module
+            module = module.strip("/")
+            if module:
+                if js_ts_language == "java":
+                    owner = Path(module).name
+                    method_owner = owner
+                    method_name = name
+                    if "." in name:
+                        method_owner, method_name = name.split(".", 1)
+                    return (
+                        f"java::{module}::method::{method_owner}:{method_name}"
+                    )
+                return f"{js_ts_language}::{module}::function::{name}"
+
         # If this looks like a bare module name.
         module = file_part.replace("/", ".").replace("\\", ".").strip(".")
         if module:
@@ -487,10 +765,719 @@ def _normalize_graph_center_node_id(center_node_id: str) -> str:
     return raw
 
 
+def _resolve_graph_module_candidate(
+    root_path: Path, language: str, module: str
+) -> Path | None:
+    """Resolve a canonical graph module to a local source file when possible."""
+    if language == "python":
+        candidate = root_path / (module.replace(".", "/") + ".py")
+        return candidate if candidate.exists() else None
+
+    if language == "java":
+        normalized = module.replace("\\", "/").strip("/")
+        module_paths = [normalized]
+        dotted_variant = normalized.replace(".", "/")
+        if dotted_variant not in module_paths:
+            module_paths.append(dotted_variant)
+
+        for module_path in module_paths:
+            candidate = (root_path / module_path).with_suffix(".java")
+            if candidate.exists():
+                return candidate
+        return None
+
+    if language not in {"javascript", "typescript"}:
+        return None
+
+    normalized = module.replace("\\", "/").strip("/")
+    candidates: list[Path] = []
+    module_paths = [normalized]
+    dotted_variant = normalized.replace(".", "/")
+    if dotted_variant not in module_paths:
+        module_paths.append(dotted_variant)
+
+    for module_path in module_paths:
+        base = root_path / module_path
+        if base.suffix.lower() in _GRAPH_LANGUAGE_EXTENSIONS[language]:
+            candidates.append(base)
+        else:
+            for suffix in _GRAPH_LANGUAGE_EXTENSIONS[language]:
+                candidates.append(base.with_suffix(suffix))
+
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+
+    return None
+
+
+def _fast_validate_js_ts_graph_node_exists(
+    candidate: Path, kind: str, name: str
+) -> tuple[bool, str | None]:
+    """Best-effort validation for a local JS/TS function or method node.
+
+    [20260306_FEATURE] Accept canonical JS/TS method IDs in addition to function IDs.
+    """
+    method_owner: str | None = None
+    method_name = name
+    if kind == "method":
+        if ":" not in name:
+            return False, f"Invalid JS/TS method node '{name}'; expected Owner:method"
+        method_owner, method_name = name.split(":", 1)
+
+    try:
+        from code_scalpel.code_parsers.javascript_parsers.javascript_parsers_treesitter import (
+            TREE_SITTER_AVAILABLE,
+            TreeSitterJSParser,
+        )
+    except Exception:
+        TREE_SITTER_AVAILABLE = False
+        TreeSitterJSParser = None  # type: ignore[assignment]
+
+    if TREE_SITTER_AVAILABLE and TreeSitterJSParser is not None:
+        try:
+            parsed = TreeSitterJSParser().parse_file(str(candidate))
+            for symbol in parsed.symbols:
+                if kind == "function" and symbol.kind == "function" and symbol.name == name:
+                    return True, None
+                if (
+                    kind == "method"
+                    and symbol.kind == "method"
+                    and symbol.parent_name == method_owner
+                    and symbol.name == method_name
+                ):
+                    return True, None
+        except Exception:
+            pass
+
+    try:
+        import esprima  # type: ignore[import-untyped]
+        import esprima.nodes  # type: ignore[import-untyped]
+    except Exception:
+        return True, None
+
+    try:
+        code = candidate.read_text(encoding="utf-8")
+        try:
+            ast_js = esprima.parseModule(code, loc=True, tolerant=True)
+        except Exception:
+            ast_js = esprima.parseScript(code, loc=True, tolerant=True)
+    except Exception:
+        return True, None
+
+    stack = [ast_js]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, list):
+            stack.extend(node)
+            continue
+        if not isinstance(node, esprima.nodes.Node):
+            continue
+        if kind == "function" and isinstance(node, esprima.nodes.FunctionDeclaration):
+            ident = getattr(getattr(node, "id", None), "name", None)
+            if ident == name:
+                return True, None
+        if kind == "method" and method_owner:
+            if node.__class__.__name__ in {"MethodDefinition", "Property"}:
+                key = getattr(node, "key", None)
+                value = getattr(node, "value", None)
+                ident = getattr(key, "name", None)
+                if ident == method_name and value is not None:
+                    parent = getattr(getattr(node, "_parent", None), "id", None)
+                    parent_name = getattr(parent, "name", None)
+                    if parent_name == method_owner:
+                        return True, None
+        for value in node.__dict__.values():
+            if isinstance(value, esprima.nodes.Node):
+                try:
+                    setattr(value, "_parent", node)
+                except Exception:
+                    pass
+                stack.append(value)
+            elif isinstance(value, list):
+                for child in value:
+                    if isinstance(child, esprima.nodes.Node):
+                        try:
+                            setattr(child, "_parent", node)
+                        except Exception:
+                            pass
+                    stack.append(child)
+
+    return False, f"Center node JS/TS {kind} '{name}' not found in {candidate}"
+
+
+def _fast_validate_java_graph_node_exists(
+    candidate: Path, kind: str, name: str
+) -> tuple[bool, str | None]:
+    """Best-effort validation for a local Java method node.
+
+    [20260308_FEATURE] Reuse the tree-sitter Java parser to validate canonical
+    Java method-node IDs for get_graph_neighborhood.
+    """
+    if kind != "method":
+        return (
+            False,
+            "get_graph_neighborhood currently supports Java method nodes only. "
+            f"Received Java {kind} node '{name}'.",
+        )
+
+    if ":" not in name:
+        return False, f"Invalid Java method node '{name}'; expected Owner:method"
+
+    owner, method_name = name.split(":", 1)
+
+    def _java_method_selector(owner_name: str, method: object, overloaded_names: set[str]) -> str:
+        member_name = owner_name.split(".")[-1] if getattr(method, "is_constructor", False) else getattr(method, "name", "")
+        if member_name not in overloaded_names:
+            return f"{owner_name}.{member_name}"
+        parameter_types = ", ".join(
+            re.sub(
+                r"([A-Za-z_$][\w$]*\.)+([A-Za-z_$][\w$]*(?:\[\])*)",
+                r"\2",
+                re.sub(r"\s+", "", getattr(parameter, "param_type", None) or "?"),
+            )
+            or "?"
+            for parameter in (getattr(method, "parameters", None) or [])
+        )
+        return f"{owner_name}.{member_name}({parameter_types})"
+
+    try:
+        from code_scalpel.code_parsers.java_parsers import TreeSitterJavaParser
+    except Exception:
+        return True, None
+
+    try:
+        parser = TreeSitterJavaParser()
+        parsed = parser.parse_detailed(candidate.read_text(encoding="utf-8"))
+    except Exception:
+        return True, None
+
+    # [20260308_FEATURE] Match both top-level and nested Java classes.
+    class_stack = list(parsed.classes)
+    while class_stack:
+        java_class = class_stack.pop()
+        overload_counts: dict[str, int] = {}
+        for java_method in java_class.methods:
+            member_name = java_class.name if getattr(java_method, "is_constructor", False) else java_method.name
+            overload_counts[member_name] = overload_counts.get(member_name, 0) + 1
+        overloaded_names = {
+            member_name for member_name, count in overload_counts.items() if count > 1
+        }
+        if java_class.name == owner and any(
+            method_name == java_method.name
+            or method_name == _java_method_selector(java_class.name, java_method, overloaded_names).split(".", 1)[1]
+            for java_method in java_class.methods
+        ):
+            return True, None
+        class_stack.extend(java_class.inner_classes)
+
+    return False, f"Center node Java method '{name}' not found in {candidate}"
+
+
+def _parse_graph_center_node_id(
+    center_node_id: str,
+) -> tuple[str, str, str, str] | None:
+    """Parse a canonical graph center node ID.
+
+    [20260306_REFACTOR] Shared parser for graph neighborhood and JS/TS dependency slices.
+    """
+    import re
+
+    match = re.match(
+        r"^(?P<lang>[^:]+)::(?P<module>[^:]+)::(?P<kind>[^:]+)::(?P<name>.+)$",
+        center_node_id.strip(),
+    )
+    if not match:
+        return None
+    return (
+        match.group("lang"),
+        match.group("module"),
+        match.group("kind"),
+        match.group("name"),
+    )
+
+
+def _fast_validate_graph_center_node_exists(
+    root_path: Path, center_node_id: str
+) -> tuple[bool, str | None]:
+    """Best-effort fast validation for supported graph-neighborhood node IDs.
+
+    [20260308_FEATURE] Supports Python function nodes, JS/TS function and
+    method nodes, and canonical Java method nodes.
+    """
+    parsed = _parse_graph_center_node_id(center_node_id)
+    if parsed is None:
+        return (
+            False,
+            "Invalid center_node_id format; expected language::module::type::name. "
+            "get_graph_neighborhood currently accepts canonical Python, JavaScript, "
+            "TypeScript, and Java node IDs such as python::app.routes::function::handle_request, "
+            "typescript::src/api/client::function::fetchUsers, or java::demo/App::method::App:main.",
+        )
+
+    lang, module, kind, name = parsed
+
+    if kind not in {"function", "method"}:
+        return (
+            False,
+            "get_graph_neighborhood currently supports local Python function nodes, JavaScript/TypeScript function and method nodes, and Java method nodes only. "
+            f"Received '{center_node_id}'.",
+        )
+
+    if lang not in {"python", "javascript", "typescript", "java"}:
+        return (
+            False,
+            "get_graph_neighborhood currently supports local Python function nodes plus local JavaScript, TypeScript, and Java method nodes only. "
+            f"Received '{center_node_id}'.",
+        )
+
+    if kind == "method" and lang == "python":
+        return (
+            False,
+            "get_graph_neighborhood currently exposes canonical method-node support for JavaScript, TypeScript, and Java only. "
+            f"Received '{center_node_id}'.",
+        )
+
+    if kind == "function" and lang == "java":
+        return (
+            False,
+            "get_graph_neighborhood currently expects canonical Java method-node IDs such as "
+            "java::demo/App::method::App:main, not Java function-node IDs. "
+            f"Received '{center_node_id}'.",
+        )
+
+    if module in ("external", "unknown"):
+        return (
+            False,
+            f"Center node module '{module}' is not a local {lang} module for get_graph_neighborhood.",
+        )
+
+    candidate = _resolve_graph_module_candidate(root_path, lang, module)
+    if candidate is None:
+        return (
+            False,
+            f"Center node file not found for local {lang} module '{module}'.",
+        )
+
+    if lang == "python":
+        return _fast_validate_python_function_node_exists(root_path, center_node_id)
+
+    if lang == "java":
+        return _fast_validate_java_graph_node_exists(candidate, kind, name)
+
+    return _fast_validate_js_ts_graph_node_exists(candidate, kind, name)
+
+
+def _get_graph_language_from_file(file_path: str) -> str:
+    """Infer graph language from a relative file path."""
+    if file_path in {"", "<external>"}:
+        return "external"
+    return _GRAPH_SUFFIX_TO_LANGUAGE.get(Path(file_path).suffix.lower(), "external")
+
+
+def _get_graph_module_from_file(file_path: str, language: str) -> str:
+    """Convert a relative file path to the canonical graph module form."""
+    if file_path in {"", "<external>"}:
+        return "external"
+
+    normalized = file_path.replace("\\", "/")
+    suffix = Path(normalized).suffix.lower()
+    if suffix:
+        normalized = normalized[: -len(suffix)]
+
+    if language == "python":
+        return normalized.replace("/", ".").strip(".")
+
+    return normalized.strip("/")
+
+
+def _build_graph_node_id(file_path: str, symbol_name: str) -> str:
+    """Build a canonical graph node ID from a file/symbol pair."""
+    language = _get_graph_language_from_file(file_path)
+    module = _get_graph_module_from_file(file_path, language)
+
+    if file_path not in {"", "<external>"} and "." in symbol_name:
+        owner, method = symbol_name.split(".", 1)
+        return str(
+            UniversalNodeID(
+                language=language,
+                module=module,
+                node_type=NodeType.METHOD,
+                name=owner,
+                method=method,
+            )
+        )
+
+    return str(
+        UniversalNodeID(
+            language=language,
+            module=module,
+            node_type=NodeType.FUNCTION,
+            name=symbol_name,
+        )
+    )
+
+
+def _get_java_symbol_base_name(symbol_name: str) -> str:
+    """Return the base member name from a Java selector or canonical method name."""
+    tail = symbol_name.rsplit(".", 1)[-1]
+    return tail.split("(", 1)[0]
+
+
+def _read_node_code_slice(root_path: Path, rel_file: str, line: int, end_line: int | None) -> str:
+    """Read a best-effort source slice for a graph node.
+
+    [20260306_FEATURE] Shared by the JS/TS cross-file dependency parity slice.
+    """
+    if rel_file in {"", "<external>"}:
+        return ""
+
+    file_path = root_path / rel_file
+    try:
+        lines = file_path.read_text(encoding="utf-8").splitlines()
+    except Exception:
+        return ""
+
+    if not lines:
+        return ""
+
+    start_idx = max(0, line - 1)
+    end_idx = max(start_idx + 1, end_line or line)
+    end_idx = min(end_idx, len(lines))
+    return "\n".join(lines[start_idx:end_idx])
+
+
+def _build_file_dependency_chains(
+    import_graph: dict[str, list[str]], target_file: str, max_depth: int
+) -> list[list[str]]:
+    """Build bounded file-level dependency chains.
+
+    [20260306_REFACTOR] Reused by the JS/TS dependency fallback to mirror the
+    existing CrossFileDependenciesResult contract.
+    """
+    from collections import deque
+
+    dependency_chains: list[list[str]] = []
+    max_chains = 25
+    queue = deque([(target_file, [target_file], 0)])
+    seen_paths: set[tuple[str, ...]] = set()
+
+    while queue and len(dependency_chains) < max_chains:
+        current, path, depth = queue.popleft()
+        if depth >= max_depth:
+            continue
+        for dep in import_graph.get(current, []):
+            new_path = path + [dep]
+            path_key = tuple(new_path)
+            if path_key in seen_paths:
+                continue
+            seen_paths.add(path_key)
+            dependency_chains.append(new_path)
+            queue.append((dep, new_path, depth + 1))
+
+    return dependency_chains
+
+
+def _build_file_mermaid(
+    import_graph: dict[str, list[str]], target_file: str, max_depth: int
+) -> str:
+    """Build a bounded Mermaid diagram from a file-level import graph."""
+    from collections import deque
+
+    max_mermaid_nodes = 60
+    max_mermaid_edges = 200
+    queue = deque([(target_file, 0)])
+    seen_nodes: set[str] = set()
+    edges_out: list[tuple[str, str]] = []
+
+    while queue and len(seen_nodes) < max_mermaid_nodes and len(edges_out) < max_mermaid_edges:
+        current, depth = queue.popleft()
+        if current in seen_nodes:
+            continue
+        seen_nodes.add(current)
+        if depth >= max_depth:
+            continue
+        for dep in import_graph.get(current, [])[:max_mermaid_edges]:
+            if len(edges_out) >= max_mermaid_edges:
+                break
+            edges_out.append((current, dep))
+            if dep not in seen_nodes:
+                queue.append((dep, depth + 1))
+
+    lines = ["graph TD"]
+    seen_nodes.add(target_file)
+    node_ids: dict[str, str] = {}
+    for index, node in enumerate(sorted(seen_nodes)):
+        node_ids[node] = f"N{index}"
+        safe_label = node.replace("/", "_").replace(".", "_")
+        lines.append(f"    {node_ids[node]}[{safe_label}]")
+
+    for source, target in edges_out:
+        if source in node_ids and target in node_ids:
+            lines.append(f"    {node_ids[source]} --> {node_ids[target]}")
+
+    if len(seen_nodes) >= max_mermaid_nodes or len(edges_out) >= max_mermaid_edges:
+        lines.append(
+            f"    %% Diagram truncated (nodes<={max_mermaid_nodes}, edges<={max_mermaid_edges})"
+        )
+
+    return "\n".join(lines)
+
+
+def _get_js_ts_cross_file_dependencies_sync(
+    root_path: Path,
+    target_path: Path,
+    target_symbol: str,
+    target_language: str,
+    effective_max_depth: int,
+    include_code: bool,
+    include_diagram: bool,
+    confidence_decay_factor: float,
+    tier: str,
+    caps_set: set[str],
+    max_depth_limit: int | None,
+    max_files_limit: int | None,
+) -> CrossFileDependenciesResult:
+    """Graph-backed JS/TS/Java dependency slice for get_cross_file_dependencies.
+
+    [20260308_FEATURE] Extend the narrow graph-backed dependency path to Java
+    method symbols, reusing the shared call-graph runtime while keeping the
+    existing result contract intact.
+    """
+    from collections import defaultdict, deque
+
+    from code_scalpel.ast_tools.call_graph import CallGraphBuilder
+    from code_scalpel.ast_tools.cross_file_extractor import (
+        DEFAULT_LOW_CONFIDENCE_THRESHOLD,
+        calculate_confidence,
+    )
+
+    target_rel = str(target_path.relative_to(root_path))
+    # [20260307_FEATURE] Stage 10.1 metadata parity for graph-backed dependency slices.
+    pro_features_enabled = tier in {"pro", "enterprise"}
+    enterprise_features_enabled = tier == "enterprise"
+    # [20260308_FEATURE] JS/TS requires advanced imported-identifier resolution
+    # for useful cross-file payloads; Java keeps Community local-only and relies
+    # on the existing Pro/Enterprise advanced builder for cross-file imports.
+    advanced_resolution = target_language in {"javascript", "typescript"} or tier in {
+        "pro",
+        "enterprise",
+    }
+
+    builder = CallGraphBuilder(root_path)
+    call_graph_result = builder.build_with_details(
+        entry_point=None,
+        depth=max(10, effective_max_depth + 2),
+        max_nodes=None,
+        advanced_resolution=advanced_resolution,
+    )
+
+    node_lookup: dict[str, Any] = {}
+    node_dependencies: dict[str, list[str]] = defaultdict(list)
+
+    for node in call_graph_result.nodes:
+        if node.file in {"", "<external>"}:
+            continue
+        if _get_graph_language_from_file(node.file) != target_language:
+            continue
+        node_lookup[f"{node.file}:{node.name}"] = node
+
+    for edge in call_graph_result.edges:
+        if ":" not in edge.caller or ":" not in edge.callee:
+            continue
+        caller_file, caller_name = edge.caller.split(":", 1)
+        callee_file, callee_name = edge.callee.split(":", 1)
+        caller_key = f"{caller_file}:{caller_name}"
+        callee_key = f"{callee_file}:{callee_name}"
+        if caller_key in node_lookup and callee_key in node_lookup:
+            node_dependencies[caller_key].append(callee_key)
+
+    target_candidates = [f"{target_rel}:{target_symbol}"]
+    if ":" in target_symbol:
+        owner, method = target_symbol.split(":", 1)
+        target_candidates.append(f"{target_rel}:{owner}.{method}")
+    if target_language == "java":
+        # [20260308_FEATURE] Allow Java callers to pass bare method names while
+        # the graph runtime exposes canonical Class.method node names.
+        java_matches = sorted(
+            key
+            for key, node in node_lookup.items()
+            if node.file == target_rel
+            and (
+                node.name == target_symbol
+                or node.name.endswith(f".{target_symbol}")
+                or node.name == target_symbol.replace(":", ".", 1)
+                or _get_java_symbol_base_name(node.name) == target_symbol
+            )
+        )
+        if len(java_matches) == 1:
+            target_candidates.insert(0, java_matches[0])
+        elif len(java_matches) > 1:
+            return CrossFileDependenciesResult(
+                success=False,
+                tier_applied=tier,
+                max_depth_applied=max_depth_limit,
+                max_files_applied=max_files_limit,
+                pro_features_enabled=pro_features_enabled,
+                enterprise_features_enabled=enterprise_features_enabled,
+                error=(
+                    f"Extraction failed: Symbol '{target_symbol}' is ambiguous in {target_path}. "
+                    "Use Class.method(type) or Class:method(type) to select an overloaded Java method."
+                ),
+            )
+
+    target_key = next((candidate for candidate in target_candidates if candidate in node_lookup), None)
+    if target_key is None:
+        return CrossFileDependenciesResult(
+            success=False,
+            tier_applied=tier,
+            max_depth_applied=max_depth_limit,
+            max_files_applied=max_files_limit,
+            pro_features_enabled=pro_features_enabled,
+            enterprise_features_enabled=enterprise_features_enabled,
+            error=f"Extraction failed: Symbol '{target_symbol}' not found in {target_path}.",
+        )
+
+    depths: dict[str, int] = {target_key: 0}
+    queue = deque([target_key])
+    while queue:
+        current = queue.popleft()
+        current_depth = depths[current]
+        if current_depth >= effective_max_depth:
+            continue
+        for dep in node_dependencies.get(current, []):
+            next_depth = current_depth + 1
+            if dep not in depths or next_depth < depths[dep]:
+                depths[dep] = next_depth
+                queue.append(dep)
+
+    file_order: list[str] = []
+    extracted_symbols: list[ExtractedSymbolModel] = []
+    low_confidence_count = 0
+    sorted_keys = sorted(depths.keys(), key=lambda key: (depths[key], key))
+    for key in sorted_keys:
+        node = node_lookup[key]
+        if node.file not in file_order:
+            file_order.append(node.file)
+
+    files_scanned = len(file_order)
+    allowed_files = set(file_order)
+    files_truncated = 0
+    truncation_warning = None
+    if max_files_limit is not None and files_scanned > max_files_limit:
+        allowed_files = set(file_order[:max_files_limit])
+        files_truncated = files_scanned - max_files_limit
+        truncation_warning = (
+            f"Truncated to {max_files_limit} files (of {files_scanned}) due to tier limits."
+        )
+
+    filtered_keys = [key for key in sorted_keys if node_lookup[key].file in allowed_files]
+    for key in filtered_keys:
+        node = node_lookup[key]
+        depth = depths[key]
+        confidence = calculate_confidence(depth, confidence_decay_factor)
+        if confidence < DEFAULT_LOW_CONFIDENCE_THRESHOLD:
+            low_confidence_count += 1
+        extracted_symbols.append(
+            ExtractedSymbolModel(
+                name=node.name,
+                code=(
+                    _read_node_code_slice(root_path, node.file, node.line, node.end_line)
+                    if include_code
+                    else ""
+                ),
+                file=node.file,
+                line_start=node.line,
+                line_end=node.end_line or 0,
+                dependencies=[
+                    node_lookup[dep].name
+                    for dep in node_dependencies.get(key, [])
+                    if dep in filtered_keys
+                ],
+                depth=depth,
+                confidence=confidence,
+                low_confidence=confidence < DEFAULT_LOW_CONFIDENCE_THRESHOLD,
+            )
+        )
+
+    import_graph: dict[str, list[str]] = defaultdict(list)
+    for key in filtered_keys:
+        source_file = node_lookup[key].file
+        for dep in node_dependencies.get(key, []):
+            if dep not in filtered_keys:
+                continue
+            target_file = node_lookup[dep].file
+            if source_file == target_file:
+                continue
+            if target_file not in import_graph[source_file]:
+                import_graph[source_file].append(target_file)
+
+    import_graph = {source: sorted(targets) for source, targets in import_graph.items()}
+    dependency_chains = _build_file_dependency_chains(import_graph, target_rel, effective_max_depth)
+    max_depth_reached = max(depths.values()) if depths else 0
+    files_analyzed = len({node_lookup[key].file for key in filtered_keys})
+    coupling_score: float | None = None
+    if files_analyzed > 0 and len(extracted_symbols) > 1 and "deep_coupling_analysis" in caps_set:
+        coupling_score = round((len(extracted_symbols) - 1) / files_analyzed, 3)
+
+    combined_code = ""
+    if include_code:
+        combined_parts = []
+        for symbol in extracted_symbols:
+            combined_parts.append(f"# From {symbol.file}")
+            combined_parts.append(symbol.code)
+        combined_code = "\n\n".join(combined_parts)
+
+    low_confidence_warning = None
+    if low_confidence_count > 0:
+        names = [symbol.name for symbol in extracted_symbols if symbol.low_confidence][:5]
+        low_confidence_warning = (
+            f"⚠️ {low_confidence_count} symbol(s) have low confidence (below 0.5): "
+            + ", ".join(names)
+            + ("..." if low_confidence_count > 5 else "")
+        )
+
+    mermaid = _build_file_mermaid(import_graph, target_rel, effective_max_depth) if include_diagram else ""
+
+    return CrossFileDependenciesResult(
+        success=True,
+        target_name=target_symbol,
+        target_file=target_rel,
+        tier_applied=tier,
+        max_depth_applied=max_depth_limit,
+        max_files_applied=max_files_limit,
+        pro_features_enabled=pro_features_enabled,
+        enterprise_features_enabled=enterprise_features_enabled,
+        extracted_symbols=extracted_symbols,
+        total_dependencies=max(0, len(extracted_symbols) - 1),
+        unresolved_imports=[],
+        import_graph=import_graph,
+        circular_imports=[],
+        combined_code=combined_code,
+        token_estimate=len(combined_code) // 4 if combined_code else 0,
+        mermaid=mermaid,
+        confidence_decay_factor=confidence_decay_factor,
+        low_confidence_count=low_confidence_count,
+        low_confidence_warning=low_confidence_warning,
+        transitive_depth=effective_max_depth,
+        coupling_score=coupling_score,
+        dependency_chains=dependency_chains,
+        files_scanned=files_scanned,
+        files_truncated=files_truncated,
+        truncation_warning=truncation_warning,
+        truncated=files_truncated > 0,
+        files_analyzed=files_analyzed,
+        max_depth_reached=max_depth_reached,
+    )
+
+
 def _fast_validate_python_function_node_exists(
     root_path: Path, center_node_id: str
 ) -> tuple[bool, str | None]:
     """Best-effort fast validation for python::<module>::function::<name>.
+
+    [20260306_DOCS] The get_graph_neighborhood fast path is intentionally scoped
+    to local Python function nodes and is wrapped by generic graph validation.
 
     This avoids building the full call graph when the node ID points to a module
     file that doesn't exist or a function name that doesn't exist in that file.
@@ -507,7 +1494,9 @@ def _fast_validate_python_function_node_exists(
     if not m:
         return (
             False,
-            "Invalid center_node_id format; expected language::module::type::name",
+            "Invalid center_node_id format; expected language::module::type::name. "
+            "get_graph_neighborhood currently accepts canonical Python function IDs such as "
+            "python::app.routes::function::handle_request.",
         )
 
     lang = m.group("lang")
@@ -519,12 +1508,18 @@ def _fast_validate_python_function_node_exists(
         return True, None
 
     if module in ("external", "unknown"):
-        return False, f"Center node module '{module}' is not a local module"
+        return (
+            False,
+            f"Center node module '{module}' is not a local Python module for get_graph_neighborhood.",
+        )
 
     # Map module -> file path
     candidate = root_path / (module.replace(".", "/") + ".py")
     if not candidate.exists():
-        return False, f"Center node file not found for module '{module}': {candidate}"
+        return (
+            False,
+            f"Center node file not found for local Python module '{module}': {candidate}",
+        )
 
     # Quick AST scan for a matching function name in that single file.
     # [20260119_FEATURE] Uses unified parser for deterministic behavior.
@@ -539,7 +1534,10 @@ def _fast_validate_python_function_node_exists(
                 and node.name == name
             ):
                 return True, None
-        return False, f"Center node function '{name}' not found in {candidate}"
+        return (
+            False,
+            f"Center node Python function '{name}' not found in {candidate}",
+        )
     except (ParsingError, UnicodeDecodeError, OSError):
         # If parsing fails, fall back to the slow path (graph build)
         return True, None
@@ -557,27 +1555,38 @@ def _get_graph_neighborhood_sync(
     """Synchronous implementation of get_graph_neighborhood."""
     root_path = Path(project_root) if project_root else _get_project_root()
 
-    if not root_path.exists():
-        return GraphNeighborhoodResult(
-            success=False,
-            error=f"Project root not found: {root_path}.",
-        )
-
-    # [20251225_FEATURE] Capability-driven tier behavior (no upgrade hints)
+    # [20260307_FEATURE] Stage 10.1 metadata parity for graph neighborhoods.
     tier = _get_current_tier()
     caps = get_tool_capabilities("get_graph_neighborhood", tier) or {}
     limits = caps.get("limits", {}) or {}
     cap_list = caps.get("capabilities", []) or []
     cap_set = set(cap_list) if not isinstance(cap_list, set) else cap_list
-
-    # Enterprise capability flags (returned even when empty)
     query_supported = bool("graph_query_language" in cap_set)
     traversal_rules_available = bool("custom_traversal_rules" in cap_set)
     path_constraints_supported = bool("path_constraint_queries" in cap_set)
-
-    # [20251226_BUGFIX] Support both legacy and current limit keys.
     max_k_hops = limits.get("max_k_hops", limits.get("max_k"))
     max_nodes_limit = limits.get("max_nodes")
+    advanced_resolution = False
+    include_enterprise_metrics = bool(
+        {
+            "custom_traversal",
+            "graph_query_language",
+            "custom_traversal_rules",
+            "path_constraint_queries",
+        }
+        & cap_set
+    )
+
+    if not root_path.exists():
+        return GraphNeighborhoodResult(
+            success=False,
+            tier_applied=tier,
+            max_k_applied=max_k_hops,
+            max_nodes_applied=max_nodes_limit,
+            advanced_resolution_enabled=advanced_resolution,
+            enterprise_features_enabled=include_enterprise_metrics,
+            error=f"Project root not found: {root_path}.",
+        )
 
     actual_k = k
     k_limited = False
@@ -593,30 +1602,48 @@ def _get_graph_neighborhood_sync(
     if k < 1:
         return GraphNeighborhoodResult(
             success=False,
+            tier_applied=tier,
+            max_k_applied=max_k_hops,
+            max_nodes_applied=max_nodes_limit,
+            advanced_resolution_enabled=advanced_resolution,
+            enterprise_features_enabled=include_enterprise_metrics,
             error="Parameter 'k' must be at least 1.",
         )
 
     if max_nodes < 1:
         return GraphNeighborhoodResult(
             success=False,
+            tier_applied=tier,
+            max_k_applied=max_k_hops,
+            max_nodes_applied=max_nodes_limit,
+            advanced_resolution_enabled=advanced_resolution,
+            enterprise_features_enabled=include_enterprise_metrics,
             error="Parameter 'max_nodes' must be at least 1.",
         )
 
     if direction not in ("outgoing", "incoming", "both"):
         return GraphNeighborhoodResult(
             success=False,
+            tier_applied=tier,
+            max_k_applied=max_k_hops,
+            max_nodes_applied=max_nodes_limit,
+            advanced_resolution_enabled=advanced_resolution,
+            enterprise_features_enabled=include_enterprise_metrics,
             error=f"Parameter 'direction' must be 'outgoing', 'incoming', or 'both', got '{direction}'.",
         )
 
     try:
         center_node_id = _normalize_graph_center_node_id(center_node_id)
 
-        ok, fast_err = _fast_validate_python_function_node_exists(
-            root_path, center_node_id
-        )
+        ok, fast_err = _fast_validate_graph_center_node_exists(root_path, center_node_id)
         if not ok:
             return GraphNeighborhoodResult(
                 success=False,
+                tier_applied=tier,
+                max_k_applied=max_k_hops,
+                max_nodes_applied=max_nodes_limit,
+                advanced_resolution_enabled=advanced_resolution,
+                enterprise_features_enabled=include_enterprise_metrics,
                 error=fast_err or "Center node not found",
             )
 
@@ -644,6 +1671,26 @@ def _get_graph_neighborhood_sync(
             & cap_set
         )
 
+        parsed_center = _parse_graph_center_node_id(center_node_id)
+        if (
+            parsed_center is not None
+            and parsed_center[0] in {"javascript", "typescript"}
+            and parsed_center[2] == "method"
+            and not advanced_resolution
+        ):
+            return GraphNeighborhoodResult(
+                success=False,
+                tier_applied=tier,
+                max_k_applied=max_k_hops,
+                max_nodes_applied=max_nodes_limit,
+                advanced_resolution_enabled=advanced_resolution,
+                enterprise_features_enabled=include_enterprise_metrics,
+                error=(
+                    "JavaScript and TypeScript method neighborhoods currently require advanced graph capabilities "
+                    "(Pro/Enterprise advanced resolution)."
+                ),
+            )
+
         cache_variant = "advanced" if advanced_resolution else "basic"
         graph = _get_cached_graph(root_path, cache_variant=cache_variant)
 
@@ -660,29 +1707,13 @@ def _get_graph_neighborhood_sync(
             )
 
             # Convert call graph to UniversalGraph
-            from code_scalpel.graph_engine import (
-                EdgeType,
-                GraphEdge,
-                GraphNode,
-                NodeType,
-                UniversalNodeID,
-            )
+            from code_scalpel.graph_engine import EdgeType, GraphEdge, GraphNode
 
             graph = UniversalGraph()
 
             # Add nodes
             for node in call_graph_result.nodes:
-                node_id = UniversalNodeID(
-                    language="python",
-                    module=(
-                        node.file.replace("/", ".").replace(".py", "")
-                        if node.file != "<external>"
-                        else "external"
-                    ),
-                    node_type=NodeType.FUNCTION,
-                    name=node.name,
-                    line=node.line,
-                )
+                node_id = _build_graph_node_id(node.file, node.name)
                 graph.add_node(
                     GraphNode(
                         id=node_id,
@@ -705,19 +1736,8 @@ def _get_graph_neighborhood_sync(
                 callee_file = callee_parts[0] if len(callee_parts) > 1 else ""
                 callee_name = callee_parts[-1]
 
-                caller_module = (
-                    caller_file.replace("/", ".").replace(".py", "")
-                    if caller_file
-                    else "unknown"
-                )
-                callee_module = (
-                    callee_file.replace("/", ".").replace(".py", "")
-                    if callee_file
-                    else "external"
-                )
-
-                caller_id = f"python::{caller_module}::function::{caller_name}"
-                callee_id = f"python::{callee_module}::function::{callee_name}"
+                caller_id = _build_graph_node_id(caller_file, caller_name)
+                callee_id = _build_graph_node_id(callee_file, callee_name)
 
                 graph.add_edge(
                     GraphEdge(
@@ -952,6 +1972,11 @@ def _get_graph_neighborhood_sync(
             success=True,
             center_node_id=center_node_id,
             k=actual_k,
+            tier_applied=tier,
+            max_k_applied=max_k_hops,
+            max_nodes_applied=max_nodes_limit,
+            advanced_resolution_enabled=advanced_resolution,
+            enterprise_features_enabled=include_enterprise_metrics,
             nodes=nodes,
             edges=edges,
             total_nodes=result.total_nodes,
@@ -969,6 +1994,11 @@ def _get_graph_neighborhood_sync(
     except Exception as e:
         return GraphNeighborhoodResult(
             success=False,
+            tier_applied=tier,
+            max_k_applied=max_k_hops,
+            max_nodes_applied=max_nodes_limit,
+            advanced_resolution_enabled=advanced_resolution,
+            enterprise_features_enabled=include_enterprise_metrics,
             error=f"Graph neighborhood extraction failed: {str(e)}",
         )
 
@@ -1096,8 +2126,15 @@ def _get_project_map_sync(
                     complexity += len(node.values) - 1
             return complexity
 
-        # Collect all Python files
-        python_files = list(root_path.rglob("*.py"))
+        # [20260307_FEATURE] Initial local JS/TS parity slice for get_project_map.
+        # Keep Python as the primary path, but include local JS/TS source files.
+        source_files = [
+            f
+            for f in root_path.rglob("*")
+            if f.is_file()
+            and f.suffix.lower()
+            in ({".py"} | set(_PROJECT_MAP_JS_TS_SUFFIXES) | set(_PROJECT_MAP_JAVA_SUFFIXES))
+        ]
 
         # [20251229_BUGFIX] Filter exclusions BEFORE applying file limit
         # Previously: files were sorted/limited first, then filtered, causing
@@ -1132,17 +2169,61 @@ def _get_project_map_sync(
                         return True
             return False
 
-        python_files = [f for f in python_files if not should_exclude(f)]
+        source_files = [f for f in source_files if not should_exclude(f)]
 
         # [20251226_FEATURE] Tier-aware file cap - AFTER filtering
-        python_files = sorted(python_files)
-        if effective_max_files is not None and len(python_files) > effective_max_files:
-            python_files = python_files[:effective_max_files]
+        source_files = sorted(source_files)
+        if effective_max_files is not None and len(source_files) > effective_max_files:
+            source_files = source_files[:effective_max_files]
 
-        for file_path in python_files:
+        for file_path in source_files:
             rel_path = str(file_path.relative_to(root_path))
 
             try:
+                if file_path.suffix.lower() in _PROJECT_MAP_JS_TS_SUFFIXES:
+                    js_ts_module = _scan_js_ts_project_map_module(
+                        file_path,
+                        root_path,
+                        include_complexity,
+                    )
+                    if js_ts_module is None:
+                        continue
+
+                    total_lines += js_ts_module.line_count
+                    if (
+                        include_complexity
+                        and js_ts_module.complexity_score >= complexity_threshold
+                    ):
+                        complexity_hotspots.append(
+                            f"{rel_path} (complexity: {js_ts_module.complexity_score})"
+                        )
+
+                    all_entry_points.extend(js_ts_module.entry_points)
+                    modules.append(js_ts_module)
+                    continue
+
+                if file_path.suffix.lower() in _PROJECT_MAP_JAVA_SUFFIXES:
+                    java_module = _scan_java_project_map_module(
+                        file_path,
+                        root_path,
+                        include_complexity,
+                    )
+                    if java_module is None:
+                        continue
+
+                    total_lines += java_module.line_count
+                    if (
+                        include_complexity
+                        and java_module.complexity_score >= complexity_threshold
+                    ):
+                        complexity_hotspots.append(
+                            f"{rel_path} (complexity: {java_module.complexity_score})"
+                        )
+
+                    all_entry_points.extend(java_module.entry_points)
+                    modules.append(java_module)
+                    continue
+
                 with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
                     code = f.read()
 
@@ -1234,8 +2315,13 @@ def _get_project_map_sync(
             builder = CallGraphBuilder(root_path)
             circular_imports = builder.detect_circular_imports()
 
-        # [20251213_FEATURE] Calculate language breakdown
-        languages: dict[str, int] = {"python": len(modules)}
+        # [20260307_FEATURE] Count languages from analyzed source modules first.
+        languages: dict[str, int] = {}
+        for mod in modules:
+            detected_language = _project_map_detect_language(mod.path)
+            if detected_language != "other":
+                languages[detected_language] = languages.get(detected_language, 0) + 1
+
         # Also count other common file types
         for ext, lang in [
             (".js", "javascript"),
@@ -1255,8 +2341,10 @@ def _get_project_map_sync(
                 for f in root_path.rglob(f"*{ext}")
                 if not any(p in exclude_patterns for p in f.parts)
             )
-            if actual_count > 0:
-                languages[lang] = languages.get(lang, 0) + actual_count
+            analyzed_count = languages.get(lang, 0)
+            remainder = max(actual_count - analyzed_count, 0)
+            if remainder > 0:
+                languages[lang] = analyzed_count + remainder
 
         modules_in_diagram = (
             len(modules)
@@ -1266,20 +2354,25 @@ def _get_project_map_sync(
         diagram_limit = modules_in_diagram
 
         # [20251226_FEATURE] Tier-aware relationship + analytics construction
-        dotted_to_path: dict[str, str] = {}
+        module_index: dict[str, str] = {}
         for mod in modules:
-            dotted = mod.path[:-3] if mod.path.endswith(".py") else mod.path
-            dotted = dotted.replace("/", ".")
-            dotted_to_path[dotted] = mod.path
+            path_obj = Path(mod.path)
+            suffix = path_obj.suffix.lower()
+            if suffix == ".py":
+                dotted = mod.path[:-3].replace("/", ".")
+                module_index[dotted] = mod.path
+                continue
 
-        def resolve_import_target(import_name: str) -> str | None:
-            """Map an import string to a known module path if possible."""
-            if import_name in dotted_to_path:
-                return dotted_to_path[import_name]
-            for dotted_key, path_value in dotted_to_path.items():
-                if import_name.startswith(dotted_key):
-                    return path_value
-            return None
+            if suffix in _PROJECT_MAP_JS_TS_SUFFIXES:
+                stem = str(path_obj.with_suffix("")).replace("\\", "/")
+                module_index[stem] = mod.path
+                if path_obj.stem == "index":
+                    module_index[str(path_obj.parent).replace("\\", "/")] = mod.path
+                continue
+
+            if suffix in _PROJECT_MAP_JAVA_SUFFIXES:
+                dotted = str(path_obj.with_suffix("")).replace("\\", "/").replace("/", ".")
+                module_index[dotted] = mod.path
 
         module_relationships: list[dict[str, str]] | None = None
         dependency_diagram: str | None = None
@@ -1351,7 +2444,11 @@ def _get_project_map_sync(
         ):
             for mod in modules:
                 for imp in mod.imports:
-                    target_path = resolve_import_target(imp)
+                    target_path = _resolve_project_map_import_target(
+                        imp,
+                        mod.path,
+                        module_index,
+                    )
                     if target_path:
                         edges.append((mod.path, target_path))
 
@@ -1967,6 +3064,9 @@ def _get_cross_file_dependencies_sync(
     caps = capabilities or get_tool_capabilities("get_cross_file_dependencies", tier)
     caps_set = set(caps.get("capabilities", set()) or [])
     limits = caps.get("limits", {}) or {}
+    # [20260307_FEATURE] Stage 10.1 metadata parity for graph-backed dependency results.
+    pro_features_enabled = tier in {"pro", "enterprise"}
+    enterprise_features_enabled = tier == "enterprise"
 
     effective_max_depth = max_depth
     depth_limit = limits.get("max_depth")
@@ -1976,9 +3076,29 @@ def _get_cross_file_dependencies_sync(
     if max_files_limit is None:
         max_files_limit = limits.get("max_files")
 
+    target_language = _get_graph_language_from_file(str(target_path))
+
     # Allow caller override but never exceed tier-imposed limit
     if limits.get("max_files") is not None and max_files_limit is not None:
         max_files_limit = min(max_files_limit, limits["max_files"])
+
+    caps_set = set(caps.get("capabilities", set()) or [])
+
+    if target_language in {"javascript", "typescript", "java"}:
+        return _get_js_ts_cross_file_dependencies_sync(
+            root_path=root_path,
+            target_path=target_path,
+            target_symbol=target_symbol,
+            target_language=target_language,
+            effective_max_depth=effective_max_depth,
+            include_code=include_code,
+            include_diagram=include_diagram,
+            confidence_decay_factor=confidence_decay_factor,
+            tier=tier,
+            caps_set=caps_set,
+            max_depth_limit=depth_limit,
+            max_files_limit=max_files_limit,
+        )
 
     # [20251227_REFACTOR] Uniform generous timeout for all tiers
     # Timeout is a safeguard, not a tier feature. The depth/file limits
@@ -2058,6 +3178,11 @@ def _get_cross_file_dependencies_sync(
                 if too_many:
                     return CrossFileDependenciesResult(
                         success=False,
+                        tier_applied=tier,
+                        max_depth_applied=depth_limit,
+                        max_files_applied=max_files_limit,
+                        pro_features_enabled=pro_features_enabled,
+                        enterprise_features_enabled=enterprise_features_enabled,
                         error=f"Scope too large (>500 files). Community Tier is limited to 500 files per scan. Please verify a specific subdirectory using the 'project_root' parameter (Current: {root_path}).",
                     )
 
@@ -2066,6 +3191,11 @@ def _get_cross_file_dependencies_sync(
             # [20251227_FEATURE] Context-window aware error messaging for AI agents
             return CrossFileDependenciesResult(
                 success=False,
+                tier_applied=tier,
+                max_depth_applied=depth_limit,
+                max_files_applied=max_files_limit,
+                pro_features_enabled=pro_features_enabled,
+                enterprise_features_enabled=enterprise_features_enabled,
                 error=(
                     f"TIMEOUT ({build_timeout}s): CrossFileExtractor.build() exceeded safeguard limit. "
                     f"FIX: Use a smaller project_root scope. Current: {root_path}. "
@@ -2093,6 +3223,11 @@ def _get_cross_file_dependencies_sync(
             # [20251227_FEATURE] Context-window aware error messaging for AI agents
             return CrossFileDependenciesResult(
                 success=False,
+                tier_applied=tier,
+                max_depth_applied=depth_limit,
+                max_files_applied=max_files_limit,
+                pro_features_enabled=pro_features_enabled,
+                enterprise_features_enabled=enterprise_features_enabled,
                 error=(
                     f"TIMEOUT ({extraction_timeout}s): Extracting '{target_symbol}' exceeded safeguard limit. "
                     f"FIX: Reduce max_depth (current: {effective_max_depth}) or target a simpler symbol. "
@@ -2105,6 +3240,11 @@ def _get_cross_file_dependencies_sync(
         if not extraction_result.success:
             return CrossFileDependenciesResult(
                 success=False,
+                tier_applied=tier,
+                max_depth_applied=depth_limit,
+                max_files_applied=max_files_limit,
+                pro_features_enabled=pro_features_enabled,
+                enterprise_features_enabled=enterprise_features_enabled,
                 error=f"Extraction failed: {'; '.join(extraction_result.errors)}.",
             )
 

@@ -289,3 +289,78 @@ async def test_get_file_context_async_interface(community_tier, tmp_path: Path):
     assert result.success is True
     assert result.tier_applied == "community"
     assert len(result.functions) > 0
+
+
+class TestGetFileContextCSharpFallback:
+    """Validate C# file-context fallback when optional parser deps are missing."""
+
+    def test_csharp_file_context_succeeds_without_tree_sitter(
+        self, community_tier, tmp_path: Path
+    ):
+        """C# get_file_context should fall back to lightweight structural parsing.
+
+        [20260308_TEST] Ensures .cs files still produce useful summaries when the
+        optional tree-sitter-c-sharp dependency is unavailable.
+        """
+        test_file = tmp_path / "Program.cs"
+        test_file.write_text(
+            """using System;
+using System.Collections.Generic;
+
+namespace Demo.App;
+
+public class UserService
+{
+    public string GetUser(int id)
+    {
+        return id.ToString();
+    }
+
+    private static void Log(string message)
+    {
+        Console.WriteLine(message);
+    }
+}
+"""
+        )
+
+        result = _get_file_context_sync(str(test_file), tier="community")
+
+        assert result.success is True
+        assert result.language == "csharp"
+        assert result.error is None
+        assert result.imports == ["System", "System.Collections.Generic"]
+
+        class_names = [c["name"] if isinstance(c, dict) else c.name for c in result.classes]
+        assert class_names == ["UserService"]
+
+        method_names = [f["name"] if isinstance(f, dict) else f.name for f in result.functions]
+        assert method_names == ["UserService.GetUser", "UserService.Log"]
+        assert "namespace Demo.App" in result.summary
+
+    def test_csharp_file_context_pro_fields_use_fallback(self, pro_tier, tmp_path: Path):
+        """Pro-tier enrichments should still work with the fallback C# parser."""
+        test_file = tmp_path / "Program.cs"
+        test_file.write_text(
+            """using Demo.Core;
+
+namespace Demo.App;
+
+public static class Program
+{
+    public static int Main(string[] args)
+    {
+        return args.Length;
+    }
+}
+"""
+        )
+
+        result = _get_file_context_sync(str(test_file), tier="pro")
+
+        assert result.success is True
+        assert result.language == "csharp"
+        assert result.semantic_summary is not None
+        assert "1 function(s)" in result.semantic_summary
+        assert result.expanded_context is not None
+        assert "public static class Program" in result.expanded_context

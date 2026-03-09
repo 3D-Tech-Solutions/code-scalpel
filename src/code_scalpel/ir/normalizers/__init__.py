@@ -29,6 +29,15 @@ except ImportError:
     JavaScriptNormalizer = None  # type: ignore[assignment]
     _HAS_JAVASCRIPT = False
 
+# [20260304_FEATURE] TypeScript normalizer — requires tree-sitter-typescript
+try:
+    from .typescript_normalizer import TypeScriptNormalizer
+
+    _HAS_TYPESCRIPT = True
+except ImportError:
+    TypeScriptNormalizer = None  # type: ignore[assignment]
+    _HAS_TYPESCRIPT = False
+
 # [20260224_FEATURE] C/C++ normalizers — require tree-sitter-c / tree-sitter-cpp
 try:
     from .c_normalizer import CNormalizer, CVisitor
@@ -79,6 +88,9 @@ __all__ = [
 if _HAS_JAVASCRIPT:
     __all__.append("JavaScriptNormalizer")
 
+if _HAS_TYPESCRIPT:
+    __all__.append("TypeScriptNormalizer")
+
 if _HAS_C:
     __all__ += ["CNormalizer", "CVisitor"]
 
@@ -116,3 +128,42 @@ except ImportError:
 
 if _HAS_PHP:
     __all__ += ["PHPNormalizer", "PHPVisitor"]
+
+# [20260304_FEATURE] Ruby normalizer — requires tree-sitter-ruby
+try:
+    from .ruby_normalizer import RubyNormalizer, RubyVisitor
+
+    _HAS_RUBY = True
+except ImportError:
+    RubyNormalizer = None  # type: ignore[assignment]
+    RubyVisitor = None  # type: ignore[assignment]
+    _HAS_RUBY = False
+
+if _HAS_RUBY:
+    __all__ += ["RubyNormalizer", "RubyVisitor"]
+
+# [20260304_FEATURE] Swift normalizer — requires tree-sitter-swift
+try:
+    from .swift_normalizer import SwiftNormalizer, SwiftVisitor
+
+    _HAS_SWIFT = True
+except ImportError:
+    SwiftNormalizer = None  # type: ignore[assignment]
+    SwiftVisitor = None  # type: ignore[assignment]
+    _HAS_SWIFT = False
+
+if _HAS_SWIFT:
+    __all__ += ["SwiftNormalizer", "SwiftVisitor"]
+
+# [20260305_FEATURE] Rust normalizer — requires tree-sitter-rust
+try:
+    from .rust_normalizer import RustNormalizer, RustVisitor
+
+    _HAS_RUST = True
+except ImportError:
+    RustNormalizer = None  # type: ignore[assignment]
+    RustVisitor = None  # type: ignore[assignment]
+    _HAS_RUST = False
+
+if _HAS_RUST:
+    __all__ += ["RustNormalizer", "RustVisitor"]

@@ -32,13 +32,13 @@ class TestCapabilitiesWithProLicense:
             assert capabilities is not None
             assert len(capabilities) > 0
 
-            # Pro tier should have all 22 tools (limits/capabilities differ by tier)
+            # Pro tier should have all 23 tools (limits/capabilities differ by tier)
             available_tools = sum(
                 1 for tool in capabilities.values() if tool.get("available", False)
             )
             assert (
-                available_tools == 22
-            ), f"Pro tier should have all 22 tools, got {available_tools}"
+                available_tools == 23
+            ), f"Pro tier should have all 23 tools, got {available_tools}"
         finally:
             os.environ.pop("CODE_SCALPEL_LICENSE_PATH", None)
 
@@ -61,7 +61,7 @@ class TestCapabilitiesWithProLicense:
 
             # All 22 tools available (limits/capabilities differ)
             assert len(locked_tools) == 0, (
-                f"Pro tier should have all 22 tools available, but {len(locked_tools)} locked: "
+                f"Pro tier should have all 23 tools available, but {len(locked_tools)} locked: "
                 f"{locked_tools}"
             )
         finally:
@@ -102,18 +102,18 @@ class TestCapabilitiesWithEnterpriseLicense:
             assert capabilities is not None
             assert len(capabilities) > 0
 
-            # Enterprise tier should have all 22 tools (limits/capabilities differ by tier)
+            # Enterprise tier should have all 23 tools (limits/capabilities differ by tier)
             available_tools = sum(
                 1 for tool in capabilities.values() if tool.get("available", False)
             )
             assert (
-                available_tools == 22
-            ), f"Enterprise tier should have all 22 tools, got {available_tools}"
+                available_tools == 23
+            ), f"Enterprise tier should have all 23 tools, got {available_tools}"
         finally:
             os.environ.pop("CODE_SCALPEL_LICENSE_PATH", None)
 
     def test_enterprise_has_all_tools(self, clear_all_caches, enterprise_license_path):
-        """Enterprise tier has all 22 tools available (limits/capabilities differ)."""
+        """Enterprise tier has all 23 tools available (limits/capabilities differ)."""
         os.environ["CODE_SCALPEL_LICENSE_PATH"] = str(enterprise_license_path)
 
         try:
@@ -128,18 +128,18 @@ class TestCapabilitiesWithEnterpriseLicense:
                 if cap.get("available", False)
             }
 
-            # Enterprise tier has all 22 tools available
+            # Enterprise tier has all 23 tools available
             # (Limits and capabilities differ by tier, not tool availability)
             assert (
-                len(enterprise_tools) == 22
-            ), f"Enterprise should have all 22 tools available, got {len(enterprise_tools)}"
+                len(enterprise_tools) == 23
+            ), f"Enterprise should have all 23 tools available, got {len(enterprise_tools)}"
         finally:
             os.environ.pop("CODE_SCALPEL_LICENSE_PATH", None)
 
     def test_all_tiers_have_all_tools_different_limits(
         self, clear_all_caches, pro_license_path, enterprise_license_path
     ):
-        """All tiers have all 22 tools - limits and capabilities differ."""
+        """All tiers have all 23 tools - limits and capabilities differ."""
         # Get Pro capabilities
         pro_cap = get_tool_capabilities("get_file_context", "pro")
         enterprise_cap = get_tool_capabilities("get_file_context", "enterprise")
@@ -177,13 +177,13 @@ class TestCapabilitiesWithoutLicense:
         capabilities = get_all_capabilities(tier)
         assert capabilities is not None
 
-        # Community tier should have all 22 tools available
+        # Community tier should have all 23 tools available
         available_tools = sum(
             1 for tool in capabilities.values() if tool.get("available", False)
         )
         assert (
-            available_tools == 22
-        ), f"Community tier should have all 22 tools, got {available_tools}"
+            available_tools == 23
+        ), f"Community tier should have all 23 tools, got {available_tools}"
 
     def test_community_tier_has_limits(self, clear_all_caches):
         """Community tools should have limits defined."""
@@ -195,9 +195,9 @@ class TestCapabilitiesWithoutLicense:
         assert tool_cap.get("available", False)
         assert "limits" in tool_cap
 
-    def test_all_22_tools_listed(self, clear_all_caches):
-        """All 22 tools should be enumerated."""
+    def test_all_23_tools_listed(self, clear_all_caches):
+        """All 23 tools should be enumerated."""
         capabilities = get_all_capabilities("community")
         assert (
-            len(capabilities) == 22
-        ), f"Expected 22 tools total, got {len(capabilities)}"
+            len(capabilities) == 23
+        ), f"Expected 23 tools total, got {len(capabilities)}"

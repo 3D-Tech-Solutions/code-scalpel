@@ -11,6 +11,7 @@ from typing import Any, TYPE_CHECKING
 from mcp.server.fastmcp import Context
 
 from code_scalpel.mcp.models.core import ContextualExtractionResult, PatchResultModel
+from code_scalpel.mcp.helpers.language_helpers import detect_tool_language
 from code_scalpel.licensing.features import get_tool_capabilities, has_capability
 from code_scalpel.mcp.path_resolver import resolve_path
 from code_scalpel.parsing import ParsingError, parse_python_code
@@ -150,12 +151,22 @@ async def _extract_polyglot(
         limits = get_tool_limits("extract_code", tier)
         max_depth_limit = limits.get("max_depth")
 
+        # [20260306_BUGFIX] Keep extract_code metadata aligned with the full polyglot language set.
         # Map Language enum to string
         lang_str_map = {
             Language.PYTHON: "python",
             Language.JAVASCRIPT: "javascript",
             Language.TYPESCRIPT: "typescript",
             Language.JAVA: "java",
+            Language.C: "c",
+            Language.CPP: "cpp",
+            Language.CSHARP: "csharp",
+            Language.GO: "go",
+            Language.KOTLIN: "kotlin",
+            Language.PHP: "php",
+            Language.RUBY: "ruby",
+            Language.SWIFT: "swift",
+            Language.RUST: "rust",
         }
         lang_str = lang_str_map.get(language, "unknown")
 
@@ -368,8 +379,9 @@ async def _extract_code_impl(
     never sees the full file content, saving potentially thousands of tokens.
 
     **MULTI-LANGUAGE SUPPORT (v2.0.0):**
-    Supports Python, JavaScript, TypeScript, and Java. Language is auto-detected
-    from file extension, or specify explicitly with `language` parameter.
+    Supports Python, JavaScript, TypeScript, Java, Go, C, C++, C#, Kotlin,
+    Ruby, Swift, and PHP. Language is auto-detected from file extension, or
+    specify explicitly with `language` parameter.
 
     **CROSS-FILE DEPENDENCIES:**
     Set `include_cross_file_deps=True` to automatically resolve imports.
@@ -387,7 +399,8 @@ async def _extract_code_impl(
         target_name: Name of the element. For methods, use "ClassName.method_name".
         file_path: Path to the source file (TOKEN SAVER - server reads file).
         code: Source code string (fallback if file_path not provided).
-        language: Language override: "python", "javascript", "typescript", "java".
+        language: Language override: "python", "javascript", "typescript", "java",
+                  "go", "c", "cpp", "csharp", "kotlin", "ruby", "swift", "php".
                   If None, auto-detects from file extension.
         include_context: If True, also extract intra-file dependencies.
         context_depth: How deep to traverse dependencies (1=direct, 2=transitive).
@@ -461,21 +474,14 @@ async def _extract_code_impl(
             max_depth_applied=None,
         )
 
-    # [20251221_FEATURE] v3.1.0 - Unified extractor for all languages
-    # Determine language from parameter, file extension, or code content
-    detected_lang = Language.AUTO
-    if language:
-        lang_map = {
-            "python": Language.PYTHON,
-            "javascript": Language.JAVASCRIPT,
-            "js": Language.JAVASCRIPT,
-            "jsx": Language.JAVASCRIPT,  # [20251216_FEATURE] JSX is JavaScript with JSX syntax
-            "typescript": Language.TYPESCRIPT,
-            "ts": Language.TYPESCRIPT,
-            "tsx": Language.TYPESCRIPT,  # [20251216_FEATURE] TSX is TypeScript with JSX syntax
-            "java": Language.JAVA,
-        }
-        detected_lang = lang_map.get(language.lower(), Language.AUTO)
+    # [20260306_REFACTOR] Resolve the canonical language through the shared helper.
+    canonical_language = detect_tool_language(
+        file_path=file_path,
+        code=code,
+        language=language,
+        default="python",
+    )
+    detected_lang = getattr(Language, canonical_language.upper(), Language.AUTO)
 
     if detected_lang == Language.AUTO:
         detected_lang = detect_language(file_path, code)

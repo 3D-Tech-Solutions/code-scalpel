@@ -231,13 +231,17 @@ Each `{lang}_parsers/` directory requires:
 ### Language Completion Status
 See `wiki/Language-Completion-Roadmap.md` for full gap analysis, implementation specs, and sequenced work queue.
 
-**Priority order for completing gaps before new languages:**
-1. **C++** (Phase 2): 7 tool parsers — Cppcheck, clang-tidy, Clang-SA, cpplint, Coverity, SonarQube
-2. **C#** (Phase 2): 6 tool parsers — Roslyn, StyleCop, SecurityCodeScan, FxCop, ReSharper, SonarQube
-3. **Go** (Phase 2): 6 tool parsers — gofmt, golint, govet, staticcheck, golangci-lint, gosec
-4. **Java** (Phase 2): 15 tool parsers — see roadmap for Tier A/B/C priority
-5. **JavaScript** (Phase 2 minor): 5 stubs to complete — npm_audit, jsdoc, package_json, test_detection, webpack
-6. **Then**: Kotlin → Ruby → Rust → Swift → PHP (in order)
+**Current roadmap focus:**
+1. **Stage 10 graph-runtime parity**: keep graph/context discovery honest and expand support as narrow vertical slices rather than broad language claims.
+2. **JavaScript/TypeScript runtime consistency**: complete the active JS/TS slice across `get_call_graph`, `get_graph_neighborhood`, `get_cross_file_dependencies`, `get_symbol_references`, and graph-derived `get_project_map` views.
+3. **Stage 10.1 validation hardening**: completed for the current JS/TS runtime slice, including tier/metadata regressions and graph-surface doc audits.
+4. **Java call-graph slice**: Java now enters the shared call-graph runtime, emits canonical `Class.method` nodes, and supports a narrow `get_call_graph` slice.
+5. **Java scope boundary**: Pro/Enterprise resolve cross-file Java type/static imports, typed imported instance calls, superclass methods, and field-backed instance calls in `get_call_graph`; broader Java parity for neighborhood/dependency/reference surfaces is still separate work.
+
+**Current incorporation status:**
+- Phase 1 IR wiring and Phase 2 tool-parser work are broadly complete for the currently tracked languages in the roadmap.
+- The remaining cross-language gap is not parser coverage; it is runtime parity in graph/context MCP surfaces, which remain Python-first overall.
+- Treat `wiki/Language-Completion-Roadmap.md` as the source of truth for active parity work and checklist status.
 
 ---
 

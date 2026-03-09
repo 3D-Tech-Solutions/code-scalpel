@@ -131,4 +131,43 @@ __all__ = [
     "CVEFinding",
     "SemgrepParser",
     "SemgrepFinding",
+    # Registry
+    "JavaParserRegistry",
 ]
+
+
+class JavaParserRegistry:
+    """Registry for Java static-analysis tool parsers.
+
+    [20260304_FEATURE] Polyglot Phase 2: lazy-load factory for Java tools.
+    Exposes semgrep, checkstyle, and pmd — all have execute_* methods.
+    SpotBugs/SonarQube require XML report files and are excluded here.
+    """
+
+    _TOOL_MAP: dict = {
+        "semgrep": ("java_parsers_Semgrep", "SemgrepParser"),
+        # [20260304_FEATURE] Checkstyle and PMD now have execute_* wrappers
+        "checkstyle": ("java_parsers_Checkstyle", "CheckstyleParser"),
+        "pmd": ("java_parsers_PMD", "PMDParser"),
+    }
+
+    def get_parser(self, tool_name: str):
+        """Return an instantiated parser for *tool_name*.
+
+        Args:
+            tool_name: One of the recognised tool identifiers (case-insensitive).
+
+        Raises:
+            ValueError: If *tool_name* is not a recognised executable tool.
+        """
+        import importlib
+
+        key = tool_name.lower()
+        if key not in self._TOOL_MAP:
+            raise ValueError(
+                f"Unknown Java parser tool: {tool_name!r}. "
+                f"Valid options: {sorted(set(self._TOOL_MAP.keys()))}"
+            )
+        module_name, class_name = self._TOOL_MAP[key]
+        module = importlib.import_module(f".{module_name}", package=__package__)
+        return getattr(module, class_name)()

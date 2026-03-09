@@ -23,11 +23,15 @@ class PHPParserAdapter(IParser):
 
     def parse(self, code: str) -> ParseResult:
         """Parse PHP code and return a ParseResult with the IR module."""
+        from ..interface import Language as IParserLanguage
+
         ir_module = self._normalizer.normalize(code)
         return ParseResult(
-            ast_tree=ir_module,
-            language="php",
-            success=True,
+            ast=ir_module,
+            errors=[],
+            warnings=[],
+            metrics={},
+            language=IParserLanguage.PHP,
         )
 
     def get_functions(self, ast_tree: Any) -> List[str]:

@@ -23,7 +23,7 @@ USAGE:
     print(len(all_caps))  # 22 tools
 
     # List available tools and tiers
-    print(get_tool_names())  # All 22 tool IDs
+    print(get_tool_names())  # All 23 tool IDs
     print(get_tier_names())  # ["community", "pro", "enterprise"]
 
 DESIGN:

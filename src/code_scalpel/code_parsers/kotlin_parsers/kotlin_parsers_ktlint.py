@@ -14,6 +14,10 @@ ktlint provides:
 """
 
 import shutil
+import json
+import re
+import subprocess
+import tempfile
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -178,6 +182,105 @@ class KtlintParser:
         """
         self._ktlint_path = ktlint_path or self._find_ktlint()
 
+    @staticmethod
+    def _split_rule(rule_value: str) -> tuple[str, str]:
+        if ":" in rule_value:
+            rule_set, rule_id = rule_value.split(":", 1)
+            return rule_set or KtlintRuleSet.STANDARD.value, rule_id
+        return KtlintRuleSet.STANDARD.value, rule_value
+
+    @staticmethod
+    def _coerce_severity(value: Optional[str]) -> KtlintSeverity:
+        return KtlintSeverity.WARNING if (value or "").strip().lower() == "warning" else KtlintSeverity.ERROR
+
+    def _make_violation(
+        self,
+        *,
+        rule_value: str,
+        message: str,
+        file_path: str,
+        line: int,
+        column: int,
+        severity: Optional[str] = None,
+        can_be_auto_corrected: bool = False,
+        detail: Optional[str] = None,
+    ) -> KtlintViolation:
+        rule_set, rule_id = self._split_rule(rule_value)
+        return KtlintViolation(
+            rule_id=rule_id,
+            rule_set=rule_set,
+            message=message,
+            severity=self._coerce_severity(severity),
+            file_path=file_path,
+            line=line,
+            column=column,
+            can_be_auto_corrected=can_be_auto_corrected,
+            detail=detail,
+        )
+
+    def _parse_json_payload(self, payload: Any) -> KtlintReport:
+        report = KtlintReport()
+        violations: list[KtlintViolation] = []
+
+        if isinstance(payload, dict) and "violations" in payload:
+            items = [payload]
+        elif isinstance(payload, list):
+            items = payload
+        else:
+            items = []
+
+        files_seen: set[str] = set()
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            file_path = item.get("file") or item.get("filePath") or item.get("path") or ""
+            if file_path:
+                files_seen.add(file_path)
+            for violation in item.get("violations", []):
+                if not isinstance(violation, dict):
+                    continue
+                violations.append(
+                    self._make_violation(
+                        rule_value=violation.get("rule") or violation.get("ruleId") or "standard:unknown",
+                        message=violation.get("message", ""),
+                        file_path=file_path,
+                        line=int(violation.get("line", 1)),
+                        column=int(violation.get("column", 1)),
+                        severity=violation.get("severity"),
+                        can_be_auto_corrected=bool(
+                            violation.get("canBeAutoCorrected", violation.get("fixable", False))
+                        ),
+                        detail=violation.get("detail"),
+                    )
+                )
+
+        report.violations = violations
+        report.files_checked = len(files_seen)
+        return report
+
+    def _run_ktlint_command(
+        self,
+        args: list[str],
+        *,
+        cwd: Optional[str] = None,
+        stdin: Optional[str] = None,
+    ) -> str:
+        if self._ktlint_path is None:
+            return ""
+        cmd = [self._ktlint_path, *args]
+        try:
+            result = subprocess.run(
+                cmd,
+                input=stdin,
+                capture_output=True,
+                text=True,
+                timeout=300,
+                cwd=cwd,
+            )
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            return ""
+        return result.stdout or result.stderr or ""
+
     def _find_ktlint(self) -> Optional[str]:
         """Find ktlint executable."""
         # Check for ktlint in PATH
@@ -204,7 +307,12 @@ class KtlintParser:
         :return: KtlintReport with violations.
 
         """
-        raise NotImplementedError("JSON report parsing not yet implemented")
+        # [20260306_FEATURE] Support reading persisted ktlint JSON reports.
+        try:
+            payload = json.loads(Path(json_path).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return KtlintReport()
+        return self._parse_json_payload(payload)
 
     def parse_json_output(self, json_output: str) -> KtlintReport:
         """
@@ -214,7 +322,23 @@ class KtlintParser:
         :return: KtlintReport with violations.
 
         """
-        raise NotImplementedError("JSON output parsing not yet implemented")
+        # [20260306_FEATURE] Support both array payloads and JSON-lines output.
+        if not json_output.strip():
+            return KtlintReport()
+        try:
+            payload = json.loads(json_output)
+            return self._parse_json_payload(payload)
+        except json.JSONDecodeError:
+            payload: list[Any] = []
+            for raw_line in json_output.splitlines():
+                line = raw_line.strip()
+                if not line:
+                    continue
+                try:
+                    payload.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+            return self._parse_json_payload(payload)
 
     def parse_text_output(self, text: str) -> KtlintReport:
         """
@@ -224,7 +348,35 @@ class KtlintParser:
         :return: KtlintReport with violations.
 
         """
-        raise NotImplementedError("Text output parsing not yet implemented")
+        # [20260306_FEATURE] Parse standard ktlint CLI output lines.
+        report = KtlintReport()
+        pattern = re.compile(
+            r"^(?P<file>.+?):(?P<line>\d+):(?P<column>\d+):\s*"
+            r"(?P<message>.+?)\s*\((?P<rule>[^)]+)\)$"
+        )
+        violations: list[KtlintViolation] = []
+        files_seen: set[str] = set()
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            match = pattern.match(line)
+            if not match:
+                continue
+            file_path = match.group("file")
+            files_seen.add(file_path)
+            violations.append(
+                self._make_violation(
+                    rule_value=match.group("rule"),
+                    message=match.group("message"),
+                    file_path=file_path,
+                    line=int(match.group("line")),
+                    column=int(match.group("column")),
+                )
+            )
+        report.violations = violations
+        report.files_checked = len(files_seen)
+        return report
 
     def parse_editorconfig(self, config_path: str = ".editorconfig") -> KtlintConfig:
         """
@@ -234,7 +386,36 @@ class KtlintParser:
         :return: KtlintConfig object.
 
         """
-        raise NotImplementedError("EditorConfig parsing not yet implemented")
+        # [20260306_FEATURE] Parse common ktlint and IntelliJ Kotlin editorconfig keys.
+        config = KtlintConfig()
+        try:
+            lines = Path(config_path).read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return config
+
+        for raw_line in lines:
+            line = raw_line.strip()
+            if not line or line.startswith(('#', ';', '[')) or '=' not in line:
+                continue
+            key, value = [part.strip() for part in line.split('=', 1)]
+            lowered = value.lower()
+            if key == 'indent_size' and value.isdigit():
+                config.indent_size = int(value)
+            elif key == 'indent_style':
+                config.indent_style = value
+            elif key == 'max_line_length' and re.fullmatch(r'-?\d+', value):
+                config.max_line_length = int(value)
+            elif key == 'ktlint_experimental':
+                config.experimental_rules = lowered == 'enabled'
+            elif key == 'ktlint_android':
+                config.android_style = lowered == 'enabled'
+            elif key == 'ktlint_code_style':
+                config.code_style = value
+            elif key == 'ktlint_disabled_rules':
+                config.disabled_rules.extend(rule.strip() for rule in value.split(',') if rule.strip())
+            else:
+                config.ktlint_settings[key] = value
+        return config
 
     def check_file(
         self,
@@ -249,7 +430,15 @@ class KtlintParser:
         :return: KtlintReport with violations.
 
         """
-        raise NotImplementedError("File checking not yet implemented")
+        # [20260306_FEATURE] Run ktlint on a single file when available.
+        report = KtlintReport()
+        if config_path:
+            report.config = self.parse_editorconfig(config_path)
+        output = self._run_ktlint_command(
+            ["--reporter=json", file_path],
+            cwd=str(Path(file_path).parent),
+        )
+        return self.parse_json_output(output) if output else report
 
     def check_code(
         self,
@@ -264,7 +453,14 @@ class KtlintParser:
         :return: KtlintReport with violations.
 
         """
-        raise NotImplementedError("Code checking not yet implemented")
+        # [20260306_FEATURE] Use a temporary file so ktlint can report stable locations.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            temp_path = Path(tmpdir) / filename
+            temp_path.write_text(code, encoding="utf-8")
+            report = self.check_file(str(temp_path))
+            for violation in report.violations:
+                violation.file_path = filename
+            return report
 
     def check_directory(
         self,
@@ -279,7 +475,25 @@ class KtlintParser:
         :return: KtlintReport with violations.
 
         """
-        raise NotImplementedError("Directory checking not yet implemented")
+        # [20260306_FEATURE] Run ktlint across a directory, optionally with explicit glob patterns.
+        report = KtlintReport()
+        args = ["--reporter=json"]
+        if patterns:
+            args.extend(patterns)
+        else:
+            args.append(directory)
+        output = self._run_ktlint_command(args, cwd=directory)
+        return self.parse_json_output(output) if output else report
+
+    # [20260306_FEATURE] Adapter used by shared MCP static-tool dispatch.
+    def execute_ktlint(self, project_path: Path) -> list[KtlintViolation]:
+        """Return ktlint violations for a file or project path."""
+        path = Path(project_path)
+        if path.is_dir():
+            report = self.check_directory(str(path))
+        else:
+            report = self.check_file(str(path))
+        return report.violations
 
     def format_file(
         self,
@@ -294,7 +508,19 @@ class KtlintParser:
         :return: Tuple of (formatted_code, was_modified).
 
         """
-        raise NotImplementedError("File formatting not yet implemented")
+        # [20260306_FEATURE] Format a file in place when ktlint is available; otherwise return original content.
+        path = Path(file_path)
+        original = path.read_text(encoding="utf-8")
+        if self._ktlint_path is None:
+            return original, False
+
+        if dry_run:
+            formatted, was_modified = self.format_code(original)
+            return formatted, was_modified
+
+        self._run_ktlint_command(["-F", file_path], cwd=str(path.parent))
+        updated = path.read_text(encoding="utf-8")
+        return updated, updated != original
 
     def format_code(self, code: str) -> tuple[str, bool]:
         """
@@ -304,7 +530,12 @@ class KtlintParser:
         :return: Tuple of (formatted_code, was_modified).
 
         """
-        raise NotImplementedError("Code formatting not yet implemented")
+        # [20260306_FEATURE] Best-effort formatter wrapper using a temporary Kotlin file.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            temp_path = Path(tmpdir) / "input.kt"
+            temp_path.write_text(code, encoding="utf-8")
+            formatted, was_modified = self.format_file(str(temp_path), dry_run=False)
+            return formatted, was_modified
 
     def get_fixable_violations(self, report: KtlintReport) -> list[KtlintViolation]:
         """Get violations that can be auto-fixed."""
@@ -323,4 +554,16 @@ class KtlintParser:
         :return: Path to generated baseline file.
 
         """
-        raise NotImplementedError("Baseline generation not yet implemented")
+        # [20260306_FEATURE] Generate a minimal baseline file when CLI support is unavailable.
+        baseline_path = Path(output_path)
+        if self._ktlint_path is not None:
+            self._run_ktlint_command(
+                [f"--baseline={baseline_path}", directory],
+                cwd=directory,
+            )
+        if not baseline_path.exists():
+            baseline_path.write_text(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?><baseline/>",
+                encoding="utf-8",
+            )
+        return str(baseline_path)

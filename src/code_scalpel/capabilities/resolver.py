@@ -26,7 +26,7 @@ from code_scalpel.licensing.config_loader import get_cached_limits, reload_confi
 
 logger = logging.getLogger(__name__)
 
-# All 22 tools in Code Scalpel (alphabetical order)
+# All 23 tools in Code Scalpel (alphabetical order)
 # Note: These are the tools registered in TOOL_CAPABILITIES
 # (excludes oracle tools and special system tools)
 ALL_TOOLS = [
@@ -37,6 +37,7 @@ ALL_TOOLS = [
     "extract_code",
     "generate_unit_tests",
     "get_call_graph",
+    "get_capabilities",
     "get_cross_file_dependencies",
     "get_file_context",
     "get_graph_neighborhood",
@@ -112,7 +113,7 @@ def get_tool_capabilities(tool_id: str, tier: str = "community") -> Dict[str, An
 
 def get_all_capabilities(tier: str = "community") -> Dict[str, Dict[str, Any]]:
     """
-    Get all capabilities for all 22 tools at a specific tier.
+    Get all capabilities for all 23 tools at a specific tier.
 
     Args:
         tier: Tier name ("community", "pro", "enterprise")
@@ -138,14 +139,14 @@ def get_all_capabilities(tier: str = "community") -> Dict[str, Dict[str, Any]]:
 
     Example:
         >>> all_caps = get_all_capabilities(tier="pro")
-        >>> print(len(all_caps))  # 22
+        >>> print(len(all_caps))  # 23
         >>> print(all_caps["analyze_code"]["available"])  # True
     """
     return {tool: get_tool_capabilities(tool, tier) for tool in ALL_TOOLS}
 
 
 def get_tool_names() -> list[str]:
-    """Get the list of all 22 tool names."""
+    """Get the list of all 23 tool names."""
     return ALL_TOOLS.copy()
 
 

@@ -10,6 +10,7 @@ class TestParserFactory:
         assert ParserFactory.detect_language("test.py") == Language.PYTHON
         assert ParserFactory.detect_language("app.js") == Language.JAVASCRIPT
         assert ParserFactory.detect_language("main.java") == Language.JAVA
+        assert ParserFactory.detect_language("lib.rs") == Language.RUST
         assert ParserFactory.detect_language("unknown.xyz") == Language.UNKNOWN
 
     def test_get_python_parser(self):
@@ -18,8 +19,9 @@ class TestParserFactory:
         assert isinstance(parser, IParser)
 
     def test_get_unsupported_parser(self):
+        # [20260304_FEATURE] CPP now has an adapter; use UNKNOWN which is always unregistered
         with pytest.raises(ValueError, match="No parser registered"):
-            ParserFactory.get_parser(Language.CPP)  # CPP not implemented
+            ParserFactory.get_parser(Language.UNKNOWN)
 
 
 class TestPythonParser:

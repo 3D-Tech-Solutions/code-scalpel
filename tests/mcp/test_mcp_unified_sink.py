@@ -128,16 +128,19 @@ open(filename)
         assert result.coverage_summary["total_patterns"] > 0
 
     async def test_unsupported_language(self):
-        """Test handling of unsupported language."""
+        """Test language without defined sink patterns returns 0 sinks (graceful degradation).
+
+        [20260304_FEATURE] No longer an error; language in limits.toml list but
+        without compiled sink patterns returns success=True, sink_count=0.
+        """
         code = "some code"
 
         result = await unified_sink_detect(
             code=code, language="rust", confidence_threshold=0.8
         )
 
-        assert not result.success
-        assert result.error
-        assert "Unsupported language" in result.error
+        assert result.success
+        assert result.sink_count == 0
 
     async def test_invalid_confidence(self):
         """Test handling of invalid confidence values."""

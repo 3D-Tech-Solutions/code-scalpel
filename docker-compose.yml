@@ -1,6 +1,12 @@
 # Code Scalpel Server - Docker Compose v3.0.0
 # Supports MCP-compliant server with HTTP and HTTPS
 # [20251218_DOCS] Updated to v3.0.0 Autonomy release
+#
+# For governed agent deployments, run Code Scalpel under Aegis-OS:
+#   https://github.com/tescolopio/aegis-os
+# Code Scalpel is included in the Aegis-OS docker-compose.yml as the default MCP toolkit.
+#   Service: code-scalpel  |  Port: 18090  |  SSE endpoint: http://localhost:18090/sse
+#   docker-compose up  (from the aegis-os repo) starts the full governed stack.
 
 version: '3.8'
 

@@ -49,6 +49,25 @@ class ParserFactory:
         "hxx": Language.CPP,
         # C#  [20260225_FEATURE]
         "cs": Language.CSHARP,
+        # [20260304_FEATURE] Go/Kotlin extensions
+        "go": Language.GO,
+        "kt": Language.KOTLIN,
+        "kts": Language.KOTLIN,
+        # [20260304_FEATURE] PHP extensions
+        "php": Language.PHP,
+        "php3": Language.PHP,
+        "php4": Language.PHP,
+        "php5": Language.PHP,
+        "phtml": Language.PHP,
+        # [20260304_FEATURE] Ruby extensions
+        "rb": Language.RUBY,
+        "rake": Language.RUBY,
+        "gemspec": Language.RUBY,
+        "rbx": Language.RUBY,
+        # [20260304_FEATURE] Swift extensions
+        "swift": Language.SWIFT,
+        # [20260305_FEATURE] Rust extension
+        "rs": Language.RUST,
     }
 
     @classmethod
@@ -160,6 +179,62 @@ def _register_available_parsers() -> None:
         from .adapters.csharp_adapter import CSharpParserAdapter
 
         ParserFactory.register_parser(Language.CSHARP, CSharpParserAdapter)
+    except ImportError:
+        pass
+
+    # [20260304_FEATURE] Go parser via adapter (backed by GoNormalizer)
+    try:
+        from .adapters.go_adapter import GoParserAdapter
+
+        ParserFactory.register_parser(Language.GO, GoParserAdapter)
+    except ImportError:
+        pass
+
+    # [20260304_FEATURE] C++ parser via adapter (backed by CppNormalizer)
+    try:
+        from .adapters.cpp_adapter import CppParserAdapter
+
+        ParserFactory.register_parser(Language.CPP, CppParserAdapter)
+    except ImportError:
+        pass
+
+    # [20260304_FEATURE] Kotlin parser via adapter (backed by KotlinNormalizer)
+    try:
+        from .adapters.kotlin_adapter import KotlinParserAdapter
+
+        ParserFactory.register_parser(Language.KOTLIN, KotlinParserAdapter)
+    except ImportError:
+        pass
+
+    # [20260304_FEATURE] PHP parser via adapter (backed by PHPNormalizer)
+    try:
+        from .adapters.php_adapter import PHPParserAdapter
+
+        ParserFactory.register_parser(Language.PHP, PHPParserAdapter)
+    except ImportError:
+        pass
+
+    # [20260304_FEATURE] Ruby parser via adapter (backed by RubyNormalizer)
+    try:
+        from .adapters.ruby_adapter import RubyParserAdapter
+
+        ParserFactory.register_parser(Language.RUBY, RubyParserAdapter)
+    except ImportError:
+        pass
+
+    # [20260304_FEATURE] Swift parser via adapter (backed by SwiftNormalizer)
+    try:
+        from .adapters.swift_adapter import SwiftParserAdapter
+
+        ParserFactory.register_parser(Language.SWIFT, SwiftParserAdapter)
+    except ImportError:
+        pass
+
+    # [20260306_REFACTOR] Rust parser via adapter (backed by RustNormalizer)
+    try:
+        from .adapters.rust_adapter import RustParserAdapter
+
+        ParserFactory.register_parser(Language.RUST, RustParserAdapter)
     except ImportError:
         pass
 

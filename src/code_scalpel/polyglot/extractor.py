@@ -44,6 +44,9 @@ class Language(Enum):
     CSHARP = "csharp"  # [20260224_FEATURE] C# language support
     GO = "go"  # [20260302_FEATURE] Go language support
     PHP = "php"  # [20260303_FEATURE] PHP language support
+    RUBY = "ruby"  # [20260304_FEATURE] Ruby language support
+    SWIFT = "swift"  # [20260304_FEATURE] Swift language support
+    RUST = "rust"  # [20260305_FEATURE] Rust language support
     AUTO = "auto"  # Auto-detect from file extension
 
 
@@ -84,6 +87,14 @@ EXTENSION_MAP: dict[str, Language] = {
     ".php5": Language.PHP,
     ".php7": Language.PHP,
     ".phtml": Language.PHP,
+    # [20260304_FEATURE] Ruby extensions
+    ".rb": Language.RUBY,
+    ".rake": Language.RUBY,
+    ".gemspec": Language.RUBY,
+    # [20260304_FEATURE] Swift extension
+    ".swift": Language.SWIFT,
+    # [20260305_FEATURE] Rust extension
+    ".rs": Language.RUST,
 }
 
 
@@ -168,6 +179,23 @@ def detect_language(file_path: str | None, code: str | None = None) -> Language:
             for kw in ["package main", "func ", "import (", "fmt.Println", "fmt.Printf"]
         ):
             return Language.GO
+
+        # [20260305_FEATURE] Rust indicators — fn + let/use are unambiguous Rust signals.
+        # Check BEFORE Go (Go uses 'func ', not 'fn ').
+        if any(kw in code for kw in ["use std::", "use crate::", "let mut ", "fn main()"]):
+            return Language.RUST
+        if "fn " in code and any(kw in code for kw in ["impl ", "trait ", "-> Result<", "unwrap()"]):
+            return Language.RUST
+
+        # [20260304_FEATURE] Swift indicators — import Foundation/UIKit and Swift annotations
+        if any(kw in code for kw in ["import Foundation", "import UIKit", "@IBOutlet", "@IBAction", "@objc "]):
+            return Language.SWIFT
+
+        # [20260304_FEATURE] Ruby indicators — "def ... end" pair is unambiguous.
+        if "def " in code and "end" in code:
+            return Language.RUBY
+        if any(kw in code for kw in ["require ", "attr_accessor", "attr_reader", "module "]):
+            return Language.RUBY
 
         # Java indicators
         if "public class " in code or "private class " in code or "package " in code:
@@ -309,6 +337,14 @@ class PolyglotExtractor:
             self._parse_csharp()  # [20260224_FEATURE]
         elif self.language == Language.GO:
             self._parse_go()  # [20260302_FEATURE]
+        elif self.language == Language.PHP:  # [20260303_FEATURE]
+            self._parse_php()
+        elif self.language == Language.RUBY:  # [20260304_FEATURE]
+            self._parse_ruby()
+        elif self.language == Language.SWIFT:  # [20260304_FEATURE]
+            self._parse_swift()
+        elif self.language == Language.RUST:  # [20260305_FEATURE]
+            self._parse_rust()
         else:
             raise ValueError(f"Unsupported language: {self.language}")
 
@@ -437,6 +473,50 @@ class PolyglotExtractor:
         from code_scalpel.ir.normalizers.go_normalizer import GoNormalizer
 
         normalizer = GoNormalizer()
+        self._ir_module = normalizer.normalize(self.code)
+
+    def _parse_php(self) -> None:
+        """
+        Parse PHP code using tree-sitter-php.
+
+        [20260303_FEATURE] Added PHP support to polyglot extractor.
+        """
+        from code_scalpel.ir.normalizers.php_normalizer import PHPNormalizer
+
+        normalizer = PHPNormalizer()
+        self._ir_module = normalizer.normalize(self.code)
+
+    def _parse_ruby(self) -> None:
+        """
+        Parse Ruby code using tree-sitter-ruby.
+
+        [20260304_FEATURE] Added Ruby support to polyglot extractor.
+        """
+        from code_scalpel.ir.normalizers.ruby_normalizer import RubyNormalizer
+
+        normalizer = RubyNormalizer()
+        self._ir_module = normalizer.normalize(self.code)
+
+    def _parse_swift(self) -> None:
+        """
+        Parse Swift code using tree-sitter-swift.
+
+        [20260304_FEATURE] Added Swift support to polyglot extractor.
+        """
+        from code_scalpel.ir.normalizers.swift_normalizer import SwiftNormalizer
+
+        normalizer = SwiftNormalizer()
+        self._ir_module = normalizer.normalize(self.code)
+
+    def _parse_rust(self) -> None:
+        """
+        Parse Rust code using tree-sitter-rust.
+
+        [20260305_FEATURE] Added Rust support to polyglot extractor.
+        """
+        from code_scalpel.ir.normalizers.rust_normalizer import RustNormalizer
+
+        normalizer = RustNormalizer()
         self._ir_module = normalizer.normalize(self.code)
 
     def extract(

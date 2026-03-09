@@ -45,6 +45,19 @@ def analyze_file(
             ".h++": "cpp",
             ".inl": "cpp",
             ".cs": "csharp",
+            # [20260304_FEATURE] Go/Kotlin/Ruby/PHP/Swift extensions
+            ".go": "go",
+            ".kt": "kotlin",
+            ".kts": "kotlin",
+            ".rb": "ruby",
+            ".rake": "ruby",
+            ".gemspec": "ruby",
+            ".php": "php",
+            ".php3": "php",
+            ".php4": "php",
+            ".php5": "php",
+            ".phtml": "php",
+            ".swift": "swift",
         }
         if ext in extension_map:
             language = extension_map[ext]
@@ -151,6 +164,64 @@ def _analyze_java(code: str, output_format: str, source: str) -> int:
     return 0
 
 
+
+def _analyze_polyglot(code: str, output_format: str, source: str, language: str) -> int:
+    """Analyze non-Python/JS/Java code via the polyglot IR extractor.
+
+    [20260304_FEATURE] Routes C/C++/C#/TS/Go/PHP/Ruby/Kotlin/Swift
+    through PolyglotExtractor for consistent IR-based analysis.
+    """
+    from .code_parsers.extractor import Language as ExtractorLanguage, PolyglotExtractor
+    from .ir.nodes import IRClassDef, IRFunctionDef
+
+    try:
+        lang_enum = ExtractorLanguage(language)
+    except ValueError:
+        lang_enum = ExtractorLanguage.AUTO
+
+    try:
+        extractor = PolyglotExtractor(code, file_path=source, language=lang_enum)
+        extractor._parse()
+        ir_module = extractor._ir_module
+    except Exception as e:
+        print(f"Error analyzing {language} code: {e}", file=sys.stderr)
+        return 1
+
+    functions = []
+    classes = []
+    if ir_module is not None:
+        for node in getattr(ir_module, "body", []):
+            line_start = node.loc.line if node.loc else None
+            line_end = node.loc.end_line if node.loc else None
+            if isinstance(node, IRFunctionDef):
+                functions.append({"name": node.name, "line_start": line_start, "line_end": line_end})
+            elif isinstance(node, IRClassDef):
+                classes.append({"name": node.name, "line_start": line_start, "line_end": line_end})
+
+    if output_format == "json":
+        output = {
+            "source": source,
+            "language": language,
+            "success": True,
+            "functions": functions,
+            "classes": classes,
+            "metrics": {"num_functions": len(functions), "num_classes": len(classes)},
+        }
+        print(json.dumps(output, indent=2))
+    else:
+        print(f"\nCode Scalpel Analysis ({language.upper()}): {source}")
+        print("=" * 60)
+        print(f"Functions found: {len(functions)}")
+        for f in functions:
+            line_info = f" (line {f['line_start']})" if f.get("line_start") else ""
+            print(f"  - {f['name']}{line_info}")
+        print(f"Classes found: {len(classes)}")
+        for c in classes:
+            line_info = f" (line {c['line_start']})" if c.get("line_start") else ""
+            print(f"  - {c['name']}{line_info}")
+    return 0
+
+
 def analyze_code(
     code: str,
     output_format: str = "text",
@@ -162,6 +233,9 @@ def analyze_code(
         return _analyze_javascript(code, output_format, source)
     if language == "java":
         return _analyze_java(code, output_format, source)
+    # [20260304_FEATURE] Route non-Python/JS/Java through polyglot extractor
+    if language in ("c", "cpp", "csharp", "typescript", "go", "php", "ruby", "kotlin", "swift"):
+        return _analyze_polyglot(code, output_format, source, language)
 
     from .code_analyzer import AnalysisLevel, CodeAnalyzer
 

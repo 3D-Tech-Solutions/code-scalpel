@@ -23,6 +23,15 @@ See [wiki/Language-Completion-Roadmap.md](wiki/Language-Completion-Roadmap.md) f
 
 ---
 
+## [2.1.1] - 2026-03-09
+
+### Changed
+- Metadata-only patch release to refresh public package and marketplace copy.
+- README and packaging copy now use the commercial framing of **22 core tools** plus separate capability introspection for tier/license discovery.
+- VS Code extension metadata synchronized with the Python package release line.
+
+---
+
 ## [2.1.0] - 2026-03-02
 
 ### Added

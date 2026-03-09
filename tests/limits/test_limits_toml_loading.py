@@ -4,7 +4,7 @@ Verifies:
 - limits.toml can be found and loaded correctly
 - Configuration cascading works (env var > project > user > system > defaults)
 - TOML parsing is correct
-- All 22 tools have configurations
+- All 23 tools have configurations
 - Tier progression is correct (community <= pro <= enterprise)
 
 [20260124_TEST] Created limits.toml loading and consistency tests.
@@ -49,11 +49,12 @@ class TestLimitsTOMLLoading:
         for tier in required_tiers:
             assert tier in limits, f"limits.toml should have [{tier}.*] sections"
 
-    def test_all_24_tools_documented(self):
-        """All 24 tools should be defined in limits.toml."""
+    def test_all_25_tools_documented(self):
+        """All 25 tools should be defined in limits.toml."""
         tools = get_all_tool_names()
 
         # [20260212_TEST] Updated: scanner and write_perfect_code added to limits.toml
+        # [20260304_FEATURE] get_capabilities added — available at all tiers
         expected_tools = {
             "analyze_code",
             "get_file_context",
@@ -64,6 +65,7 @@ class TestLimitsTOMLLoading:
             "rename_symbol",
             "update_symbol",
             "get_call_graph",
+            "get_capabilities",
             "get_cross_file_dependencies",
             "get_graph_neighborhood",
             "scan_dependencies",
@@ -228,4 +230,4 @@ class TestLimitsWithFeatures:
         """Tools in limits.toml should exist in tool capabilities."""
         # This test ensures no orphaned tool definitions
         tools = get_all_tool_names()
-        assert len(tools) >= 22, f"Expected at least 22 tools, found {len(tools)}"
+        assert len(tools) >= 23, f"Expected at least 22 tools, found {len(tools)}"

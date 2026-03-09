@@ -6,7 +6,8 @@ Validates that each tool's language support matches documentation:
 - Java: Limited support (sink detection)
 - C/C++/C#: Extraction support (analyze_code, extract_code) — added v2.0.0
 - Go: Extraction support (analyze_code, extract_code) — added v2.0.3 [20260302_FEATURE]
-- Rust/Ruby/PHP: Roadmap/partial support
+- Ruby: Full Phase 1+2 support — added v2.1.x [20260304_FEATURE]
+- Rust/PHP: Roadmap/partial support
 
 Tests verify:
 - Claimed language support actually works
@@ -16,6 +17,7 @@ Tests verify:
 [20260124_TEST] Created comprehensive polyglot language verification.
 [20260224_TEST] Updated for v2.0.0: C, C++, C# are now fully supported.
 [20260302_TEST] Updated for v2.0.3: Go is now fully supported.
+[20260304_TEST] Updated for v2.1.x: Ruby is now fully supported.
 """
 
 from __future__ import annotations
@@ -28,7 +30,7 @@ class TestAnalyzeCodeLanguageSupport:
 
     @pytest.mark.parametrize(
         "language",
-        ["python", "javascript", "typescript", "java", "c", "cpp", "csharp", "go"],
+        ["python", "javascript", "typescript", "java", "c", "cpp", "csharp", "go", "ruby"],
     )
     def test_analyze_code_supported_languages(self, language):
         """Supported languages should be analyzable."""
@@ -90,10 +92,10 @@ class TestUnifiedSinkDetectLanguageSupport:
 
     @pytest.mark.parametrize(
         "language",
-        ["python", "javascript", "typescript", "java", "c", "cpp", "csharp", "go"],
+        ["python", "javascript", "typescript", "java", "c", "cpp", "csharp", "go", "ruby"],
     )
     def test_unified_sink_detect_supported(self, language):
-        """Supported languages should be detectable (C/C++/C# added v2.0.0, Go added v2.0.3)."""
+        """Supported languages should be detectable (C/C++/C#/Go added v2.0.0–3, Ruby v2.1.x)."""
         pass
 
     def test_unified_sink_detect_python_sinks(self):
@@ -195,8 +197,9 @@ class TestTypeEvaporationLanguageSupport:
         ("security_scan", "typescript", "sink_only"),
         ("get_call_graph", "typescript", "partial"),
         ("extract_code", "typescript", "single_symbol"),
-        # Java: Very limited
+        # Java: initial get_call_graph slice now present
         ("security_scan", "java", "sink_only"),
+        ("get_call_graph", "java", "partial"),
         ("unified_sink_detect", "java", "supported"),
         ("extract_code", "java", "single_symbol"),
         # Go: Full extraction support added v2.0.3 [20260302_FEATURE]
@@ -213,9 +216,12 @@ class TestTypeEvaporationLanguageSupport:
         ("extract_code", "cpp", "single_symbol"),
         ("analyze_code", "csharp", "basic"),
         ("extract_code", "csharp", "single_symbol"),
-        # Ruby/PHP: Roadmap only
+        # Ruby: Phase 1+2 complete [20260304_FEATURE]
+        ("analyze_code", "ruby", "basic"),
+        ("extract_code", "ruby", "single_symbol"),
+        ("unified_sink_detect", "ruby", "supported"),
+        # PHP: Phase 1+2 complete
         ("security_scan", "php", "not_supported"),
-        ("security_scan", "ruby", "not_supported"),
     ],
 )
 class TestToolLanguageMatrix:
@@ -255,6 +261,9 @@ class TestLanguageDetection:
             "renderer.cc": "cpp",
             "vec3.h": "c",
             "Program.cs": "csharp",
+            # [20260304_TEST] Ruby extension added
+            "app.rb": "ruby",
+            "Gemfile": "ruby",
         }
 
         for filename, expected_lang in detections.items():
@@ -336,3 +345,11 @@ class TestLanguageRoadmapTracking:
         assert Language.CPP.value == "cpp"
         assert Language.CSHARP.value == "csharp"
         assert Language.GO.value == "go"
+
+    def test_ruby_fully_supported(self):
+        """Ruby is fully supported as of v2.1.x [20260304_FEATURE]"""
+        # Ruby now supports: Phase 1 IR (RubyNormalizer), Phase 2 tool parsers,
+        # analyze_code, extract_code, unified_sink_detect
+        from code_scalpel.code_parsers.extractor import Language
+
+        assert Language.RUBY.value == "ruby"

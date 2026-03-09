@@ -670,7 +670,7 @@ internal/utils.go
 
 ---
 
-### Stage 4a — Python Remaining Stubs (5 files)
+### Stage 4a — Python Remaining Stubs (5 files) ✅ COMPLETE [20260303_FEATURE]
 
 All tasks are PARALLEL to each other. All read the corresponding current stub file first.
 

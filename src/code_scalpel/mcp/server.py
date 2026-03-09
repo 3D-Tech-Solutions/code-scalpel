@@ -28,7 +28,7 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Any, Optional, TYPE_CHECKING, List
+from typing import Any, List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from code_scalpel import SurgicalExtractor
@@ -45,106 +45,77 @@ from code_scalpel.security.analyzers.unified_sink_detector import (
 
 # [20251218_BUGFIX] Import version from package instead of hardcoding
 from code_scalpel import __version__
+from code_scalpel.licensing.authorization import compute_effective_tier_for_startup
+from code_scalpel.licensing.jwt_validator import JWTLicenseValidator
 from code_scalpel.mcp.helpers.analyze_helpers import (
     _analyze_clike_code as helper_analyze_clike_code,
     _analyze_code_sync as helper_analyze_code_sync,
     _analyze_java_code as helper_analyze_java_code,
     _analyze_javascript_code as helper_analyze_js_code,
 )
+from code_scalpel.mcp.helpers.context_helpers import (
+    EXT_TO_LANGUAGE,  # [20260306_REFACTOR] Canonical extension-to-language map
+)
+from code_scalpel.mcp.models.core import (
+    AnalysisResult,
+    ClassInfo,
+    FunctionInfo,
+    GeneratedTestCase,  # noqa: F401 – re-exported for backward compatibility
+    TestGenerationResult,  # noqa: F401 – re-exported for backward compatibility
+)
+from code_scalpel.mcp.models.policy import PolicyVerificationResult
 from code_scalpel.mcp.paths import (
-    maybe_auto_init_config_dir as _maybe_auto_init_config_dir,  # [20260119_BUGFIX]
     env_truthy as _env_truthy,
+    maybe_auto_init_config_dir as _maybe_auto_init_config_dir,
     scalpel_home_dir as _scalpel_home_dir,
 )
-
-# [20260116_REFACTOR] Import shared mcp instance from protocol
-from code_scalpel.mcp.protocol import mcp, set_current_tier
-
-# [20260117_SECURITY] Authoritative startup tier selection via authorization helper
-from code_scalpel.licensing.authorization import compute_effective_tier_for_startup
-
-from code_scalpel.mcp.models.core import AnalysisResult, FunctionInfo, ClassInfo
-from code_scalpel.mcp.models.policy import (
-    PolicyVerificationResult,  # [20260121_BUGFIX] Reuse canonical model to avoid duplication
+from code_scalpel.mcp.protocol import (
+    _get_current_tier as get_current_tier_from_license,
+    mcp,
+    set_current_tier,
 )
 
-# [20260116_FEATURE] License-gated tier system restored from archive
-from code_scalpel.licensing.jwt_validator import JWTLicenseValidator
-
-# [20260213_BUGFIX] Use protocol._get_current_tier for consistent tier detection
-# (tier_detector.get_current_tier bypasses JWT validation downgrade logic)
-from code_scalpel.mcp.protocol import _get_current_tier as get_current_tier_from_license
-
-# [20260119_REFACTOR] get_current_tier_from_license is re-exported for tests that mock it.
-# server.py has its own _get_current_tier() that does full license validation with env var support.
-
-# Current tier for response envelope metadata.
-# Initialized to "community" (community tier) by default.
-# The actual tier is determined by license validation at runtime.
 CURRENT_TIER = "community"
 
-# [20260119_BUGFIX] Restore backward-compatible project root globals for tests and path validation.
-# [20260120_BUGFIX] Use a mutable container to allow dynamic updates from main().
-# Direct assignment to PROJECT_ROOT creates a new object, but _PROJECT_ROOT_HOLDER[0]
-# can be updated in place and accessed via get_project_root().
 try:
     _PROJECT_ROOT_HOLDER: list[Path] = [Path.cwd()]
 except FileNotFoundError:
-    # Handle case where cwd() fails (e.g., directory was deleted)
-    _PROJECT_ROOT_HOLDER: list[Path] = [Path("/tmp")]  # nosec B108
+    _PROJECT_ROOT_HOLDER = [Path("/tmp")]  # nosec B108
 try:
-    PROJECT_ROOT: Path = Path.cwd()  # Backward compat - may be stale after main() runs
+    PROJECT_ROOT: Path = Path.cwd()
 except FileNotFoundError:
-    PROJECT_ROOT: Path = Path("/tmp")  # nosec B108
+    PROJECT_ROOT = Path("/tmp")  # nosec B108
 ALLOWED_ROOTS: list[Path] = []
 
 
 def get_project_root() -> Path:
-    """Get the current project root.
-
-    [20260120_FEATURE] Getter function to access PROJECT_ROOT.
-    This allows helper modules to get the dynamically-set value after main() runs.
-    """
+    """Get the current project root."""
     return _PROJECT_ROOT_HOLDER[0]
 
 
 def set_project_root(path: Path) -> None:
-    """Set the project root (called by main()).
-
-    [20260120_FEATURE] Setter to update both the holder and backward-compat global.
-    """
+    """Set the project root (called by main())."""
     global PROJECT_ROOT
     _PROJECT_ROOT_HOLDER[0] = path
     PROJECT_ROOT = path
 
 
-# [20251228_FEATURE] Runtime license grace for long-lived server processes.
-# If a license expires mid-session, keep the last known valid tier for 24h.
-# This does NOT change startup behavior: expired licenses remain invalid at startup.
 _LAST_VALID_LICENSE_TIER: str | None = None
 _LAST_VALID_LICENSE_AT: float | None = None
 _MID_SESSION_EXPIRY_GRACE_SECONDS = 24 * 60 * 60
 
 
-# [20251215_BUGFIX] Configure logging to stderr only to prevent stdio transport corruption
-# When using stdio transport, stdout must contain ONLY valid JSON-RPC messages.
-# Any logging to stdout will corrupt the protocol stream.
 def _configure_logging(transport: str = "stdio"):
     """Configure logging based on transport type."""
     root_logger = logging.getLogger()
-
-    # Remove any existing handlers
     for handler in root_logger.handlers[:]:
         root_logger.removeHandler(handler)
 
-    # Always log to stderr to avoid corrupting stdio transport
     handler = logging.StreamHandler(sys.stderr)
     handler.setFormatter(
         logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
     )
 
-    # [20260116_BUGFIX] Use SCALPEL_MCP_OUTPUT with string levels (DEBUG, INFO, ALERT, WARNING)
-    # Restores original behavior from archive/server.py
     env_level = os.environ.get("SCALPEL_MCP_OUTPUT", "WARNING").upper()
     if env_level == "DEBUG":
         level = logging.DEBUG
@@ -160,18 +131,11 @@ def _configure_logging(transport: str = "stdio"):
     root_logger.addHandler(handler)
 
 
-# Setup logging (default to stderr)
 logger = logging.getLogger(__name__)
 
 
-# [20260125_FEATURE] Phase 3: Performance optimization - conditional debug output
 def _debug_print(msg: str) -> None:
-    """Print debug message only if SCALPEL_MCP_OUTPUT=DEBUG.
-
-    This avoids unnecessary stderr I/O during normal operation, improving
-    stdio transport latency. Debug messages are only emitted when explicitly
-    requested via environment variable.
-    """
+    """Print debug output only when explicitly requested."""
     if os.environ.get("SCALPEL_MCP_OUTPUT", "").upper() == "DEBUG":
         try:
             print(msg, file=sys.stderr)
@@ -179,26 +143,20 @@ def _debug_print(msg: str) -> None:
             pass
 
 
-# =============================================================================
-# [20260116_FEATURE] License-Gated Tier System
-# Restored from archive/server.py - Proper license validation with downgrade capability
-# =============================================================================
-
-
 def _normalize_tier(value: str | None) -> str:
     """Normalize tier string to canonical form."""
     if not value:
         return "community"
-    v = value.strip().lower()
-    if v == "community":
+    normalized = value.strip().lower()
+    if normalized == "community":
         return "community"
-    if v == "all":
-        return "Enterprise"
-    return v
+    if normalized == "all":
+        return "enterprise"
+    return normalized
 
 
 def _requested_tier_from_env() -> str | None:
-    """Get requested tier from environment variables (for testing/downgrade)."""
+    """Get requested tier from environment variables for downgrade testing."""
     requested = os.environ.get("CODE_SCALPEL_TIER") or os.environ.get("SCALPEL_TIER")
     if requested is None:
         return None
@@ -486,165 +444,14 @@ def _is_path_allowed(path: Path) -> bool:
 
 
 def _validate_path_security(path: Path) -> Path:
+    """Validate a path against configured security roots.
+
+    [20251215_FEATURE] v2.0.0 - Security boundary enforcement
     """
-    Validate path is within allowed roots and return resolved path.
-
-    [20251215_FEATURE] v2.0.0 - Security validation with helpful errors
-
-    Args:
-        path: Path to validate
-
-    Returns:
-        Resolved path if valid
-
-    Raises:
-        PermissionError: If path is outside allowed roots
-    """
-    resolved = path.resolve()
-
-    if not _is_path_allowed(resolved):
-        roots_str = ", ".join(str(r) for r in (ALLOWED_ROOTS or [PROJECT_ROOT]))
-        raise PermissionError(
-            f"Access denied: {path} is outside allowed roots.\n"
-            f"Allowed roots: {roots_str}\n"
-            f"Set roots via the roots/list capability or SCALPEL_ROOT environment variable."
-        )
-
-    return resolved
-
-
-async def _fetch_and_cache_roots(ctx: Context | None) -> list[Path]:
-    """
-    Fetch roots from client via MCP context and cache in ALLOWED_ROOTS.
-
-    [20251215_FEATURE] v2.0.0 - Dynamic roots capability support
-
-    This function requests the list of allowed filesystem roots from the
-    MCP client. Roots define the boundaries where the server can operate.
-
-    Args:
-        ctx: MCP Context object (from tool execution)
-
-    Returns:
-        List of allowed root paths
-
-    Note:
-        If ctx is None or client doesn't support roots, returns PROJECT_ROOT.
-        Roots are cached in ALLOWED_ROOTS global for subsequent calls.
-    """
-    global ALLOWED_ROOTS
-
-    if ctx is None:
-        return [PROJECT_ROOT]
-
-    try:
-        # Request roots from client via MCP protocol
-        # Note: list_roots may not be available on all Context implementations
-        list_roots_fn = getattr(ctx, "list_roots", None)
-        if list_roots_fn is None:
-            return [PROJECT_ROOT]
-        roots = await list_roots_fn()
-
-        if roots:
-            # Convert file:// URIs to Path objects
-            ALLOWED_ROOTS = []
-            for root in roots:
-                uri = str(root.uri)
-                if uri.startswith("file://"):
-                    # Handle file:// URIs (e.g., file:///home/user/project)
-                    # Remove 'file://' prefix and handle Windows paths
-                    path_str = uri[7:]  # Remove 'file://'
-                    # Windows paths may have extra slash: file:///C:/path
-                    if len(path_str) >= 3 and path_str[0] == "/" and path_str[2] == ":":
-                        path_str = path_str[1:]  # Remove leading /
-                    ALLOWED_ROOTS.append(Path(path_str))
-                else:
-                    # Non-file URIs - log warning but try as path
-                    logger.warning(f"Non-file root URI: {uri}")
-                    ALLOWED_ROOTS.append(Path(uri))
-
-            logger.debug(f"Updated ALLOWED_ROOTS from client: {ALLOWED_ROOTS}")
-            return ALLOWED_ROOTS
-        else:
-            return [PROJECT_ROOT]
-
-    except Exception as e:
-        # Client may not support roots capability
-        logger.debug(f"Could not fetch roots from client: {e}")
-        return [PROJECT_ROOT]
-
-
-# ============================================================================
-# CACHING
-# ============================================================================
-
-
-def _get_cache():
-    """Get the analysis cache (lazy initialization).
-
-    [20260213_BUGFIX] Check SCALPEL_CACHE_ENABLED dynamically instead of relying
-    on module-level CACHE_ENABLED, so test fixtures that set the env var at
-    runtime are respected.
-    """
-    if os.environ.get("SCALPEL_CACHE_ENABLED", "1") == "0":
-        return None
-    if not CACHE_ENABLED:
-        return None
-        return None
-    try:
-        # [20251223_CONSOLIDATION] Import from unified cache
-        from code_scalpel.cache import get_cache
-
-        return get_cache()
-    except ImportError:
-        logger.warning("Cache module not available")
-        return None
-
-
-# ============================================================================
-# STRUCTURED OUTPUT MODELS
-# ============================================================================
-
-
-class VulnerabilityInfo(BaseModel):
-    """Information about a detected vulnerability."""
-
-    type: str = Field(description="Vulnerability type (e.g., SQL Injection)")
-    cwe: str = Field(description="CWE identifier")
-    severity: str = Field(description="Severity level")
-    line: int | None = Field(default=None, description="Line number if known")
-    description: str = Field(description="Description of the vulnerability")
-
-
-class SecurityResult(BaseModel):
-    """Result of security analysis."""
-
-    success: bool = Field(description="Whether analysis succeeded")
-    server_version: str = Field(default=__version__, description="Code Scalpel version")
-    has_vulnerabilities: bool = Field(description="Whether vulnerabilities were found")
-    vulnerability_count: int = Field(description="Number of vulnerabilities")
-    risk_level: str = Field(description="Overall risk level")
-    vulnerabilities: list[VulnerabilityInfo] = Field(
-        default_factory=list, description="List of vulnerabilities"
-    )
-    taint_sources: list[str] = Field(
-        default_factory=list, description="Identified taint sources"
-    )
-    error: str | None = Field(default=None, description="Error message if failed")
-
-    # [20251229_FEATURE] v3.3.0 - Pro/Enterprise fields
-    semantic_summary: Optional[str] = Field(
-        default=None, description="AI-generated semantic summary (Pro)"
-    )
-    related_imports: List[str] = Field(
-        default_factory=list, description="Related imports from other files (Pro)"
-    )
-    pii_redacted: bool = Field(
-        default=False, description="Whether PII was redacted (Enterprise)"
-    )
-    access_controlled: bool = Field(
-        default=False, description="Whether access control was applied (Enterprise)"
-    )
+    if not _is_path_allowed(path):
+        allowed = ", ".join(str(root) for root in (ALLOWED_ROOTS or [PROJECT_ROOT]))
+        raise ValueError(f"Access denied: {path} is outside allowed roots: {allowed}")
+    return path
 
 
 # [20251216_FEATURE] Unified sink detection result model
@@ -679,183 +486,6 @@ class UnifiedSinkResult(BaseModel):
         default_factory=dict, description="Summary of sink pattern coverage"
     )
     error: str | None = Field(default=None, description="Error message if failed")
-
-    # [20251229_FEATURE] v3.3.0 - Pro/Enterprise fields
-    semantic_summary: Optional[str] = Field(
-        default=None, description="AI-generated semantic summary (Pro)"
-    )
-    related_imports: List[str] = Field(
-        default_factory=list, description="Related imports from other files (Pro)"
-    )
-    pii_redacted: bool = Field(
-        default=False, description="Whether PII was redacted (Enterprise)"
-    )
-    access_controlled: bool = Field(
-        default=False, description="Whether access control was applied (Enterprise)"
-    )
-
-
-class PathCondition(BaseModel):
-    """A condition along an execution path."""
-
-    condition: str = Field(description="The condition expression")
-    is_satisfiable: bool = Field(description="Whether condition is satisfiable")
-
-
-class ExecutionPath(BaseModel):
-    """An execution path discovered by symbolic execution."""
-
-    path_id: int = Field(description="Unique path identifier")
-    conditions: list[str] = Field(description="Conditions along the path")
-    final_state: dict[str, Any] = Field(description="Variable values at path end")
-    reproduction_input: dict[str, Any] | None = Field(
-        default=None, description="Input values that trigger this path"
-    )
-    is_reachable: bool = Field(description="Whether path is reachable")
-
-
-class SymbolicResult(BaseModel):
-    """Result of symbolic execution."""
-
-    success: bool = Field(description="Whether analysis succeeded")
-    server_version: str = Field(default=__version__, description="Code Scalpel version")
-    paths_explored: int = Field(description="Number of execution paths explored")
-    paths: list[ExecutionPath] = Field(
-        default_factory=list, description="Discovered execution paths"
-    )
-    symbolic_variables: list[str] = Field(
-        default_factory=list, description="Variables treated symbolically"
-    )
-    constraints: list[str] = Field(
-        default_factory=list, description="Discovered constraints"
-    )
-    error: str | None = Field(default=None, description="Error message if failed")
-
-    # [20251229_FEATURE] v3.3.0 - Pro/Enterprise fields
-    semantic_summary: Optional[str] = Field(
-        default=None, description="AI-generated semantic summary (Pro)"
-    )
-    related_imports: List[str] = Field(
-        default_factory=list, description="Related imports from other files (Pro)"
-    )
-    pii_redacted: bool = Field(
-        default=False, description="Whether PII was redacted (Enterprise)"
-    )
-    access_controlled: bool = Field(
-        default=False, description="Whether access control was applied (Enterprise)"
-    )
-
-
-class GeneratedTestCase(BaseModel):
-    """A generated test case."""
-
-    path_id: int = Field(description="Path ID this test covers")
-    function_name: str = Field(description="Function being tested")
-    inputs: dict[str, Any] = Field(description="Input values for this test")
-    description: str = Field(description="Human-readable description")
-    path_conditions: list[str] = Field(
-        default_factory=list, description="Conditions that define this path"
-    )
-
-
-class TestGenerationResult(BaseModel):
-    """Result of test generation."""
-
-    success: bool = Field(description="Whether generation succeeded")
-    server_version: str = Field(default=__version__, description="Code Scalpel version")
-    function_name: str = Field(description="Function tests were generated for")
-    test_count: int = Field(description="Number of test cases generated")
-    test_cases: list[GeneratedTestCase] = Field(
-        default_factory=list, description="Generated test cases"
-    )
-    # [20260120_BUGFIX] Align metadata fields with core model for tier transparency and truncation
-    total_test_cases: int = Field(
-        default=0, description="Total test cases before truncation"
-    )
-    truncated: bool = Field(default=False, description="Whether results were truncated")
-    truncation_warning: str | None = Field(
-        default=None, description="Neutral warning when truncation occurs"
-    )
-    pytest_code: str = Field(default="", description="Generated pytest code")
-    unittest_code: str = Field(default="", description="Generated unittest code")
-    error: str | None = Field(default=None, description="Error message if failed")
-
-    # [20251229_FEATURE] v3.3.0 - Pro/Enterprise fields
-    semantic_summary: Optional[str] = Field(
-        default=None, description="AI-generated semantic summary (Pro)"
-    )
-    related_imports: List[str] = Field(
-        default_factory=list, description="Related imports from other files (Pro)"
-    )
-    pii_redacted: bool = Field(
-        default=False, description="Whether PII was redacted (Enterprise)"
-    )
-    access_controlled: bool = Field(
-        default=False, description="Whether access control was applied (Enterprise)"
-    )
-    # [20260120_BUGFIX] Output metadata (mirrors mcp.models.core.TestGenerationResult)
-    tier_applied: str = Field(
-        default="community",
-        description="Tier used for this generation (community/pro/enterprise)",
-    )
-    framework_used: str = Field(
-        default="pytest",
-        description="Test framework used for generation",
-    )
-    max_test_cases_limit: int | None = Field(
-        default=None,
-        description="Max test cases limit applied (None=unlimited)",
-    )
-    data_driven_enabled: bool = Field(
-        default=False,
-        description="Whether data-driven/parametrized tests were generated",
-    )
-    bug_reproduction_enabled: bool = Field(
-        default=False,
-        description="Whether bug reproduction mode was used",
-    )
-
-
-class RefactorSecurityIssue(BaseModel):
-    """A security issue found in refactored code."""
-
-    type: str = Field(description="Vulnerability type")
-    severity: str = Field(description="Severity level")
-    line: int | None = Field(default=None, description="Line number")
-    description: str = Field(description="Issue description")
-    cwe: str | None = Field(default=None, description="CWE identifier")
-
-
-class RefactorSimulationResult(BaseModel):
-    """Result of refactor simulation."""
-
-    success: bool = Field(description="Whether simulation succeeded")
-    server_version: str = Field(default=__version__, description="Code Scalpel version")
-    is_safe: bool = Field(description="Whether the refactor is safe to apply")
-    status: str = Field(description="Status: safe, unsafe, warning, or error")
-    reason: str | None = Field(default=None, description="Reason if not safe")
-    security_issues: list[RefactorSecurityIssue] = Field(
-        default_factory=list, description="Security issues found"
-    )
-    structural_changes: dict[str, Any] = Field(
-        default_factory=dict, description="Functions/classes added/removed"
-    )
-    warnings: list[str] = Field(default_factory=list, description="Warnings")
-    error: str | None = Field(default=None, description="Error message if failed")
-
-    # [20251229_FEATURE] v3.3.0 - Pro/Enterprise fields
-    semantic_summary: Optional[str] = Field(
-        default=None, description="AI-generated semantic summary (Pro)"
-    )
-    related_imports: List[str] = Field(
-        default_factory=list, description="Related imports from other files (Pro)"
-    )
-    pii_redacted: bool = Field(
-        default=False, description="Whether PII was redacted (Enterprise)"
-    )
-    access_controlled: bool = Field(
-        default=False, description="Whether access control was applied (Enterprise)"
-    )
 
 
 class CrawlFunctionInfo(BaseModel):
@@ -1212,18 +842,15 @@ def _walk_ts_tree(node):
 
 
 def _analyze_code_sync(code: str, language: str = "auto") -> AnalysisResult:
-    """Synchronous implementation of analyze_code.
+    """Delegate analyze_code to the shared helper implementation.
 
-    [20251219_BUGFIX] v3.0.4 - Auto-detect language from content if not specified.
-    [20251219_BUGFIX] v3.0.4 - Strip UTF-8 BOM if present.
-    [20251220_FEATURE] v3.0.4 - Multi-language support for JavaScript/TypeScript.
-    [20251221_FEATURE] v3.1.0 - Use unified_extractor for language detection.
+    [20260306_REFACTOR] Keep the server shim as a thin wrapper so helper and
+    server imports cannot drift in supported-language behavior.
     """
-    # [20251219_BUGFIX] Strip UTF-8 BOM if present
-    if code.startswith("\ufeff"):
-        code = code[1:]
+    return helper_analyze_code_sync(code=code, language=language, file_path=None)
 
-    # [20251221_FEATURE] v3.1.0 - Use unified_extractor for language detection
+    # Legacy implementation retained below for historical context but is
+    # intentionally unreachable now that the helper is the single source of truth.
     if language == "auto" or language is None:
         from code_scalpel.unified_extractor import detect_language, Language
 
@@ -1384,21 +1011,7 @@ def _security_scan_sync(
 
             # [20251220_FEATURE] v3.0.4 - Detect language from file extension
             ext = path.suffix.lower()
-            extension_map = {
-                ".py": "python",
-                ".pyi": "python",
-                ".pyw": "python",
-                ".js": "javascript",
-                ".mjs": "javascript",
-                ".cjs": "javascript",
-                ".jsx": "javascript",
-                ".ts": "typescript",
-                ".tsx": "typescript",
-                ".mts": "typescript",
-                ".cts": "typescript",
-                ".java": "java",
-            }
-            detected_language = extension_map.get(ext, "python")
+            detected_language = EXT_TO_LANGUAGE.get(ext, "python")
         except Exception as e:
             return SecurityResult(
                 success=False,
@@ -3242,17 +2855,8 @@ def _get_file_context_sync(file_path: str) -> FileContextResult:
     [20251214_FEATURE] v1.5.3 - Integrated PathResolver for intelligent path resolution
     [20251220_FEATURE] v3.0.5 - Multi-language support via file extension detection
     """
-    from code_scalpel.mcp.path_resolver import resolve_path
-
     # Language detection by file extension
-    LANG_EXTENSIONS = {
-        ".py": "python",
-        ".js": "javascript",
-        ".jsx": "javascript",
-        ".ts": "typescript",
-        ".tsx": "typescript",
-        ".java": "java",
-    }
+    from code_scalpel.mcp.path_resolver import resolve_path
 
     try:
         # [20251214_FEATURE] Use PathResolver for intelligent path resolution
@@ -3277,7 +2881,7 @@ def _get_file_context_sync(file_path: str) -> FileContextResult:
         lines = code.splitlines()
 
         # [20251220_FEATURE] Detect language from file extension
-        detected_lang = LANG_EXTENSIONS.get(path.suffix.lower(), "unknown")
+        detected_lang = EXT_TO_LANGUAGE.get(path.suffix.lower(), "unknown")
 
         # For non-Python files, use analyze_code which handles multi-language
         if detected_lang != "python":
@@ -3595,100 +3199,36 @@ def _get_call_graph_sync(
     tier: str = "community",
     capabilities: dict[str, Any] | None = None,
 ) -> CallGraphResultModel:
-    """Synchronous implementation of get_call_graph."""
-    from code_scalpel.ast_tools.call_graph import CallGraphBuilder
+    """Synchronous implementation of get_call_graph.
 
-    root_path = Path(project_root) if project_root else PROJECT_ROOT
-
-    if not root_path.exists():
-        return CallGraphResultModel(
-            success=False,
-            error=f"Project root not found: {root_path}.",
-            tier_applied=tier,
-        )
-
-    # [20260120_FEATURE] Apply tier limits
-    limits = capabilities.get("limits", {}) if capabilities else {}
-    max_depth_limit = limits.get("max_depth", None)
-    max_nodes_limit = limits.get("max_nodes", None)
-
-    # Ensure limits and depth are integers
-    try:
-        if max_depth_limit is not None:
-            max_depth_limit = int(max_depth_limit)
-        if max_nodes_limit is not None:
-            max_nodes_limit = int(max_nodes_limit)
-        if depth is not None:
-            depth = int(depth)
-    except (ValueError, TypeError) as e:
-        return CallGraphResultModel(
-            success=False,
-            error=f"Invalid depth or limit types: depth={depth} ({type(depth)}), max_depth={max_depth_limit} ({type(max_depth_limit)}), max_nodes={max_nodes_limit} ({type(max_nodes_limit)}): {e}",
-            tier_applied=tier,
-        )
-
-    # Apply depth limit
-    if max_depth_limit is not None and (depth is None or depth > max_depth_limit):
-        depth = max_depth_limit
-
-    # [20260120_FEATURE] Check for advanced resolution capability
-    advanced_resolution = (
-        "advanced_call_graph" in capabilities.get("capabilities", set())
-        if capabilities
-        else False
+    [20260308_REFACTOR] Delegate to the canonical helper implementation so the
+    server re-export stays aligned with the MCP tool surface and metadata.
+    """
+    from code_scalpel.mcp.helpers.graph_helpers import (
+        _get_call_graph_sync as _canonical_get_call_graph_sync,
     )
 
-    try:
-        builder = CallGraphBuilder(root_path)
-        result = builder.build_with_details(
-            entry_point=entry_point,
-            depth=depth,
-            max_nodes=max_nodes_limit,
-            advanced_resolution=advanced_resolution,
-        )
+    limits = capabilities.get("limits", {}) if capabilities else {}
+    max_nodes_limit = limits.get("max_nodes") if limits else None
+    capability_set = set(capabilities.get("capabilities", []) if capabilities else [])
 
-        # Convert dataclasses to Pydantic models
-        nodes = [
-            CallNodeModel(
-                name=n.name,
-                file=n.file,
-                line=n.line,
-                end_line=n.end_line,
-                is_entry_point=n.is_entry_point,
-            )
-            for n in result.nodes
-        ]
-
-        edges = [CallEdgeModel(caller=e.caller, callee=e.callee) for e in result.edges]
-
-        # Optionally check for circular imports
-        circular_imports = []
-        if include_circular_import_check:
-            circular_imports = builder.detect_circular_imports()
-
-        # [20260120_FEATURE] Populate metadata fields
-        enterprise_metrics = tier == "enterprise"
-
-        return CallGraphResultModel(
-            nodes=nodes,
-            edges=edges,
-            entry_point=result.entry_point,
-            depth_limit=result.depth_limit,
-            mermaid=result.mermaid,
-            circular_imports=circular_imports,
-            tier_applied=tier,
-            max_depth_applied=max_depth_limit,
-            max_nodes_applied=max_nodes_limit,
-            advanced_resolution_enabled=advanced_resolution,
-            enterprise_metrics_enabled=enterprise_metrics,
-        )
-
-    except Exception as e:
-        return CallGraphResultModel(
-            success=False,
-            error=f"Call graph analysis failed: {str(e)}",
-            tier_applied=tier,
-        )
+    return _canonical_get_call_graph_sync(
+        project_root,
+        entry_point,
+        depth,
+        include_circular_import_check,
+        max_nodes_limit,
+        "advanced_call_graph" in capability_set,
+        bool(
+            {"hot_path_identification", "dead_code_detection", "custom_graph_analysis"}
+            & capability_set
+        ),
+        None,
+        None,
+        None,
+        tier,
+        capabilities,
+    )
 
 
 from code_scalpel.mcp.models.graph import (  # noqa: E402
@@ -5581,6 +5121,8 @@ __all__ = [
     "verify_supply_chain",
     # Models (public)
     "AnalysisResult",
+    "GeneratedTestCase",
+    "TestGenerationResult",
     "SecurityResult",
     "SymbolicResult",
     "RefactorSimulationResult",

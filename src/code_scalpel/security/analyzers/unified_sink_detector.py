@@ -43,6 +43,7 @@ class Language(Enum):
     JAVA = "java"
     TYPESCRIPT = "typescript"
     JAVASCRIPT = "javascript"
+    RUST = "rust"  # [20260305_FEATURE] Rust language support
 
 
 @dataclass
@@ -231,6 +232,69 @@ UNIFIED_SINKS: Dict[str, Dict[str, List[SinkDefinition]]] = {
                 "Model.find", 0.7, SecuritySink.SQL_QUERY, "MongoDB/Mongoose find"
             ),
         ],
+        # [20260305_FEATURE] Polyglot SQL injection sinks - Go/C/C++/C#/Kotlin/PHP/Ruby/Swift
+        "go": [
+            SinkDefinition("db.Query", 0.95, SecuritySink.SQL_QUERY, "sql.DB Query"),
+            SinkDefinition("db.QueryRow", 0.95, SecuritySink.SQL_QUERY, "sql.DB QueryRow"),
+            SinkDefinition("db.Exec", 0.9, SecuritySink.SQL_QUERY, "sql.DB Exec"),
+            SinkDefinition("sqlx.Get", 0.9, SecuritySink.SQL_QUERY, "sqlx Get"),
+            SinkDefinition("sqlx.Select", 0.9, SecuritySink.SQL_QUERY, "sqlx Select"),
+            SinkDefinition(".QueryContext", 0.9, SecuritySink.SQL_QUERY, "Context query"),
+        ],
+        "c": [
+            SinkDefinition("sqlite3_exec", 0.95, SecuritySink.SQL_QUERY, "SQLite3 exec"),
+            SinkDefinition("sqlite3_prepare", 0.9, SecuritySink.SQL_QUERY, "SQLite3 prepare"),
+            SinkDefinition("PQexec", 0.95, SecuritySink.SQL_QUERY, "libpq PQexec"),
+            SinkDefinition("mysql_query", 0.95, SecuritySink.SQL_QUERY, "MySQL C API query"),
+        ],
+        "cpp": [
+            SinkDefinition("sqlite3_exec", 0.95, SecuritySink.SQL_QUERY, "SQLite3 exec"),
+            SinkDefinition("sqlite3_prepare_v2", 0.9, SecuritySink.SQL_QUERY, "SQLite3 prepare"),
+            SinkDefinition("execute(", 0.8, SecuritySink.SQL_QUERY, "ORM execute"),
+        ],
+        "csharp": [
+            SinkDefinition("SqlCommand", 0.95, SecuritySink.SQL_QUERY, "ADO.NET SqlCommand"),
+            SinkDefinition("ExecuteReader", 0.9, SecuritySink.SQL_QUERY, "ADO.NET ExecuteReader"),
+            SinkDefinition("ExecuteNonQuery", 0.9, SecuritySink.SQL_QUERY, "ADO.NET ExecuteNonQuery"),
+            SinkDefinition("ExecuteScalar", 0.9, SecuritySink.SQL_QUERY, "ADO.NET ExecuteScalar"),
+            SinkDefinition("DbCommand", 0.85, SecuritySink.SQL_QUERY, "ADO.NET DbCommand"),
+            SinkDefinition(".FromSqlRaw", 0.95, SecuritySink.SQL_QUERY, "EF Core raw SQL"),
+            SinkDefinition(".ExecuteSqlRaw", 0.95, SecuritySink.SQL_QUERY, "EF Core execute raw SQL"),
+        ],
+        "kotlin": [
+            SinkDefinition("jdbcTemplate.queryForObject", 0.9, SecuritySink.SQL_QUERY, "Spring JdbcTemplate"),
+            SinkDefinition("jdbcTemplate.query", 0.9, SecuritySink.SQL_QUERY, "Spring JdbcTemplate query"),
+            SinkDefinition("createQuery", 0.85, SecuritySink.SQL_QUERY, "JPA createQuery"),
+            SinkDefinition("rawQuery", 0.95, SecuritySink.SQL_QUERY, "Android SQLite rawQuery"),
+            SinkDefinition("execSQL", 0.9, SecuritySink.SQL_QUERY, "Android SQLite execSQL"),
+        ],
+        "php": [
+            SinkDefinition("mysql_query", 0.95, SecuritySink.SQL_QUERY, "MySQL legacy query"),
+            SinkDefinition("mysqli_query", 0.95, SecuritySink.SQL_QUERY, "MySQLi query"),
+            SinkDefinition("->query", 0.85, SecuritySink.SQL_QUERY, "PDO/MySQLi query"),
+            SinkDefinition("PDO::query", 0.9, SecuritySink.SQL_QUERY, "PDO query"),
+            SinkDefinition("->exec", 0.9, SecuritySink.SQL_QUERY, "PDO exec"),
+            SinkDefinition("pg_query", 0.95, SecuritySink.SQL_QUERY, "PostgreSQL query"),
+        ],
+        "ruby": [
+            SinkDefinition(".execute", 0.9, SecuritySink.SQL_QUERY, "ActiveRecord execute"),
+            SinkDefinition("find_by_sql", 0.95, SecuritySink.SQL_QUERY, "ActiveRecord find_by_sql"),
+            SinkDefinition("ActiveRecord::Base.connection.execute", 1.0, SecuritySink.SQL_QUERY, "Direct AR connection execute"),
+            SinkDefinition("sanitize_sql", 0.7, SecuritySink.SQL_QUERY, "AR sanitize_sql - check usage"),
+        ],
+        "swift": [
+            SinkDefinition("sqlite3_exec", 0.95, SecuritySink.SQL_QUERY, "SQLite3 exec"),
+            SinkDefinition("sqlite3_prepare_v2", 0.9, SecuritySink.SQL_QUERY, "SQLite3 prepare"),
+            SinkDefinition(".execute", 0.8, SecuritySink.SQL_QUERY, "ORM execute"),
+        ],
+        # [20260305_FEATURE] Rust SQL injection sinks
+        "rust": [
+            SinkDefinition(".execute(", 0.95, SecuritySink.SQL_QUERY, "sqlx/diesel execute"),
+            SinkDefinition(".query(", 0.9, SecuritySink.SQL_QUERY, "sqlx/diesel query"),
+            SinkDefinition(".query_as(", 0.9, SecuritySink.SQL_QUERY, "sqlx query_as"),
+            SinkDefinition("diesel::sql_query(", 0.95, SecuritySink.SQL_QUERY, "Diesel raw SQL"),
+            SinkDefinition(".fetch_all(", 0.85, SecuritySink.SQL_QUERY, "sqlx fetch_all"),
+        ],
     },
     # ==========================================================================
     # A03:2021 – Injection - Command Injection
@@ -313,6 +377,63 @@ UNIFIED_SINKS: Dict[str, Dict[str, List[SinkDefinition]]] = {
                 "setInterval", 0.8, SecuritySink.EVAL, "setInterval with string"
             ),
         ],
+        # [20260305_FEATURE] Polyglot command injection sinks - Go/C/C++/C#/Kotlin/PHP/Ruby/Swift
+        "go": [
+            SinkDefinition("exec.Command", 1.0, SecuritySink.SHELL_COMMAND, "os/exec Command"),
+            SinkDefinition("syscall.Exec", 1.0, SecuritySink.SHELL_COMMAND, "syscall Exec"),
+            SinkDefinition("syscall.ForkExec", 1.0, SecuritySink.SHELL_COMMAND, "syscall ForkExec"),
+        ],
+        "c": [
+            SinkDefinition("system(", 1.0, SecuritySink.SHELL_COMMAND, "C stdlib system"),
+            SinkDefinition("popen(", 1.0, SecuritySink.SHELL_COMMAND, "C popen"),
+            SinkDefinition("execve(", 1.0, SecuritySink.SHELL_COMMAND, "POSIX execve"),
+            SinkDefinition("execl(", 1.0, SecuritySink.SHELL_COMMAND, "POSIX execl"),
+            SinkDefinition("execvp(", 1.0, SecuritySink.SHELL_COMMAND, "POSIX execvp"),
+        ],
+        "cpp": [
+            SinkDefinition("system(", 1.0, SecuritySink.SHELL_COMMAND, "C++ stdlib system"),
+            SinkDefinition("popen(", 1.0, SecuritySink.SHELL_COMMAND, "C++ popen"),
+            SinkDefinition("execve(", 1.0, SecuritySink.SHELL_COMMAND, "POSIX execve"),
+            SinkDefinition("boost::process::child", 0.9, SecuritySink.SHELL_COMMAND, "Boost.Process child"),
+        ],
+        "csharp": [
+            SinkDefinition("Process.Start", 1.0, SecuritySink.SHELL_COMMAND, "System.Diagnostics Process.Start"),
+            SinkDefinition("ProcessStartInfo", 0.9, SecuritySink.SHELL_COMMAND, "ProcessStartInfo"),
+            SinkDefinition("new Process", 0.85, SecuritySink.SHELL_COMMAND, "System.Diagnostics Process"),
+        ],
+        "kotlin": [
+            SinkDefinition("Runtime.getRuntime().exec", 1.0, SecuritySink.SHELL_COMMAND, "Java Runtime exec"),
+            SinkDefinition("ProcessBuilder", 0.9, SecuritySink.SHELL_COMMAND, "Java ProcessBuilder"),
+        ],
+        "php": [
+            SinkDefinition("exec(", 1.0, SecuritySink.SHELL_COMMAND, "PHP exec"),
+            SinkDefinition("system(", 1.0, SecuritySink.SHELL_COMMAND, "PHP system"),
+            SinkDefinition("shell_exec(", 1.0, SecuritySink.SHELL_COMMAND, "PHP shell_exec"),
+            SinkDefinition("passthru(", 1.0, SecuritySink.SHELL_COMMAND, "PHP passthru"),
+            SinkDefinition("popen(", 0.9, SecuritySink.SHELL_COMMAND, "PHP popen"),
+            SinkDefinition("proc_open(", 0.9, SecuritySink.SHELL_COMMAND, "PHP proc_open"),
+            SinkDefinition("eval(", 1.0, SecuritySink.EVAL, "PHP eval"),
+        ],
+        "ruby": [
+            SinkDefinition("system(", 1.0, SecuritySink.SHELL_COMMAND, "Ruby Kernel#system"),
+            SinkDefinition("exec(", 1.0, SecuritySink.SHELL_COMMAND, "Ruby Kernel#exec"),
+            SinkDefinition("IO.popen", 1.0, SecuritySink.SHELL_COMMAND, "Ruby IO.popen"),
+            SinkDefinition("`", 0.9, SecuritySink.SHELL_COMMAND, "Ruby backtick shell"),
+            SinkDefinition("%x{", 0.9, SecuritySink.SHELL_COMMAND, "Ruby %x shell"),
+            SinkDefinition("spawn(", 0.9, SecuritySink.SHELL_COMMAND, "Ruby Kernel#spawn"),
+        ],
+        "swift": [
+            SinkDefinition("Process()", 1.0, SecuritySink.SHELL_COMMAND, "Foundation Process"),
+            SinkDefinition("NSTask()", 1.0, SecuritySink.SHELL_COMMAND, "Foundation NSTask"),
+        ],
+        # [20260305_FEATURE] Rust command injection sinks
+        "rust": [
+            SinkDefinition("Command::new(", 1.0, SecuritySink.SHELL_COMMAND, "std::process::Command"),
+            SinkDefinition(".arg(", 0.8, SecuritySink.SHELL_COMMAND, "Command arg - check if user-controlled"),
+            SinkDefinition(".args(", 0.8, SecuritySink.SHELL_COMMAND, "Command args slice"),
+            SinkDefinition(".spawn(", 0.9, SecuritySink.SHELL_COMMAND, "Command spawn"),
+            SinkDefinition(".output(", 0.85, SecuritySink.SHELL_COMMAND, "Command output"),
+        ],
     },
     # ==========================================================================
     # A03:2021 – Injection - Cross-Site Scripting (XSS)
@@ -391,6 +512,41 @@ UNIFIED_SINKS: Dict[str, Dict[str, List[SinkDefinition]]] = {
                 "Servlet writer",
             ),
         ],
+        # [20260305_FEATURE] Polyglot XSS sinks - Go/C#/Kotlin/PHP/Ruby
+        "go": [
+            SinkDefinition("template.HTML(", 0.95, SecuritySink.HTML_OUTPUT, "Go unsafe HTML in template"),
+            SinkDefinition("fmt.Fprintf(w", 0.75, SecuritySink.HTML_OUTPUT, "Unescaped write to ResponseWriter"),
+            SinkDefinition("w.Write(", 0.7, SecuritySink.HTML_OUTPUT, "Raw write to ResponseWriter"),
+        ],
+        "csharp": [
+            SinkDefinition("Response.Write(", 0.9, SecuritySink.HTML_OUTPUT, "ASP.NET Response.Write"),
+            SinkDefinition("Html.Raw(", 1.0, SecuritySink.HTML_OUTPUT, "ASP.NET MVC Html.Raw"),
+            SinkDefinition("@Html.Raw(", 1.0, SecuritySink.HTML_OUTPUT, "Razor @Html.Raw"),
+            SinkDefinition("HttpResponse.Write(", 0.9, SecuritySink.HTML_OUTPUT, "HttpResponse.Write"),
+        ],
+        "kotlin": [
+            SinkDefinition("response.writer.print(", 0.85, SecuritySink.HTML_OUTPUT, "Servlet response print"),
+            SinkDefinition("PrintWriter.println(", 0.8, SecuritySink.HTML_OUTPUT, "PrintWriter output"),
+        ],
+        "php": [
+            SinkDefinition("echo ", 0.75, SecuritySink.HTML_OUTPUT, "PHP echo"),
+            SinkDefinition("print(", 0.75, SecuritySink.HTML_OUTPUT, "PHP print"),
+            SinkDefinition("printf(", 0.75, SecuritySink.HTML_OUTPUT, "PHP printf"),
+            SinkDefinition("<?=", 0.75, SecuritySink.HTML_OUTPUT, "PHP short echo tag"),
+            SinkDefinition("header(\"Location:", 0.9, SecuritySink.REDIRECT, "PHP redirect XSS"),
+        ],
+        "ruby": [
+            SinkDefinition("render html:", 0.9, SecuritySink.HTML_OUTPUT, "Rails render raw HTML"),
+            SinkDefinition("raw(", 0.95, SecuritySink.HTML_OUTPUT, "Rails raw helper"),
+            SinkDefinition(".html_safe", 0.9, SecuritySink.HTML_OUTPUT, "Rails html_safe"),
+        ],
+        # [20260305_FEATURE] Rust XSS sinks (server-side template injection)
+        "rust": [
+            SinkDefinition("minijinja::render!", 0.85, SecuritySink.HTML_OUTPUT, "MiniJinja template render"),
+            SinkDefinition("tera.render(", 0.85, SecuritySink.HTML_OUTPUT, "Tera template render"),
+            SinkDefinition("handlebars.render(", 0.85, SecuritySink.HTML_OUTPUT, "Handlebars template render"),
+            SinkDefinition(".render(", 0.7, SecuritySink.HTML_OUTPUT, "Template render - check if user-controlled"),
+        ],
     },
     # ==========================================================================
     # A01:2021 – Broken Access Control - Path Traversal
@@ -440,6 +596,66 @@ UNIFIED_SINKS: Dict[str, Dict[str, List[SinkDefinition]]] = {
             SinkDefinition("fs.readFile", 0.8, SecuritySink.FILE_PATH, "File read"),
             SinkDefinition("fs.writeFile", 0.85, SecuritySink.FILE_PATH, "File write"),
             SinkDefinition("path.join", 0.6, SecuritySink.FILE_PATH, "Path join"),
+        ],
+        # [20260305_FEATURE] Polyglot path traversal sinks - Go/C/C++/C#/Kotlin/PHP/Ruby/Swift
+        "go": [
+            SinkDefinition("os.Open(", 0.85, SecuritySink.FILE_PATH, "os.Open"),
+            SinkDefinition("os.ReadFile(", 0.85, SecuritySink.FILE_PATH, "os.ReadFile"),
+            SinkDefinition("ioutil.ReadFile(", 0.85, SecuritySink.FILE_PATH, "ioutil.ReadFile"),
+            SinkDefinition("filepath.Join(", 0.7, SecuritySink.FILE_PATH, "filepath.Join"),
+            SinkDefinition("os.Create(", 0.85, SecuritySink.FILE_PATH, "os.Create"),
+        ],
+        "c": [
+            SinkDefinition("fopen(", 0.9, SecuritySink.FILE_PATH, "C stdio fopen"),
+            SinkDefinition("open(", 0.8, SecuritySink.FILE_PATH, "POSIX open"),
+            SinkDefinition("freopen(", 0.9, SecuritySink.FILE_PATH, "C stdio freopen"),
+        ],
+        "cpp": [
+            SinkDefinition("fopen(", 0.9, SecuritySink.FILE_PATH, "C++ fopen"),
+            SinkDefinition("std::ifstream", 0.85, SecuritySink.FILE_PATH, "C++ ifstream"),
+            SinkDefinition("std::ofstream", 0.85, SecuritySink.FILE_PATH, "C++ ofstream"),
+            SinkDefinition("std::fstream", 0.85, SecuritySink.FILE_PATH, "C++ fstream"),
+        ],
+        "csharp": [
+            SinkDefinition("File.ReadAllText(", 0.9, SecuritySink.FILE_PATH, "System.IO File.ReadAllText"),
+            SinkDefinition("File.WriteAllText(", 0.9, SecuritySink.FILE_PATH, "System.IO File.WriteAllText"),
+            SinkDefinition("new FileStream(", 0.9, SecuritySink.FILE_PATH, "System.IO FileStream"),
+            SinkDefinition("Directory.GetFiles(", 0.8, SecuritySink.FILE_PATH, "System.IO Directory.GetFiles"),
+            SinkDefinition("File.Open(", 0.9, SecuritySink.FILE_PATH, "System.IO File.Open"),
+        ],
+        "kotlin": [
+            SinkDefinition("File(", 0.8, SecuritySink.FILE_PATH, "java.io.File"),
+            SinkDefinition("Files.readAllBytes(", 0.85, SecuritySink.FILE_PATH, "java.nio Files"),
+            SinkDefinition("FileInputStream(", 0.9, SecuritySink.FILE_PATH, "java.io FileInputStream"),
+            SinkDefinition("FileOutputStream(", 0.9, SecuritySink.FILE_PATH, "java.io FileOutputStream"),
+        ],
+        "php": [
+            SinkDefinition("include(", 0.9, SecuritySink.FILE_PATH, "PHP include"),
+            SinkDefinition("require(", 0.9, SecuritySink.FILE_PATH, "PHP require"),
+            SinkDefinition("include_once(", 0.9, SecuritySink.FILE_PATH, "PHP include_once"),
+            SinkDefinition("fopen(", 0.9, SecuritySink.FILE_PATH, "PHP fopen"),
+            SinkDefinition("file_get_contents(", 0.8, SecuritySink.FILE_PATH, "PHP file_get_contents"),
+            SinkDefinition("readfile(", 0.85, SecuritySink.FILE_PATH, "PHP readfile"),
+        ],
+        "ruby": [
+            SinkDefinition("File.read(", 0.9, SecuritySink.FILE_PATH, "Ruby File.read"),
+            SinkDefinition("File.open(", 0.85, SecuritySink.FILE_PATH, "Ruby File.open"),
+            SinkDefinition("IO.read(", 0.9, SecuritySink.FILE_PATH, "Ruby IO.read"),
+            SinkDefinition("Pathname.new(", 0.75, SecuritySink.FILE_PATH, "Ruby Pathname"),
+        ],
+        "swift": [
+            SinkDefinition("FileManager.default.contents(", 0.9, SecuritySink.FILE_PATH, "NSFileManager contents"),
+            SinkDefinition("String(contentsOfFile:", 0.9, SecuritySink.FILE_PATH, "String contentsOfFile"),
+            SinkDefinition("URL(fileURLWithPath:", 0.8, SecuritySink.FILE_PATH, "URL fileURLWithPath"),
+        ],
+        # [20260305_FEATURE] Rust path traversal sinks
+        "rust": [
+            SinkDefinition("File::open(", 0.85, SecuritySink.FILE_PATH, "std::fs::File::open"),
+            SinkDefinition("fs::read(", 0.85, SecuritySink.FILE_PATH, "std::fs::read"),
+            SinkDefinition("fs::read_to_string(", 0.85, SecuritySink.FILE_PATH, "std::fs::read_to_string"),
+            SinkDefinition("fs::write(", 0.9, SecuritySink.FILE_PATH, "std::fs::write"),
+            SinkDefinition("Path::new(", 0.7, SecuritySink.FILE_PATH, "std::path::Path construction"),
+            SinkDefinition("PathBuf::from(", 0.7, SecuritySink.FILE_PATH, "std::path::PathBuf construction"),
         ],
     },
     # ==========================================================================
@@ -495,6 +711,60 @@ UNIFIED_SINKS: Dict[str, Dict[str, List[SinkDefinition]]] = {
             SinkDefinition(
                 "request.get", 0.9, SecuritySink.SSRF, "Request library GET"
             ),
+        ],
+        # [20260305_FEATURE] Polyglot SSRF sinks - Go/C/C++/C#/Kotlin/PHP/Ruby/Swift
+        "go": [
+            SinkDefinition("http.Get(", 0.9, SecuritySink.SSRF, "net/http GET"),
+            SinkDefinition("http.Post(", 0.9, SecuritySink.SSRF, "net/http POST"),
+            SinkDefinition("http.NewRequest(", 0.85, SecuritySink.SSRF, "net/http NewRequest"),
+            SinkDefinition("http.DefaultClient.Do(", 0.9, SecuritySink.SSRF, "net/http client Do"),
+        ],
+        "c": [
+            SinkDefinition("curl_easy_setopt(", 0.85, SecuritySink.SSRF, "libcurl setopt with URL"),
+            SinkDefinition("curl_easy_perform(", 0.9, SecuritySink.SSRF, "libcurl perform"),
+        ],
+        "cpp": [
+            SinkDefinition("curl_easy_setopt(", 0.85, SecuritySink.SSRF, "libcurl setopt"),
+            SinkDefinition("curl_easy_perform(", 0.9, SecuritySink.SSRF, "libcurl perform"),
+            SinkDefinition("beast::http::get(", 0.9, SecuritySink.SSRF, "Boost.Beast HTTP GET"),
+        ],
+        "csharp": [
+            SinkDefinition("HttpClient.GetAsync(", 0.9, SecuritySink.SSRF, "System.Net.Http GetAsync"),
+            SinkDefinition("HttpClient.PostAsync(", 0.9, SecuritySink.SSRF, "System.Net.Http PostAsync"),
+            SinkDefinition("WebClient.DownloadString(", 0.9, SecuritySink.SSRF, "System.Net WebClient"),
+            SinkDefinition("WebRequest.Create(", 0.9, SecuritySink.SSRF, "System.Net WebRequest"),
+        ],
+        "kotlin": [
+            SinkDefinition("URL(", 0.8, SecuritySink.SSRF, "java.net.URL"),
+            SinkDefinition("HttpURLConnection", 0.85, SecuritySink.SSRF, "java.net.HttpURLConnection"),
+            SinkDefinition("OkHttpClient", 0.85, SecuritySink.SSRF, "OkHttp3 client"),
+            SinkDefinition("Fuel.get(", 0.9, SecuritySink.SSRF, "Fuel HTTP GET"),
+        ],
+        "php": [
+            SinkDefinition("curl_exec(", 0.9, SecuritySink.SSRF, "PHP cURL exec"),
+            SinkDefinition("file_get_contents(", 0.75, SecuritySink.SSRF, "PHP file_get_contents with URL"),
+            SinkDefinition("fsockopen(", 0.9, SecuritySink.SSRF, "PHP fsockopen"),
+        ],
+        "ruby": [
+            SinkDefinition("Net::HTTP.get(", 0.9, SecuritySink.SSRF, "Ruby Net::HTTP GET"),
+            SinkDefinition("Net::HTTP.post(", 0.9, SecuritySink.SSRF, "Ruby Net::HTTP POST"),
+            SinkDefinition("open(", 0.75, SecuritySink.SSRF, "Ruby open-uri"),
+            SinkDefinition("URI.open(", 0.8, SecuritySink.SSRF, "Ruby URI.open"),
+            SinkDefinition("Faraday.get(", 0.9, SecuritySink.SSRF, "Faraday HTTP GET"),
+        ],
+        "swift": [
+            SinkDefinition("URLSession.shared.dataTask(", 0.9, SecuritySink.SSRF, "Foundation URLSession"),
+            SinkDefinition("URLSession.shared.data(", 0.9, SecuritySink.SSRF, "Foundation URLSession async"),
+            SinkDefinition("URLRequest(", 0.8, SecuritySink.SSRF, "Foundation URLRequest"),
+        ],
+        # [20260305_FEATURE] Rust SSRF sinks
+        "rust": [
+            SinkDefinition("reqwest::get(", 0.9, SecuritySink.SSRF, "reqwest GET"),
+            SinkDefinition("reqwest::Client::new(", 0.85, SecuritySink.SSRF, "reqwest Client"),
+            SinkDefinition(".get(", 0.75, SecuritySink.SSRF, "HTTP GET - check if URL is user-controlled"),
+            SinkDefinition(".post(", 0.75, SecuritySink.SSRF, "HTTP POST - check if URL is user-controlled"),
+            SinkDefinition("hyper::Client::", 0.85, SecuritySink.SSRF, "hyper HTTP client"),
+            SinkDefinition("ureq::get(", 0.9, SecuritySink.SSRF, "ureq GET"),
         ],
     },
     # ==========================================================================
@@ -610,6 +880,60 @@ UNIFIED_SINKS: Dict[str, Dict[str, List[SinkDefinition]]] = {
             ),
             SinkDefinition("md5(", 0.95, SecuritySink.WEAK_CRYPTO, "MD5 function call"),
         ],
+        # [20260305_FEATURE] Polyglot weak crypto sinks - Go/C/C++/C#/Kotlin/PHP/Ruby/Swift
+        "go": [
+            SinkDefinition("md5.New()", 0.95, SecuritySink.WEAK_CRYPTO, "Go crypto/md5"),
+            SinkDefinition("sha1.New()", 0.85, SecuritySink.WEAK_CRYPTO, "Go crypto/sha1"),
+            SinkDefinition("des.NewCipher(", 1.0, SecuritySink.WEAK_CRYPTO, "Go crypto/des"),
+            SinkDefinition("rc4.NewCipher(", 1.0, SecuritySink.WEAK_CRYPTO, "Go crypto/rc4"),
+        ],
+        "c": [
+            SinkDefinition("MD5_Init(", 0.95, SecuritySink.WEAK_CRYPTO, "OpenSSL MD5"),
+            SinkDefinition("SHA1_Init(", 0.85, SecuritySink.WEAK_CRYPTO, "OpenSSL SHA1"),
+            SinkDefinition("DES_set_key(", 1.0, SecuritySink.WEAK_CRYPTO, "OpenSSL DES"),
+        ],
+        "cpp": [
+            SinkDefinition("MD5_Init(", 0.95, SecuritySink.WEAK_CRYPTO, "OpenSSL MD5"),
+            SinkDefinition("SHA1_Init(", 0.85, SecuritySink.WEAK_CRYPTO, "OpenSSL SHA1"),
+            SinkDefinition("EVP_des_cbc(", 1.0, SecuritySink.WEAK_CRYPTO, "OpenSSL DES CBC"),
+        ],
+        "csharp": [
+            SinkDefinition("MD5.Create(", 0.95, SecuritySink.WEAK_CRYPTO, "System.Security.Cryptography MD5"),
+            SinkDefinition("SHA1.Create(", 0.85, SecuritySink.WEAK_CRYPTO, "System.Security.Cryptography SHA1"),
+            SinkDefinition("DESCryptoServiceProvider(", 1.0, SecuritySink.WEAK_CRYPTO, "DES cipher"),
+            SinkDefinition("new MD5CryptoServiceProvider(", 0.95, SecuritySink.WEAK_CRYPTO, "MD5 provider"),
+            SinkDefinition("TripleDESCryptoServiceProvider(", 0.9, SecuritySink.WEAK_CRYPTO, "3DES - weak"),
+        ],
+        "kotlin": [
+            SinkDefinition('MessageDigest.getInstance("MD5")', 0.95, SecuritySink.WEAK_CRYPTO, "Java MD5"),
+            SinkDefinition('MessageDigest.getInstance("SHA-1")', 0.85, SecuritySink.WEAK_CRYPTO, "Java SHA-1"),
+            SinkDefinition('Cipher.getInstance("DES")', 1.0, SecuritySink.WEAK_CRYPTO, "Java DES cipher"),
+        ],
+        "php": [
+            SinkDefinition("md5(", 0.95, SecuritySink.WEAK_CRYPTO, "PHP md5"),
+            SinkDefinition("sha1(", 0.85, SecuritySink.WEAK_CRYPTO, "PHP sha1"),
+            SinkDefinition("crc32(", 0.8, SecuritySink.WEAK_CRYPTO, "PHP crc32 - not cryptographic"),
+            SinkDefinition("mcrypt_encrypt(", 1.0, SecuritySink.WEAK_CRYPTO, "PHP mcrypt (deprecated)"),
+        ],
+        "ruby": [
+            SinkDefinition("Digest::MD5.hexdigest(", 0.95, SecuritySink.WEAK_CRYPTO, "Ruby Digest MD5"),
+            SinkDefinition("Digest::SHA1.hexdigest(", 0.85, SecuritySink.WEAK_CRYPTO, "Ruby Digest SHA1"),
+            SinkDefinition('OpenSSL::Cipher.new("DES")', 1.0, SecuritySink.WEAK_CRYPTO, "Ruby OpenSSL DES"),
+        ],
+        "swift": [
+            SinkDefinition("CC_MD5(", 0.95, SecuritySink.WEAK_CRYPTO, "CommonCrypto MD5"),
+            SinkDefinition("CC_SHA1(", 0.85, SecuritySink.WEAK_CRYPTO, "CommonCrypto SHA1"),
+            SinkDefinition("kCCAlgorithmDES", 1.0, SecuritySink.WEAK_CRYPTO, "CommonCrypto DES"),
+        ],
+        # [20260305_FEATURE] Rust weak crypto sinks
+        "rust": [
+            SinkDefinition("md5::compute(", 0.95, SecuritySink.WEAK_CRYPTO, "md5 crate compute"),
+            SinkDefinition("Md5::new(", 0.95, SecuritySink.WEAK_CRYPTO, "RustCrypto MD5"),
+            SinkDefinition("Sha1::new(", 0.85, SecuritySink.WEAK_CRYPTO, "RustCrypto SHA1"),
+            SinkDefinition("sha1::Sha1::", 0.85, SecuritySink.WEAK_CRYPTO, "sha1 crate"),
+            SinkDefinition("Des::new(", 1.0, SecuritySink.WEAK_CRYPTO, "RustCrypto DES"),
+            SinkDefinition("Rc4::new(", 1.0, SecuritySink.WEAK_CRYPTO, "RustCrypto RC4 (broken)"),
+        ],
     },
     # ==========================================================================
     # [20251229_FEATURE] v3.0.4 - A05:2021 – Security Misconfiguration (XXE)
@@ -698,6 +1022,55 @@ UNIFIED_SINKS: Dict[str, Dict[str, List[SinkDefinition]]] = {
             SinkDefinition(
                 "libxmljs", 0.95, SecuritySink.XXE, "libxmljs - XXE vulnerable"
             ),
+        ],
+        # [20260305_FEATURE] Polyglot XXE sinks - Go/C/C++/C#/Kotlin/PHP/Ruby/Swift
+        "go": [
+            SinkDefinition("xml.NewDecoder(", 0.85, SecuritySink.XXE, "encoding/xml Decoder"),
+            SinkDefinition("xml.Unmarshal(", 0.85, SecuritySink.XXE, "encoding/xml Unmarshal"),
+            SinkDefinition("etree.ReadFrom(", 0.9, SecuritySink.XXE, "etree ReadFrom"),
+        ],
+        "c": [
+            SinkDefinition("xmlParseDoc(", 0.9, SecuritySink.XXE, "libxml2 xmlParseDoc"),
+            SinkDefinition("xmlReadFile(", 0.9, SecuritySink.XXE, "libxml2 xmlReadFile"),
+            SinkDefinition("xmlSAXParseDoc(", 0.9, SecuritySink.XXE, "libxml2 SAX parse"),
+        ],
+        "cpp": [
+            SinkDefinition("xmlParseDoc(", 0.9, SecuritySink.XXE, "libxml2 xmlParseDoc"),
+            SinkDefinition("xmlReadFile(", 0.9, SecuritySink.XXE, "libxml2 xmlReadFile"),
+            SinkDefinition("TiXmlDocument", 0.85, SecuritySink.XXE, "TinyXML document"),
+        ],
+        "csharp": [
+            SinkDefinition("XmlReader.Create(", 0.9, SecuritySink.XXE, "System.Xml XmlReader"),
+            SinkDefinition("XmlDocument.Load(", 0.9, SecuritySink.XXE, "System.Xml XmlDocument"),
+            SinkDefinition("XDocument.Load(", 0.85, SecuritySink.XXE, "System.Xml.Linq XDocument"),
+            SinkDefinition("XmlTextReader(", 0.9, SecuritySink.XXE, "System.Xml XmlTextReader (legacy)"),
+        ],
+        "kotlin": [
+            SinkDefinition("DocumentBuilderFactory.newInstance(", 0.95, SecuritySink.XXE, "Java DOM parser"),
+            SinkDefinition("SAXParserFactory.newInstance(", 0.95, SecuritySink.XXE, "Java SAX parser"),
+            SinkDefinition("XmlPullParserFactory.newInstance(", 0.9, SecuritySink.XXE, "Android XmlPullParser"),
+        ],
+        "php": [
+            SinkDefinition("simplexml_load_string(", 0.9, SecuritySink.XXE, "PHP SimpleXML"),
+            SinkDefinition("simplexml_load_file(", 0.9, SecuritySink.XXE, "PHP SimpleXML file"),
+            SinkDefinition("DOMDocument::loadXML(", 0.9, SecuritySink.XXE, "PHP DOMDocument loadXML"),
+            SinkDefinition("DOMDocument::load(", 0.9, SecuritySink.XXE, "PHP DOMDocument load"),
+        ],
+        "ruby": [
+            SinkDefinition("Nokogiri::XML(", 0.9, SecuritySink.XXE, "Nokogiri XML parser"),
+            SinkDefinition("REXML::Document.new(", 0.85, SecuritySink.XXE, "Ruby REXML"),
+            SinkDefinition("LibXML::XML::Document.file(", 0.9, SecuritySink.XXE, "Ruby LibXML"),
+        ],
+        "swift": [
+            SinkDefinition("XMLParser(", 0.85, SecuritySink.XXE, "Foundation XMLParser"),
+            SinkDefinition("XMLDocument(", 0.85, SecuritySink.XXE, "Foundation XMLDocument"),
+        ],
+        # [20260305_FEATURE] Rust XXE sinks
+        "rust": [
+            SinkDefinition("roxmltree::Document::parse(", 0.85, SecuritySink.XXE, "roxmltree parser"),
+            SinkDefinition("minidom::Element::from_reader(", 0.85, SecuritySink.XXE, "minidom reader"),
+            SinkDefinition("xml::reader::EventReader::", 0.8, SecuritySink.XXE, "xml-rs EventReader"),
+            SinkDefinition("quick_xml::Reader::", 0.8, SecuritySink.XXE, "quick-xml Reader"),
         ],
     },
     # ==========================================================================
@@ -790,6 +1163,66 @@ UNIFIED_SINKS: Dict[str, Dict[str, List[SinkDefinition]]] = {
                 "bunyan.info", 0.75, SecuritySink.LOG_OUTPUT, "Bunyan logger"
             ),
         ],
+        # [20260305_FEATURE] Polyglot log injection sinks - Go/C/C++/C#/Kotlin/PHP/Ruby/Swift
+        "go": [
+            SinkDefinition("log.Print(", 0.65, SecuritySink.LOG_OUTPUT, "Go log Print"),
+            SinkDefinition("log.Printf(", 0.65, SecuritySink.LOG_OUTPUT, "Go log Printf"),
+            SinkDefinition("log.Println(", 0.65, SecuritySink.LOG_OUTPUT, "Go log Println"),
+            SinkDefinition(".Info(", 0.65, SecuritySink.LOG_OUTPUT, "Go logger Info (zap/logrus)"),
+            SinkDefinition(".Error(", 0.65, SecuritySink.LOG_OUTPUT, "Go logger Error (zap/logrus)"),
+        ],
+        "c": [
+            SinkDefinition("printf(", 0.6, SecuritySink.LOG_OUTPUT, "C printf"),
+            SinkDefinition("fprintf(stderr", 0.65, SecuritySink.LOG_OUTPUT, "C fprintf to stderr"),
+            SinkDefinition("syslog(", 0.7, SecuritySink.LOG_OUTPUT, "POSIX syslog"),
+        ],
+        "cpp": [
+            SinkDefinition("printf(", 0.6, SecuritySink.LOG_OUTPUT, "C++ printf"),
+            SinkDefinition("std::cout", 0.55, SecuritySink.LOG_OUTPUT, "C++ cout"),
+            SinkDefinition("syslog(", 0.7, SecuritySink.LOG_OUTPUT, "POSIX syslog"),
+            SinkDefinition("BOOST_LOG_TRIVIAL(", 0.7, SecuritySink.LOG_OUTPUT, "Boost.Log"),
+        ],
+        "csharp": [
+            SinkDefinition("Console.WriteLine(", 0.6, SecuritySink.LOG_OUTPUT, "System Console.WriteLine"),
+            SinkDefinition("logger.LogInformation(", 0.7, SecuritySink.LOG_OUTPUT, "ILogger LogInformation"),
+            SinkDefinition("logger.LogError(", 0.7, SecuritySink.LOG_OUTPUT, "ILogger LogError"),
+            SinkDefinition("logger.LogWarning(", 0.7, SecuritySink.LOG_OUTPUT, "ILogger LogWarning"),
+            SinkDefinition("_logger.Log(", 0.7, SecuritySink.LOG_OUTPUT, "ILogger Log"),
+        ],
+        "kotlin": [
+            SinkDefinition("println(", 0.6, SecuritySink.LOG_OUTPUT, "Kotlin println"),
+            SinkDefinition("Log.i(", 0.65, SecuritySink.LOG_OUTPUT, "Android Log.i"),
+            SinkDefinition("Log.d(", 0.6, SecuritySink.LOG_OUTPUT, "Android Log.d"),
+            SinkDefinition("Log.e(", 0.65, SecuritySink.LOG_OUTPUT, "Android Log.e"),
+            SinkDefinition("log.info(", 0.7, SecuritySink.LOG_OUTPUT, "SLF4J log.info"),
+        ],
+        "php": [
+            SinkDefinition("error_log(", 0.7, SecuritySink.LOG_OUTPUT, "PHP error_log"),
+            SinkDefinition("syslog(", 0.7, SecuritySink.LOG_OUTPUT, "PHP syslog"),
+            SinkDefinition("trigger_error(", 0.65, SecuritySink.LOG_OUTPUT, "PHP trigger_error"),
+        ],
+        "ruby": [
+            SinkDefinition("Rails.logger.info", 0.7, SecuritySink.LOG_OUTPUT, "Rails logger"),
+            SinkDefinition("logger.info", 0.7, SecuritySink.LOG_OUTPUT, "Ruby Logger info"),
+            SinkDefinition("puts ", 0.55, SecuritySink.LOG_OUTPUT, "Ruby puts"),
+            SinkDefinition("Syslog.log(", 0.7, SecuritySink.LOG_OUTPUT, "Ruby Syslog"),
+        ],
+        "swift": [
+            SinkDefinition("print(", 0.55, SecuritySink.LOG_OUTPUT, "Swift print"),
+            SinkDefinition("NSLog(", 0.65, SecuritySink.LOG_OUTPUT, "Foundation NSLog"),
+            SinkDefinition("os_log(", 0.65, SecuritySink.LOG_OUTPUT, "os.log os_log"),
+            SinkDefinition("Logger(", 0.65, SecuritySink.LOG_OUTPUT, "os.log Logger"),
+        ],
+        # [20260305_FEATURE] Rust log injection sinks
+        "rust": [
+            SinkDefinition("println!(", 0.55, SecuritySink.LOG_OUTPUT, "Rust println macro"),
+            SinkDefinition("eprintln!(", 0.6, SecuritySink.LOG_OUTPUT, "Rust eprintln macro"),
+            SinkDefinition("log::info!(", 0.65, SecuritySink.LOG_OUTPUT, "log crate info"),
+            SinkDefinition("log::warn!(", 0.65, SecuritySink.LOG_OUTPUT, "log crate warn"),
+            SinkDefinition("log::error!(", 0.65, SecuritySink.LOG_OUTPUT, "log crate error"),
+            SinkDefinition("tracing::info!(", 0.65, SecuritySink.LOG_OUTPUT, "tracing crate info"),
+            SinkDefinition("tracing::error!(", 0.65, SecuritySink.LOG_OUTPUT, "tracing crate error"),
+        ],
     },
     # ==========================================================================
     # [20251229_FEATURE] v3.0.4 - ReDoS (Regular Expression Denial of Service)
@@ -846,6 +1279,49 @@ UNIFIED_SINKS: Dict[str, Dict[str, List[SinkDefinition]]] = {
             SinkDefinition("RegExp(", 0.75, SecuritySink.EVAL, "RegExp constructor"),
             SinkDefinition(".match(", 0.6, SecuritySink.EVAL, "String match"),
             SinkDefinition(".replace(", 0.6, SecuritySink.EVAL, "String replace"),
+        ],
+        # [20260305_FEATURE] Polyglot ReDoS sinks - Go/C++/C#/Kotlin/PHP/Ruby/Swift
+        "go": [
+            SinkDefinition("regexp.Compile(", 0.65, SecuritySink.EVAL, "Go regexp.Compile"),
+            SinkDefinition("regexp.MustCompile(", 0.65, SecuritySink.EVAL, "Go regexp.MustCompile"),
+            SinkDefinition("regexp.MatchString(", 0.6, SecuritySink.EVAL, "Go regexp.MatchString"),
+        ],
+        "cpp": [
+            SinkDefinition("std::regex(", 0.7, SecuritySink.EVAL, "C++ std::regex dynamic"),
+            SinkDefinition("regex_match(", 0.6, SecuritySink.EVAL, "C++ regex_match"),
+            SinkDefinition("regex_search(", 0.6, SecuritySink.EVAL, "C++ regex_search"),
+        ],
+        "csharp": [
+            SinkDefinition("new Regex(", 0.75, SecuritySink.EVAL, "C# dynamic Regex"),
+            SinkDefinition("Regex.Match(", 0.65, SecuritySink.EVAL, "C# Regex.Match"),
+            SinkDefinition("Regex.IsMatch(", 0.65, SecuritySink.EVAL, "C# Regex.IsMatch"),
+            SinkDefinition("Regex.Replace(", 0.6, SecuritySink.EVAL, "C# Regex.Replace"),
+        ],
+        "kotlin": [
+            SinkDefinition("Regex(", 0.7, SecuritySink.EVAL, "Kotlin Regex"),
+            SinkDefinition(".toRegex(", 0.65, SecuritySink.EVAL, "Kotlin toRegex"),
+            SinkDefinition("Pattern.compile(", 0.6, SecuritySink.EVAL, "Java Pattern.compile"),
+        ],
+        "php": [
+            SinkDefinition("preg_match(", 0.65, SecuritySink.EVAL, "PHP preg_match"),
+            SinkDefinition("preg_replace(", 0.65, SecuritySink.EVAL, "PHP preg_replace"),
+            SinkDefinition("preg_match_all(", 0.65, SecuritySink.EVAL, "PHP preg_match_all"),
+        ],
+        "ruby": [
+            SinkDefinition("Regexp.new(", 0.75, SecuritySink.EVAL, "Ruby dynamic Regexp"),
+            SinkDefinition(".match(", 0.6, SecuritySink.EVAL, "Ruby String.match"),
+            SinkDefinition(".scan(", 0.6, SecuritySink.EVAL, "Ruby String.scan"),
+        ],
+        "swift": [
+            SinkDefinition("NSRegularExpression(", 0.75, SecuritySink.EVAL, "Foundation NSRegularExpression"),
+            SinkDefinition("try NSRegularExpression(", 0.75, SecuritySink.EVAL, "Foundation NSRegularExpression throwing init"),
+        ],
+        # [20260305_FEATURE] Rust ReDoS sinks
+        "rust": [
+            SinkDefinition("Regex::new(", 0.75, SecuritySink.EVAL, "regex crate dynamic Regex"),
+            SinkDefinition("RegexSet::new(", 0.7, SecuritySink.EVAL, "regex crate RegexSet"),
+            SinkDefinition("Regex::is_match(", 0.6, SecuritySink.EVAL, "regex crate is_match"),
+            SinkDefinition("Regex::find(", 0.6, SecuritySink.EVAL, "regex crate find"),
         ],
     },
 }
@@ -955,8 +1431,9 @@ class UnifiedSinkDetector:
         Raises:
             ValueError: If language is not supported
         """
-        if language not in ["python", "java", "typescript", "javascript"]:
-            raise ValueError(f"Unsupported language: {language}")
+        # [20260304_FEATURE] Languages without defined sink patterns return [] gracefully.
+        # Sink patterns for go, c, cpp, csharp, kotlin, php, ruby, swift will be
+        # added incrementally; unknown languages are not rejected at this layer.
 
         # [20251228_BUGFIX] Return a list-like object with `.sinks` for compatibility.
         class _DetectedSinkList(list):

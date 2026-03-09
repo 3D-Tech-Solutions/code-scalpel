@@ -27,16 +27,20 @@ This directory contains Code Scalpel's **MCP server implementation**. It provide
 ## Available Tools (19 Stable + 4 Experimental)
 
 ### Code Extraction & Analysis (5)
+- Graph-oriented tools remain Python-first overall, with initial local
+    JavaScript/TypeScript parity in `get_call_graph`, `get_graph_neighborhood`,
+    and `get_cross_file_dependencies`. JS/TS method-node neighborhoods currently
+    rely on advanced resolution.
 - `extract_code` - Surgical symbol extraction with dependencies
 - `analyze_code` - Parse and extract code structure
 - `get_file_context` - Quick file overview
 - `get_symbol_references` - Find all symbol usages
-- `get_cross_file_dependencies` - Analyze import chains
+- `get_cross_file_dependencies` - Analyze Python-first import/dependency chains with an initial local JS/TS graph-backed slice
 
 ### Project Analysis (4)
-- `get_call_graph` - Build and trace function calls
+- `get_call_graph` - Build and trace Python-first function calls with initial JS/TS parity
 - `get_project_map` - Generate project structure map
-- `get_graph_neighborhood` - Extract k-hop subgraph
+- `get_graph_neighborhood` - Extract Python-first k-hop subgraph with initial JS/TS function parity and JS/TS method neighborhoods via advanced resolution
 - `crawl_project` - Project-wide analysis
 
 ### Security (5)

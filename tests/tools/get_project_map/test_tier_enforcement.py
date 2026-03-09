@@ -132,3 +132,94 @@ class TestTierTransitions:
         assert (
             result.total_files >= 100
         ), f"Pro tier should count all 120 files (unlimited), got {result.total_files}"
+
+    @pytest.mark.asyncio
+    async def test_typescript_project_map_preserves_tier_metadata(
+        self, community_server, pro_server, tmp_path
+    ):
+        """[20260307_TEST] JS/TS project-map slices should still expose tier metadata correctly."""
+        root = tmp_path / "ts_project_map_tiers"
+        src = root / "src"
+        src.mkdir(parents=True)
+
+        (src / "util.ts").write_text(
+            "export function helper(): number {\n    return 1\n}\n",
+            encoding="utf-8",
+        )
+        (src / "main.ts").write_text(
+            'import { helper } from "./util"\n\n'
+            "export function entry(): number {\n    return helper()\n}\n",
+            encoding="utf-8",
+        )
+
+        community_result = await community_server.get_project_map(
+            project_root=str(root), include_complexity=False
+        )
+        pro_result = await pro_server.get_project_map(
+            project_root=str(root), include_complexity=False
+        )
+
+        assert community_result.success is True
+        assert community_result.tier_applied == "community"
+        assert community_result.max_files_applied == 500
+        assert community_result.max_modules_applied == 100
+        assert community_result.languages.get("typescript") == 2
+
+        assert pro_result.success is True
+        assert pro_result.tier_applied == "pro"
+        assert pro_result.max_files_applied is None
+        assert pro_result.max_modules_applied == 1000
+        assert pro_result.languages.get("typescript") == 2
+
+    @pytest.mark.asyncio
+    async def test_java_project_map_preserves_tier_metadata(
+        self, community_server, pro_server, tmp_path
+    ):
+        """[20260308_TEST] Java project-map slices should still expose tier metadata correctly."""
+        root = tmp_path / "java_project_map_tiers"
+        package_dir = root / "demo"
+        package_dir.mkdir(parents=True)
+
+        (package_dir / "Helper.java").write_text(
+            "package demo;\n\n"
+            "public class Helper {\n"
+            "    public static void tool() {\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        (package_dir / "App.java").write_text(
+            "package demo;\n\n"
+            "import static demo.Helper.tool;\n\n"
+            "public class App {\n"
+            "    public static void entry() {\n"
+            "        tool();\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        community_result = await community_server.get_project_map(
+            project_root=str(root), include_complexity=False
+        )
+        pro_result = await pro_server.get_project_map(
+            project_root=str(root), include_complexity=False
+        )
+
+        assert community_result.success is True
+        assert community_result.tier_applied == "community"
+        assert community_result.max_files_applied == 500
+        assert community_result.max_modules_applied == 100
+        assert community_result.languages.get("java") == 2
+
+        community_modules = {module.path: module for module in community_result.modules}
+        assert "demo/App.java" in community_modules
+        assert "demo/Helper.java" in community_modules
+        assert "App.entry" in community_modules["demo/App.java"].functions
+        assert "Helper.tool" in community_modules["demo/Helper.java"].functions
+
+        assert pro_result.success is True
+        assert pro_result.tier_applied == "pro"
+        assert pro_result.max_files_applied is None
+        assert pro_result.max_modules_applied == 1000
+        assert pro_result.languages.get("java") == 2

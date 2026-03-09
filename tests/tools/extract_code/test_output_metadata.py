@@ -5,8 +5,12 @@ Tests for extract_code output metadata fields.
 for transparency about tier, language, and feature availability.
 """
 
+import sys
+from types import SimpleNamespace
+
 import pytest
 
+from code_scalpel.mcp.helpers import extraction_helpers
 from code_scalpel.mcp.models.core import ContextualExtractionResult
 from code_scalpel.mcp.tools.extraction import extract_code
 
@@ -82,6 +86,81 @@ function greet(name: string): string {
         assert result.success is True
         assert result.language_detected == "typescript"
         assert result.tier_applied in ("community", "pro", "enterprise")
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("language", "expected_language"),
+        [
+            (SimpleNamespace(name="GO"), "go"),
+            (SimpleNamespace(name="KOTLIN"), "kotlin"),
+            (SimpleNamespace(name="PHP"), "php"),
+            (SimpleNamespace(name="RUBY"), "ruby"),
+            (SimpleNamespace(name="SWIFT"), "swift"),
+            (SimpleNamespace(name="RUST"), "rust"),
+        ],
+    )
+    async def test_additional_polyglot_languages_include_metadata(
+        self, monkeypatch, language, expected_language
+    ):
+        # [20260306_TEST] Ensure newer polyglot extractors report canonical language metadata.
+        """Newer polyglot extractors should report the canonical detected language."""
+
+        class FakeExtractionResult:
+            success = True
+            error = None
+            code = "fn demo() {}"
+            token_estimate = 3
+            start_line = 1
+            end_line = 1
+            jsx_normalized = False
+            is_server_component = False
+            is_server_action = False
+            component_type = None
+
+        class FakeExtractor:
+            def __init__(self, *_args, **_kwargs):
+                pass
+
+            @classmethod
+            def from_file(cls, *_args, **_kwargs):
+                return cls()
+
+            def extract(self, *_args, **_kwargs):
+                return FakeExtractionResult()
+
+        class FakeLanguage:
+            PYTHON = object()
+            JAVASCRIPT = object()
+            TYPESCRIPT = object()
+            JAVA = object()
+            C = object()
+            CPP = object()
+            CSHARP = object()
+            GO = object()
+            KOTLIN = object()
+            PHP = object()
+            RUBY = object()
+            SWIFT = object()
+            RUST = object()
+
+        setattr(FakeLanguage, language.name, object())
+        fake_module = SimpleNamespace(Language=FakeLanguage, UnifiedExtractor=FakeExtractor)
+        monkeypatch.setitem(
+            sys.modules, "code_scalpel.surgery.unified_extractor", fake_module
+        )
+
+        result = await extraction_helpers._extract_polyglot(
+            target_type="function",
+            target_name="demo",
+            file_path=None,
+            code="ignored",
+            language=getattr(FakeLanguage, language.name),
+            include_token_estimate=True,
+        )
+
+        assert result.success is True
+        assert result.language_detected == expected_language
+        assert result.cross_file_deps_enabled is False
 
     @pytest.mark.asyncio
     async def test_metadata_in_error_responses(self):

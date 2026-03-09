@@ -587,14 +587,19 @@ class TestFalsePositiveRate:
 
 
 class TestUnsupportedLanguage:
-    """Test handling of unsupported languages."""
+    """Test handling of languages without defined sink patterns."""
 
-    def test_unsupported_language_raises_error(self):
-        """Unsupported language should raise ValueError."""
+    def test_unsupported_language_returns_empty(self):
+        """Languages without defined sink patterns return [] gracefully.
+
+        [20260304_FEATURE] No longer raises ValueError; unknown languages degrade
+        gracefully so that adding new language sink patterns never requires
+        changing this guard.
+        """
         detector = UnifiedSinkDetector()
 
-        with pytest.raises(ValueError, match="Unsupported language"):
-            detector.detect_sinks("some code", "rust", min_confidence=0.8)
+        result = detector.detect_sinks("some code", "rust", min_confidence=0.8)
+        assert result == []
 
 
 class TestSinkDefinitionValidation:

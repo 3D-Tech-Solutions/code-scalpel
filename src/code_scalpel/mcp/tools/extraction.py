@@ -76,7 +76,7 @@ async def extract_code(
         file_path (str, optional): Path to source file. Either file_path or code required.
         code (str, optional): Source code string. Either file_path or code required.
         language (str, optional): Programming language. Default: auto-detect.
-                       Supported: python, javascript, typescript, java, c, cpp, csharp, go
+                       Supported: python, javascript, typescript, java, c, cpp, csharp, go, kotlin, php, ruby, swift, rust
         include_context (bool): Include surrounding code context. Default: False.
         context_depth (int): Depth of context to include. Default: 1.
         include_cross_file_deps (bool): Include cross-file dependencies (Pro+ only). Default: False.

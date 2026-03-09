@@ -63,6 +63,11 @@ try:
 except (ImportError, NotImplementedError):
     SwiftParserAdapter = None  # type: ignore
 
+try:
+    from .rust_adapter import RustParserAdapter
+except (ImportError, NotImplementedError):
+    RustParserAdapter = None  # type: ignore
+
 
 __all__ = [
     "JavaScriptParserAdapter",
@@ -76,4 +81,5 @@ __all__ = [
     "RubyParserAdapter",
     # "PhpParserAdapter",  # [20260120_BUGFIX] Removed from __all__ - implementation not present
     "SwiftParserAdapter",
+    "RustParserAdapter",
 ]

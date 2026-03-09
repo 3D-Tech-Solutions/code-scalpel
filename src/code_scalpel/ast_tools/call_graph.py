@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import os
+import re
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -69,7 +70,7 @@ class CallGraphResult:
 
 class CallGraphBuilder:
     """
-    Builds a static call graph for a Python project.
+    Builds a static call graph for Python and supported polyglot projects.
     """
 
     def __init__(self, root_path: Path):
@@ -89,6 +90,50 @@ class CallGraphBuilder:
         self._js_imports_raw: Dict[str, Dict[str, tuple[str, str]]] = {}
         # Export index: file -> exported symbol names
         self._js_exports: Dict[str, Set[str]] = {}
+
+        # [20260307_FEATURE] Java get_call_graph foundation metadata for package/import resolution.
+        self._java_packages: Dict[str, str] = {}
+        self._java_imports_raw: Dict[str, list[str]] = {}
+        self._java_static_imports_raw: Dict[str, list[str]] = {}
+        self._java_types_by_fqcn: Dict[str, str] = {}
+        self._java_fqcn_to_local: Dict[str, str] = {}
+        self._java_simple_type_index: Dict[str, Set[str]] = {}
+        self._java_superclass_refs: Dict[str, str] = {}
+        self._java_field_types_by_class: Dict[str, Dict[str, str]] = {}
+        self._java_member_selectors_by_class: Dict[str, Dict[str, List[str]]] = {}
+        self._java_selector_return_types: Dict[str, str] = {}
+
+        # [20260307_FEATURE] Generic IR-backed get_call_graph fallback for the broader
+        # polyglot normalizer set. This provides local callable nodes and same-file
+        # call edges for languages that do not yet have handwritten graph resolvers.
+        self._ir_modules: Dict[str, object] = {}
+        # [20260308_FEATURE] Generic IR import and module indexes for cohort-1
+        # cross-file call graph resolution.
+        self._ir_languages: Dict[str, str] = {}
+        self._ir_import_bindings: Dict[str, Dict[str, tuple[str, str | None, bool]]] = {}
+        self._ir_files_by_module_key: Dict[str, Set[str]] = {}
+
+    _GENERIC_IR_EXTENSION_LANGUAGE_MAP: Dict[str, str] = {
+        ".c": "c",
+        ".h": "c",
+        ".cpp": "cpp",
+        ".cc": "cpp",
+        ".cxx": "cpp",
+        ".hpp": "cpp",
+        ".hxx": "cpp",
+        ".hh": "cpp",
+        ".cs": "csharp",
+        ".go": "go",
+        ".kt": "kotlin",
+        ".kts": "kotlin",
+        ".php": "php",
+        ".phtml": "php",
+        ".rb": "ruby",
+        ".rake": "ruby",
+        ".gemspec": "ruby",
+        ".swift": "swift",
+        ".rs": "rust",
+    }
 
     def build(self, advanced_resolution: bool = False) -> Dict[str, List[str]]:
         """Build the call graph.
@@ -110,6 +155,10 @@ class CallGraphBuilder:
                     continue
             elif suffix in {".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"}:
                 self._analyze_definitions_js_ts(file_path, rel_path)
+            elif suffix == ".java":
+                self._analyze_definitions_java(file_path, rel_path)
+            elif suffix in self._GENERIC_IR_EXTENSION_LANGUAGE_MAP:
+                self._analyze_definitions_ir(file_path, rel_path)
 
         # 2. Second pass: Analyze calls and resolve them
         graph: Dict[str, List[str]] = {}
@@ -137,6 +186,20 @@ class CallGraphBuilder:
                     advanced_resolution=advanced_resolution,
                 )
                 graph.update(file_calls)
+            elif suffix == ".java":
+                file_calls = self._analyze_calls_java(
+                    file_path,
+                    rel_path,
+                    advanced_resolution=advanced_resolution,
+                )
+                graph.update(file_calls)
+            elif suffix in self._GENERIC_IR_EXTENSION_LANGUAGE_MAP:
+                file_calls = self._analyze_calls_ir(
+                    file_path,
+                    rel_path,
+                    advanced_resolution=advanced_resolution,
+                )
+                graph.update(file_calls)
 
         return graph
 
@@ -159,6 +222,26 @@ class CallGraphBuilder:
                         ".py",
                         ".js",
                         ".jsx",
+                        ".java",
+                        ".c",
+                        ".h",
+                        ".cpp",
+                        ".cc",
+                        ".cxx",
+                        ".hpp",
+                        ".hxx",
+                        ".hh",
+                        ".cs",
+                        ".go",
+                        ".kt",
+                        ".kts",
+                        ".php",
+                        ".phtml",
+                        ".rb",
+                        ".rake",
+                        ".gemspec",
+                        ".swift",
+                        ".rs",
                         ".ts",
                         ".tsx",
                         ".mjs",
@@ -166,6 +249,1481 @@ class CallGraphBuilder:
                     )
                 ):
                     yield Path(root) / file
+
+    # [20260307_FEATURE] Load a normalizer-backed IR module for languages that use
+    # the shared polyglot IR but do not yet have dedicated call-graph resolvers.
+    def _load_ir_module(self, file_path: Path, rel_path: str):
+        """Return an IR module for a supported polyglot file, or None on failure."""
+        suffix = file_path.suffix.lower()
+        language = self._GENERIC_IR_EXTENSION_LANGUAGE_MAP.get(suffix)
+        if language is None:
+            return None
+
+        if rel_path in self._ir_modules:
+            return self._ir_modules[rel_path]
+
+        try:
+            from code_scalpel.ir import normalizers as ir_normalizers
+        except Exception:
+            return None
+
+        normalizer_name = {
+            "c": "CNormalizer",
+            "cpp": "CppNormalizer",
+            "csharp": "CSharpNormalizer",
+            "go": "GoNormalizer",
+            "kotlin": "KotlinNormalizer",
+            "php": "PHPNormalizer",
+            "ruby": "RubyNormalizer",
+            "swift": "SwiftNormalizer",
+            "rust": "RustNormalizer",
+        }.get(language)
+        if normalizer_name is None:
+            return None
+
+        normalizer_cls = getattr(ir_normalizers, normalizer_name, None)
+        if normalizer_cls is None:
+            return None
+
+        try:
+            code = file_path.read_text(encoding="utf-8")
+            module = normalizer_cls().normalize(code, filename=rel_path)
+        except Exception:
+            return None
+
+        self._ir_modules[rel_path] = module
+        return module
+
+    # [20260307_FEATURE] Shared IR traversal for call-graph fallbacks across the
+    # broader normalizer-backed language set.
+    def _iter_ir_child_nodes(self, value):
+        """Yield nested IR nodes from a value, list, or dict."""
+        try:
+            from code_scalpel.ir.nodes import IRNode
+        except Exception:
+            return
+
+        if isinstance(value, IRNode):
+            yield value
+            return
+        if isinstance(value, list):
+            for item in value:
+                yield from self._iter_ir_child_nodes(item)
+            return
+        if isinstance(value, dict):
+            for item in value.values():
+                yield from self._iter_ir_child_nodes(item)
+
+    # [20260308_FEATURE] Preserve receiver-backed method names for IR languages that
+    # encode methods outside class bodies, such as Go and Kotlin extensions.
+    def _extract_ir_receiver_name(self, function_node) -> str | None:
+        """Return a normalized receiver/type name from IR function metadata."""
+        raw_receiver = getattr(function_node, "_metadata", {}).get("receiver")
+        if not isinstance(raw_receiver, str) or not raw_receiver.strip():
+            return None
+
+        normalized = raw_receiver.strip()
+        normalized = normalized.strip("()")
+        normalized = normalized.replace("*", " ")
+        normalized = re.sub(r"\b(var|val|mut|const|ref|inout)\b", " ", normalized)
+        tokens = re.findall(r"[A-Za-z_][A-Za-z0-9_]*", normalized)
+        if not tokens:
+            return None
+        for token in reversed(tokens):
+            if token[:1].isupper():
+                return token
+        if len(tokens) >= 2:
+            return tokens[-1]
+        return None
+
+    # [20260308_FEATURE] Canonicalize generic IR callable names consistently across
+    # local and import-aware resolution.
+    def _qualify_ir_callable_name(
+        self, function_node, current_class: str | None = None
+    ) -> str | None:
+        """Return the canonical graph name for an IR function definition."""
+        name = getattr(function_node, "name", "")
+        if not name or name.startswith("<"):
+            return None
+        if current_class:
+            return f"{current_class}.{name}"
+        receiver_name = self._extract_ir_receiver_name(function_node)
+        if receiver_name:
+            return f"{receiver_name}.{name}"
+        return name
+
+    # [20260308_FEATURE] Flatten IR call targets so member calls participate in the
+    # shared generic resolver.
+    def _flatten_ir_callable_expr(self, expr) -> str | None:
+        """Return a dotted callee string from an IR expression when possible."""
+        try:
+            from code_scalpel.ir.nodes import IRAttribute, IRName
+        except Exception:
+            return None
+
+        if isinstance(expr, IRName):
+            return str(expr.id)
+        if isinstance(expr, IRAttribute):
+            base = self._flatten_ir_callable_expr(getattr(expr, "value", None))
+            if base:
+                return f"{base}.{expr.attr}"
+            if expr.attr:
+                return expr.attr
+        func_id = getattr(expr, "id", None)
+        if isinstance(func_id, str):
+            return func_id
+        attr_name = getattr(expr, "attr", None)
+        if isinstance(attr_name, str) and attr_name:
+            return attr_name
+        return None
+
+    # [20260308_FEATURE] Harvest IR imports so advanced generic resolution can map
+    # imported modules and symbols onto project files.
+    def _iter_ir_import_nodes(self, module):
+        """Yield top-level import nodes from a generic IR module."""
+        try:
+            from code_scalpel.ir.nodes import IRImport
+        except Exception:
+            return
+
+        for node in getattr(module, "body", []) or []:
+            if isinstance(node, IRImport):
+                yield node
+
+    # [20260308_FEATURE] Maintain a best-effort module key index for generic import
+    # resolution across the local project.
+    def _candidate_ir_module_keys(
+        self,
+        rel_path: str,
+        language: str,
+        import_module: str | None = None,
+        imported_name: str | None = None,
+    ) -> Set[str]:
+        """Return lookup keys for a file path or import spec."""
+        if import_module is None:
+            noext = Path(rel_path).with_suffix("").as_posix()
+            if not noext:
+                return set()
+            parts = [part for part in noext.split("/") if part and part != "index"]
+            if not parts:
+                parts = [Path(noext).stem]
+            candidates = {
+                "/".join(parts),
+                ".".join(parts),
+                "::".join(parts),
+                parts[-1],
+                f"./{parts[-1]}",
+            }
+            if language == "rust":
+                candidates |= {
+                    f"crate::{'::'.join(parts)}",
+                    f"crate::{parts[-1]}",
+                }
+            if language == "php":
+                candidates.add("\\".join(parts))
+            return {
+                item.strip("/")
+                for candidate in candidates
+                for item in {candidate, candidate.lower()}
+                if item.strip("/")
+            }
+
+        raw = import_module.strip().strip("\"'")
+        if not raw:
+            return set()
+        raw = raw.lstrip("./")
+        if raw.startswith("crate::"):
+            raw = raw[len("crate::") :]
+        if raw.startswith("self::"):
+            raw = raw[len("self::") :]
+        if raw.startswith("super::"):
+            raw = raw[len("super::") :]
+
+        variants = {
+            raw,
+            raw.replace("\\", "/"),
+            raw.replace("::", "/"),
+            raw.replace(".", "/"),
+            raw.replace("/", "."),
+            raw.replace("/", "::"),
+            raw.replace(".", "::"),
+        }
+
+        if imported_name:
+            imported_name = imported_name.strip("\\")
+            expanded: Set[str] = set()
+            for variant in list(variants):
+                clean = variant.strip("/")
+                if not clean:
+                    continue
+                expanded.add(clean)
+                expanded.add(f"{clean}/{imported_name}")
+                expanded.add(f"{clean}.{imported_name}")
+                expanded.add(f"{clean}::{imported_name}")
+                if language == "php":
+                    expanded.add(f"{clean}\\{imported_name}")
+            variants |= expanded
+
+        return {
+            item.strip("/")
+            for candidate in variants
+            for item in {candidate, candidate.lower()}
+            if item.strip("/")
+        }
+
+    # [20260308_FEATURE] Convert IR imports into alias bindings for advanced generic
+    # resolution while keeping lookups conservative.
+    def _build_ir_import_bindings(self, module, rel_path: str, language: str) -> None:
+        """Populate alias and module bindings for a generic IR module."""
+        bindings: Dict[str, tuple[str, str | None, bool]] = {}
+
+        for import_node in self._iter_ir_import_nodes(module) or []:
+            module_spec = getattr(import_node, "module", "") or ""
+            names = [name for name in getattr(import_node, "names", []) or [] if name]
+            alias = getattr(import_node, "alias", None)
+            if names:
+                for imported_name in names:
+                    local_name = alias or imported_name
+                    bindings[local_name] = (module_spec, imported_name, False)
+                continue
+
+            if alias:
+                bindings[alias] = (module_spec, None, True)
+
+            segments = [
+                segment
+                for segment in re.split(r"[./:\\\\]+", module_spec)
+                if segment and segment not in {"crate", "self", "super"}
+            ]
+            if not segments:
+                continue
+
+            basename = segments[-1]
+            bindings.setdefault(basename, (module_spec, None, True))
+
+            if language in {"rust", "kotlin", "php"} and len(segments) >= 2:
+                bindings[basename] = ("/".join(segments[:-1]), basename, False)
+
+        self._ir_import_bindings[rel_path] = bindings
+
+    # [20260308_FEATURE] Resolve generic import specs to project files using a
+    # best-effort module/file index.
+    def _match_ir_import_targets(
+        self,
+        rel_path: str,
+        local_name: str,
+        imported_name: str | None = None,
+    ) -> List[str]:
+        """Return candidate project files for a generic IR import binding."""
+        language = self._ir_languages.get(rel_path, "")
+        module_spec, binding_imported_name, _is_module_import = self._ir_import_bindings.get(
+            rel_path, {}
+        ).get(local_name, ("", None, False))
+        target_name = imported_name or binding_imported_name
+        if binding_imported_name:
+            target_name = binding_imported_name
+        if not module_spec:
+            return []
+
+        matches: Set[str] = set()
+        for key in self._candidate_ir_module_keys(
+            rel_path,
+            language,
+            import_module=module_spec,
+            imported_name=target_name,
+        ):
+            matches.update(self._ir_files_by_module_key.get(key, set()))
+
+        return sorted(candidate for candidate in matches if candidate != rel_path)
+
+    # [20260308_FEATURE] Resolve advanced generic import edges conservatively so the
+    # cohort-1 runtime slice only claims edges that map cleanly to known files.
+    def _resolve_ir_imported_callee(
+        self,
+        raw_callee: str,
+        rel_path: str,
+        current_class: str | None,
+    ) -> str | None:
+        """Resolve a generic IR callee through imported project files."""
+        normalized = self._normalize_ir_callee_name(raw_callee)
+        head, _sep, tail = normalized.partition(".")
+        candidate_files = self._match_ir_import_targets(rel_path, head, tail or None)
+
+        resolved: Set[str] = set()
+        for target_file in candidate_files:
+            target_definitions = self.definitions.get(target_file, set())
+            if not target_definitions:
+                continue
+
+            if tail:
+                exact_matches = {
+                    definition
+                    for definition in target_definitions
+                    if definition == tail or definition.endswith(f".{tail}")
+                }
+            else:
+                exact_matches = {definition for definition in target_definitions if definition == head}
+
+            if not exact_matches and not tail:
+                exact_matches = {
+                    definition
+                    for definition in target_definitions
+                    if definition.endswith(f".{head}")
+                }
+
+            if len(exact_matches) == 1:
+                resolved.add(f"{target_file}:{next(iter(exact_matches))}")
+
+        if len(resolved) == 1:
+            return next(iter(resolved))
+
+        if "." not in normalized:
+            imported_matches: Set[str] = set()
+            for local_name in self._ir_import_bindings.get(rel_path, {}):
+                for target_file in self._match_ir_import_targets(rel_path, local_name):
+                    target_definitions = self.definitions.get(target_file, set())
+                    exact_matches = {
+                        definition
+                        for definition in target_definitions
+                        if definition == normalized or definition.endswith(f".{normalized}")
+                    }
+                    if len(exact_matches) == 1:
+                        imported_matches.add(
+                            f"{target_file}:{next(iter(exact_matches))}"
+                        )
+            if len(imported_matches) == 1:
+                return next(iter(imported_matches))
+
+        if current_class and normalized.startswith(("self.", "this.")):
+            return None
+        return None
+
+    # [20260307_FEATURE] Extract callable details from a normalizer-backed IR module.
+    def _iter_ir_callable_details(self, module) -> list[tuple[str, int, int | None, bool]]:
+        """Return callable names and source locations from a generic IR module."""
+        try:
+            from code_scalpel.ir.nodes import IRClassDef, IRFunctionDef
+        except Exception:
+            return []
+
+        details: list[tuple[str, int, int | None, bool]] = []
+
+        def visit(nodes, current_class: str | None = None) -> None:
+            for node in nodes or []:
+                if isinstance(node, IRClassDef):
+                    qualified_class = (
+                        f"{current_class}.{node.name}" if current_class else node.name
+                    )
+                    visit(node.body, qualified_class)
+                elif isinstance(node, IRFunctionDef):
+                    qualified_name = self._qualify_ir_callable_name(node, current_class)
+                    if not qualified_name:
+                        continue
+                    line = getattr(getattr(node, "loc", None), "line", 0) or 0
+                    end_line = getattr(getattr(node, "loc", None), "end_line", None)
+                    is_entry = node.name in {"main", "Main"}
+                    details.append((qualified_name, line, end_line, is_entry))
+                    visit(node.body, current_class)
+
+        visit(getattr(module, "body", []))
+        return details
+
+    # [20260307_FEATURE] Populate same-file definitions from normalizer-backed IR modules.
+    def _analyze_definitions_ir(self, file_path: Path, rel_path: str) -> None:
+        """Extract callable definitions from a generic IR module."""
+        module = self._load_ir_module(file_path, rel_path)
+        if module is None:
+            return
+
+        language = getattr(module, "source_language", None) or self._GENERIC_IR_EXTENSION_LANGUAGE_MAP.get(
+            file_path.suffix.lower(), ""
+        )
+        self._ir_languages[rel_path] = language
+        for key in self._candidate_ir_module_keys(rel_path, language):
+            self._ir_files_by_module_key.setdefault(key, set()).add(rel_path)
+
+        definitions = {
+            callable_name
+            for callable_name, _line, _end_line, _is_entry in self._iter_ir_callable_details(module)
+        }
+        self.definitions[rel_path] = definitions
+        self.imports.setdefault(rel_path, {})
+        self._build_ir_import_bindings(module, rel_path, language)
+
+    # [20260307_FEATURE] Normalize IR call names so generic local resolution can map
+    # method receivers consistently across languages.
+    def _normalize_ir_callee_name(self, callee: str) -> str:
+        """Canonicalize a raw IR callee name for same-file lookup."""
+        normalized = callee.replace("::", ".").replace("->", ".")
+        if normalized.startswith("__new__"):
+            return normalized[len("__new__") :]
+        return normalized
+
+    # [20260307_FEATURE] Resolve same-file callees for IR-backed fallback languages.
+    def _resolve_ir_callee(
+        self,
+        raw_callee: str,
+        rel_path: str,
+        current_class: str | None,
+        advanced_resolution: bool = False,
+    ) -> str:
+        """Resolve a generic IR callee against same-file definitions."""
+        definitions = self.definitions.get(rel_path, set())
+        normalized = self._normalize_ir_callee_name(raw_callee)
+
+        if current_class and normalized.startswith(("self.", "this.")):
+            method_name = normalized.split(".", 1)[1]
+            candidate = f"{current_class}.{method_name}"
+            if candidate in definitions:
+                return f"{rel_path}:{candidate}"
+
+        if current_class and "." not in normalized:
+            candidate = f"{current_class}.{normalized}"
+            if candidate in definitions:
+                return f"{rel_path}:{candidate}"
+
+        if normalized in definitions:
+            return f"{rel_path}:{normalized}"
+
+        if "." in normalized:
+            if normalized in definitions:
+                return f"{rel_path}:{normalized}"
+            _receiver, member = normalized.rsplit(".", 1)
+            suffix_matches = sorted(
+                definition
+                for definition in definitions
+                if definition.endswith(f".{member}")
+            )
+            if len(suffix_matches) == 1:
+                return f"{rel_path}:{suffix_matches[0]}"
+        else:
+            suffix_matches = sorted(
+                definition
+                for definition in definitions
+                if definition.endswith(f".{normalized}")
+            )
+            if len(suffix_matches) == 1:
+                return f"{rel_path}:{suffix_matches[0]}"
+
+        if advanced_resolution:
+            imported = self._resolve_ir_imported_callee(
+                raw_callee, rel_path, current_class
+            )
+            if imported:
+                return imported
+
+        return normalized
+
+    # [20260307_FEATURE] Generic local-call graph extraction for normalizer-backed
+    # languages beyond Python, JS/TS, and Java.
+    def _analyze_calls_ir(
+        self,
+        file_path: Path,
+        rel_path: str,
+        advanced_resolution: bool = False,
+    ) -> Dict[str, List[str]]:
+        """Extract same-file call edges from a normalizer-backed IR module."""
+        try:
+            from code_scalpel.ir.nodes import IRCall, IRClassDef, IRFunctionDef
+        except Exception:
+            return {}
+
+        module = self._load_ir_module(file_path, rel_path)
+        if module is None:
+            return {}
+
+        file_graph: Dict[str, List[str]] = {}
+
+        def callee_name(call_node: IRCall) -> str | None:
+            return self._flatten_ir_callable_expr(getattr(call_node, "func", None))
+
+        def collect_calls(node, current_class: str | None, calls: list[str]) -> None:
+            if isinstance(node, IRFunctionDef):
+                return
+            if isinstance(node, IRClassDef):
+                return
+            if isinstance(node, IRCall):
+                raw = callee_name(node)
+                if raw:
+                    calls.append(
+                        self._resolve_ir_callee(
+                            raw,
+                            rel_path,
+                            current_class,
+                            advanced_resolution=advanced_resolution,
+                        )
+                    )
+            for child in self._iter_ir_child_nodes(getattr(node, "__dict__", {})):
+                collect_calls(child, current_class, calls)
+
+        def visit(nodes, current_class: str | None = None) -> None:
+            for node in nodes or []:
+                if isinstance(node, IRClassDef):
+                    qualified_class = (
+                        f"{current_class}.{node.name}" if current_class else node.name
+                    )
+                    visit(node.body, qualified_class)
+                elif isinstance(node, IRFunctionDef):
+                    qualified_name = self._qualify_ir_callable_name(node, current_class)
+                    if not qualified_name:
+                        continue
+                    caller_key = f"{rel_path}:{qualified_name}"
+                    calls: list[str] = []
+                    for body_node in node.body:
+                        collect_calls(body_node, current_class, calls)
+                    file_graph[caller_key] = calls
+                    visit(node.body, current_class)
+
+        visit(getattr(module, "body", []))
+        return file_graph
+
+    # [20260307_FEATURE] Builder-first Java graph substrate for Stage 10 runtime work.
+    def _load_java_parse_result(self, file_path: Path):
+        """Parse a Java file and return the parser plus detailed result."""
+        try:
+            from code_scalpel.code_parsers.java_parsers.java_parser_treesitter import (
+                JavaParser,
+            )
+        except Exception:
+            return None, None
+
+        try:
+            code = file_path.read_text(encoding="utf-8")
+        except Exception:
+            return None, None
+
+        try:
+            parser = JavaParser()
+            result = parser.parse_detailed(code)
+        except Exception:
+            return None, None
+
+        return parser, result
+
+    def _normalize_java_selector_type(self, type_name: str | None) -> str:
+        """Normalize a Java type name for selector and overload matching."""
+        if not type_name:
+            return "?"
+        normalized = re.sub(r"\s+", "", type_name)
+        normalized = re.sub(
+            r"([A-Za-z_$][\w$]*\.)+([A-Za-z_$][\w$]*(?:\[\])*)",
+            r"\2",
+            normalized,
+        )
+        return normalized or "?"
+
+    def _build_java_selector(
+        self,
+        qualified_owner: str,
+        member_name: str,
+        parameters: list[object] | None,
+        overloaded_names: set[str],
+    ) -> str:
+        """Return the canonical Java selector for a method or constructor."""
+        if member_name not in overloaded_names:
+            return f"{qualified_owner}.{member_name}"
+        normalized_parameters = ", ".join(
+            self._normalize_java_selector_type(getattr(parameter, "param_type", None))
+            for parameter in (parameters or [])
+        )
+        return f"{qualified_owner}.{member_name}({normalized_parameters})"
+
+    def _java_selector_arity(self, selector: str) -> int | None:
+        """Return selector arity for a signature-qualified Java callable."""
+        if "(" not in selector or not selector.endswith(")"):
+            return None
+        argument_block = selector.rsplit("(", 1)[1][:-1]
+        if not argument_block:
+            return 0
+        return len([part for part in argument_block.split(",") if part.strip()])
+
+    def _select_java_selector(
+        self,
+        selectors: list[str],
+        argument_types: list[str] | None = None,
+    ) -> str | None:
+        """Choose the best Java selector using exact signature then arity fallback."""
+        if not selectors:
+            return None
+        if len(selectors) == 1:
+            return selectors[0]
+
+        normalized_arguments = [
+            self._normalize_java_selector_type(argument_type)
+            for argument_type in (argument_types or [])
+        ]
+        if normalized_arguments:
+            exact_suffix = f"({', '.join(normalized_arguments)})"
+            exact_matches = [
+                selector for selector in selectors if selector.endswith(exact_suffix)
+            ]
+            if len(exact_matches) == 1:
+                return exact_matches[0]
+
+            arity_matches = [
+                selector
+                for selector in selectors
+                if self._java_selector_arity(selector) == len(normalized_arguments)
+            ]
+            if len(arity_matches) == 1:
+                return arity_matches[0]
+
+        unsuffixed = [selector for selector in selectors if "(" not in selector]
+        if len(unsuffixed) == 1:
+            return unsuffixed[0]
+
+        return None
+
+    def _iter_java_callable_metadata(
+        self, result
+    ) -> list[tuple[str, str, str, int, int | None, bool, str | None]]:
+        """Return canonical Java callable metadata from a parse result."""
+        callables: list[tuple[str, str, str, int, int | None, bool, str | None]] = []
+
+        def add_class(class_info, prefix: str | None = None) -> None:
+            qualified_class = (
+                f"{prefix}.{class_info.name}" if prefix else class_info.name
+            )
+            overloaded_names: dict[str, int] = {}
+            for method in getattr(class_info, "methods", []) or []:
+                member_name = class_info.name if getattr(method, "is_constructor", False) else method.name
+                overloaded_names[member_name] = overloaded_names.get(member_name, 0) + 1
+            overloaded_member_names = {
+                member_name
+                for member_name, count in overloaded_names.items()
+                if count > 1
+            }
+
+            for method in getattr(class_info, "methods", []) or []:
+                member_name = class_info.name if getattr(method, "is_constructor", False) else method.name
+                callable_name = self._build_java_selector(
+                    qualified_class,
+                    member_name,
+                    getattr(method, "parameters", []),
+                    overloaded_member_names,
+                )
+                is_entry_point = method.name == "main"
+                if getattr(method, "is_constructor", False):
+                    is_entry_point = False
+                callables.append(
+                    (
+                        qualified_class,
+                        member_name,
+                        callable_name,
+                        method.line,
+                        method.end_line or None,
+                        is_entry_point,
+                        qualified_class.split(".")[-1]
+                        if getattr(method, "is_constructor", False)
+                        else getattr(method, "return_type", None),
+                    )
+                )
+
+            for inner_class in getattr(class_info, "inner_classes", []) or []:
+                add_class(inner_class, qualified_class)
+
+            for inner_record in getattr(class_info, "inner_records", []) or []:
+                add_record(inner_record, qualified_class)
+
+        def add_record(record_info, prefix: str | None = None) -> None:
+            qualified_record = (
+                f"{prefix}.{record_info.name}" if prefix else record_info.name
+            )
+            overloaded_names: dict[str, int] = {}
+            for method in getattr(record_info, "methods", []) or []:
+                member_name = record_info.name if getattr(method, "is_constructor", False) else method.name
+                overloaded_names[member_name] = overloaded_names.get(member_name, 0) + 1
+            overloaded_member_names = {
+                member_name
+                for member_name, count in overloaded_names.items()
+                if count > 1
+            }
+            for method in getattr(record_info, "methods", []) or []:
+                member_name = record_info.name if getattr(method, "is_constructor", False) else method.name
+                callable_name = self._build_java_selector(
+                    qualified_record,
+                    member_name,
+                    getattr(method, "parameters", []),
+                    overloaded_member_names,
+                )
+                callables.append(
+                    (
+                        qualified_record,
+                        member_name,
+                        callable_name,
+                        method.line,
+                        method.end_line or None,
+                        False,
+                        qualified_record.split(".")[-1]
+                        if getattr(method, "is_constructor", False)
+                        else getattr(method, "return_type", None),
+                    )
+                )
+
+        for class_info in getattr(result, "classes", []) or []:
+            add_class(class_info)
+
+        for record_info in getattr(result, "records", []) or []:
+            add_record(record_info)
+
+        return callables
+
+    # [20260307_FEATURE] Canonical Java callable details for graph node emission.
+    def _iter_java_callable_details(self, result) -> list[tuple[str, int, int | None, bool]]:
+        """Return canonical Java callable details from a parse result."""
+        return [
+            (selector, line, end_line, is_entry_point)
+            for _owner, _member_name, selector, line, end_line, is_entry_point, _return_type in self._iter_java_callable_metadata(result)
+        ]
+
+    def _get_java_selectors_for_member(
+        self,
+        file_path: str,
+        owner_name: str,
+        member_name: str,
+    ) -> list[str]:
+        """Return overload-aware selectors for a member on a given Java owner."""
+        return list(
+            self._java_member_selectors_by_class
+            .get(f"{file_path}:{owner_name}", {})
+            .get(member_name, [])
+        )
+
+    def _get_java_file_local_member_matches(
+        self,
+        file_path: str,
+        member_name: str,
+        argument_types: list[str] | None = None,
+    ) -> str | None:
+        """Return a unique file-local Java member match for a bare method name."""
+        matches: list[str] = []
+        for class_key, member_map in self._java_member_selectors_by_class.items():
+            if not class_key.startswith(f"{file_path}:"):
+                continue
+            matches.extend(member_map.get(member_name, []))
+        selected = self._select_java_selector(sorted(matches), argument_types)
+        return f"{file_path}:{selected}" if selected else None
+
+    # [20260307_FEATURE] Track canonical Java type names for package/import resolution.
+    def _iter_java_type_names(self, result) -> list[str]:
+        """Return canonical Java type names from a parse result."""
+        type_names: list[str] = []
+
+        def add_class(class_info, prefix: str | None = None) -> None:
+            qualified_class = (
+                f"{prefix}.{class_info.name}" if prefix else class_info.name
+            )
+            type_names.append(qualified_class)
+
+            for inner_class in getattr(class_info, "inner_classes", []) or []:
+                add_class(inner_class, qualified_class)
+
+            for inner_record in getattr(class_info, "inner_records", []) or []:
+                add_record(inner_record, qualified_class)
+
+        def add_record(record_info, prefix: str | None = None) -> None:
+            qualified_record = (
+                f"{prefix}.{record_info.name}" if prefix else record_info.name
+            )
+            type_names.append(qualified_record)
+
+        for class_info in getattr(result, "classes", []) or []:
+            add_class(class_info)
+
+        for record_info in getattr(result, "records", []) or []:
+            add_record(record_info)
+
+        return type_names
+
+    # [20260307_FEATURE] Resolve Java type references for Pro/Enterprise cross-file call graph edges.
+    def _resolve_java_type_reference(
+        self,
+        current_file: str,
+        type_name: str,
+    ) -> tuple[str | None, str | None]:
+        """Resolve a Java type reference to its defining file and fully-qualified name."""
+        if not type_name:
+            return None, None
+
+        imports = self.imports.get(current_file, {})
+        current_package = self._java_packages.get(current_file, "")
+        candidates: list[str] = []
+        seen: set[str] = set()
+
+        def add_candidate(fqcn: str) -> None:
+            if fqcn in self._java_types_by_fqcn and fqcn not in seen:
+                seen.add(fqcn)
+                candidates.append(fqcn)
+
+        add_candidate(type_name)
+
+        if "." in type_name:
+            head, tail = type_name.split(".", 1)
+            imported = imports.get(head)
+            if imported:
+                add_candidate(f"{imported}.{tail}")
+            if current_package:
+                add_candidate(f"{current_package}.{type_name}")
+        else:
+            imported = imports.get(type_name)
+            if imported:
+                add_candidate(imported)
+            if current_package:
+                add_candidate(f"{current_package}.{type_name}")
+            for fqcn in sorted(self._java_simple_type_index.get(type_name, set())):
+                add_candidate(fqcn)
+
+        if len(candidates) != 1:
+            return None, None
+
+        fqcn = candidates[0]
+        return self._java_types_by_fqcn.get(fqcn), fqcn
+
+    # [20260307_FEATURE] Resolve Java static imports to canonical call graph nodes.
+    def _resolve_java_static_import(self, current_file: str, member_name: str) -> str | None:
+        """Resolve a Java static import to a canonical call graph node."""
+        return self._resolve_java_static_import_with_args(current_file, member_name, None)
+
+    def _resolve_java_static_import_with_args(
+        self,
+        current_file: str,
+        member_name: str,
+        argument_types: list[str] | None,
+    ) -> str | None:
+        """Resolve a Java static import to a canonical call graph node with overload awareness."""
+        for static_import in self._java_static_imports_raw.get(current_file, []):
+            if static_import.endswith(".*"):
+                type_fqcn = static_import[:-2]
+                target_file = self._java_types_by_fqcn.get(type_fqcn)
+                local_type = self._java_fqcn_to_local.get(type_fqcn)
+                if not target_file or not local_type:
+                    continue
+                selector = self._select_java_selector(
+                    self._get_java_selectors_for_member(target_file, local_type, member_name),
+                    argument_types,
+                )
+                if selector:
+                    return f"{target_file}:{selector}"
+                continue
+
+            if "." not in static_import:
+                continue
+
+            type_fqcn, imported_member = static_import.rsplit(".", 1)
+            if imported_member != member_name:
+                continue
+
+            target_file = self._java_types_by_fqcn.get(type_fqcn)
+            local_type = self._java_fqcn_to_local.get(type_fqcn)
+            if not target_file or not local_type:
+                continue
+
+            selector = self._select_java_selector(
+                self._get_java_selectors_for_member(target_file, local_type, member_name),
+                argument_types,
+            )
+            if selector:
+                return f"{target_file}:{selector}"
+
+        return None
+
+    # [20260307_FEATURE] Resolve Java field-backed instance members for get_call_graph advanced resolution.
+    def _resolve_java_field_type(
+        self,
+        current_file: str,
+        current_class: str,
+        field_name: str,
+    ) -> str | None:
+        """Resolve a field name to its declared Java type within a class hierarchy."""
+        visited: set[str] = set()
+        next_type: str | None = current_class
+
+        while next_type and next_type not in visited:
+            visited.add(next_type)
+            class_key = f"{current_file}:{next_type}"
+            field_types = self._java_field_types_by_class.get(class_key, {})
+            if field_name in field_types:
+                return field_types[field_name]
+
+            _, next_fqcn = self._resolve_java_type_reference(current_file, next_type)
+            if not next_fqcn:
+                break
+            next_type = self._java_superclass_refs.get(next_fqcn)
+
+        return None
+
+    # [20260307_FEATURE] Walk Java inheritance for get_call_graph advanced resolution.
+    def _resolve_java_member_on_type(
+        self,
+        current_file: str,
+        type_name: str,
+        member_name: str,
+        argument_types: list[str] | None = None,
+    ) -> str | None:
+        """Resolve a Java member on a type or one of its superclasses."""
+        target_file: str | None
+        target_fqcn: str | None
+
+        if type_name in self._java_types_by_fqcn:
+            target_fqcn = type_name
+            target_file = self._java_types_by_fqcn.get(type_name)
+        else:
+            target_file, target_fqcn = self._resolve_java_type_reference(
+                current_file,
+                type_name,
+            )
+
+        visited: set[str] = set()
+        while target_file and target_fqcn and target_fqcn not in visited:
+            visited.add(target_fqcn)
+            local_type = self._java_fqcn_to_local.get(target_fqcn)
+            if local_type:
+                selector = self._select_java_selector(
+                    self._get_java_selectors_for_member(target_file, local_type, member_name),
+                    argument_types,
+                )
+                if selector:
+                    return f"{target_file}:{selector}"
+
+            superclass_ref = self._java_superclass_refs.get(target_fqcn)
+            if not superclass_ref:
+                break
+
+            target_file, target_fqcn = self._resolve_java_type_reference(
+                target_file,
+                superclass_ref,
+            )
+
+        return None
+
+    # [20260307_FEATURE] Populate Java definitions so get_call_graph can emit canonical Java nodes.
+    def _analyze_definitions_java(self, file_path: Path, rel_path: str) -> None:
+        """Extract Java class and callable definitions."""
+        _, result = self._load_java_parse_result(file_path)
+        if result is None:
+            return
+
+        package_name = (getattr(result, "package", None) or "").strip()
+        self._java_packages[rel_path] = package_name
+        self._java_imports_raw[rel_path] = list(getattr(result, "imports", []) or [])
+        self._java_static_imports_raw[rel_path] = list(
+            getattr(result, "static_imports", []) or []
+        )
+
+        definitions: Set[str] = set()
+        member_selectors_by_class: Dict[str, Dict[str, List[str]]] = {}
+
+        def add_class(class_info, prefix: str | None = None) -> None:
+            qualified_class = (
+                f"{prefix}.{class_info.name}" if prefix else class_info.name
+            )
+            definitions.add(qualified_class)
+            fqcn = f"{package_name}.{qualified_class}" if package_name else qualified_class
+            if getattr(class_info, "superclass", None):
+                self._java_superclass_refs[fqcn] = class_info.superclass
+            self._java_field_types_by_class[f"{rel_path}:{qualified_class}"] = {
+                field.name: field.field_type
+                for field in getattr(class_info, "fields", []) or []
+                if getattr(field, "name", None) and getattr(field, "field_type", None)
+            }
+            for inner_class in getattr(class_info, "inner_classes", []) or []:
+                add_class(inner_class, qualified_class)
+            for inner_record in getattr(class_info, "inner_records", []) or []:
+                add_record(inner_record, qualified_class)
+
+        def add_record(record_info, prefix: str | None = None) -> None:
+            qualified_record = (
+                f"{prefix}.{record_info.name}" if prefix else record_info.name
+            )
+            definitions.add(qualified_record)
+
+        for class_info in getattr(result, "classes", []) or []:
+            add_class(class_info)
+
+        for record_info in getattr(result, "records", []) or []:
+            add_record(record_info)
+
+        for owner_name, member_name, selector, _line, _end_line, _is_entry, return_type in self._iter_java_callable_metadata(result):
+            definitions.add(selector)
+            member_selectors_by_class.setdefault(f"{rel_path}:{owner_name}", {}).setdefault(
+                member_name, []
+            ).append(selector)
+            if return_type:
+                self._java_selector_return_types[
+                    f"{rel_path}:{selector}"
+                ] = self._normalize_java_selector_type(return_type)
+
+        self.definitions[rel_path] = definitions
+        self._java_member_selectors_by_class.update(member_selectors_by_class)
+        self.imports[rel_path] = {
+            imported_type.split(".")[-1]: imported_type
+            for imported_type in self._java_imports_raw.get(rel_path, [])
+            if imported_type
+        }
+
+        for local_type in self._iter_java_type_names(result):
+            fqcn = f"{package_name}.{local_type}" if package_name else local_type
+            self._java_types_by_fqcn[fqcn] = rel_path
+            self._java_fqcn_to_local[fqcn] = local_type
+            self._java_simple_type_index.setdefault(local_type, set()).add(fqcn)
+            self._java_simple_type_index.setdefault(local_type.split(".")[-1], set()).add(
+                fqcn
+            )
+
+    # [20260307_FEATURE] Resolve minimal Java intra-file calls against canonical Class.method nodes.
+    def _analyze_calls_java(
+        self,
+        file_path: Path,
+        rel_path: str,
+        advanced_resolution: bool = False,
+    ) -> Dict[str, List[str]]:
+        """Extract Java method calls and resolve canonical same-file or cross-file callees."""
+        parser, result = self._load_java_parse_result(file_path)
+        if parser is None or result is None or getattr(parser, "_tree", None) is None:
+            return {}
+
+        definitions = self.definitions.get(rel_path, set())
+        file_graph: Dict[str, List[str]] = {}
+        root = parser._tree.root_node
+
+        java_type_node_types = {
+            "type_identifier",
+            "scoped_type_identifier",
+            "generic_type",
+            "array_type",
+            "integral_type",
+            "floating_point_type",
+            "boolean_type",
+        }
+
+        def get_declared_type(node) -> str | None:
+            for child in getattr(node, "children", []) or []:
+                if child.type in java_type_node_types:
+                    return parser._get_text(child)
+            return None
+
+        def collect_var_types(node) -> dict[str, str]:
+            var_types: dict[str, str] = {}
+
+            def visit(cur) -> None:
+                if cur.type in {"formal_parameter", "spread_parameter"}:
+                    declared_type = get_declared_type(cur)
+                    name_node = parser._find_child_by_type(cur, "identifier")
+                    if declared_type and name_node is not None:
+                        var_types[parser._get_text(name_node)] = declared_type
+                elif cur.type == "local_variable_declaration":
+                    declared_type = get_declared_type(cur)
+                    if declared_type:
+                        for declarator in parser._find_children_by_type(
+                            cur, "variable_declarator"
+                        ):
+                            name_node = parser._find_child_by_type(
+                                declarator, "identifier"
+                            )
+                            if name_node is not None:
+                                var_types[parser._get_text(name_node)] = declared_type
+
+                for child in getattr(cur, "children", []) or []:
+                    if getattr(child, "is_named", False):
+                        visit(child)
+
+            visit(node)
+            return var_types
+
+        # [20260308_FEATURE] Infer Java expression types for casts and chained receivers so overload resolution can use the same shared selector runtime.
+        def infer_expression_type(
+            node,
+            current_class: str,
+            var_types: dict[str, str],
+        ) -> str:
+            if node is None:
+                return "?"
+
+            node_text = parser._get_text(node).strip()
+            node_type = getattr(node, "type", "")
+
+            if node_type in {
+                "decimal_integer_literal",
+                "hex_integer_literal",
+                "octal_integer_literal",
+                "binary_integer_literal",
+            }:
+                return "int"
+            if node_type in {
+                "decimal_floating_point_literal",
+                "hex_floating_point_literal",
+            }:
+                return "double"
+            if node_type == "string_literal":
+                return "String"
+            if node_type == "character_literal":
+                return "char"
+            if node_text in {"true", "false"}:
+                return "boolean"
+            if node_text == "null":
+                return "null"
+
+            if node_type == "identifier":
+                return self._normalize_java_selector_type(
+                    var_types.get(node_text)
+                    or self._resolve_java_field_type(
+                        rel_path,
+                        current_class,
+                        node_text,
+                    )
+                    or "?"
+                )
+
+            if node_type == "object_creation_expression":
+                type_node = node.child_by_field_name("type")
+                return self._normalize_java_selector_type(
+                    parser._get_text(type_node) if type_node else "?"
+                )
+
+            if node_type == "parenthesized_expression":
+                for child in getattr(node, "children", []) or []:
+                    if getattr(child, "is_named", False):
+                        return infer_expression_type(child, current_class, var_types)
+                return "?"
+
+            if node_type == "cast_expression":
+                for child in getattr(node, "children", []) or []:
+                    if getattr(child, "type", "") in java_type_node_types:
+                        return self._normalize_java_selector_type(parser._get_text(child))
+                return "?"
+
+            if node_type == "method_invocation":
+                resolved_callee = resolve_method_invocation(node, current_class, var_types)
+                return self._java_selector_return_types.get(resolved_callee, "?")
+
+            return "?"
+
+        def infer_argument_types(node, current_class: str, var_types: dict[str, str]) -> list[str]:
+            argument_list = parser._find_child_by_type(node, "argument_list")
+            if argument_list is None:
+                return []
+
+            inferred_types: list[str] = []
+            for child in getattr(argument_list, "children", []) or []:
+                if not getattr(child, "is_named", False):
+                    continue
+                inferred_types.append(
+                    infer_expression_type(child, current_class, var_types)
+                )
+
+            return inferred_types
+
+        selector_by_line: Dict[tuple[str, int, bool], str] = {}
+        for owner_name, member_name, selector, line, _end_line, _is_entry, _return_type in self._iter_java_callable_metadata(result):
+            is_constructor = member_name == owner_name.split(".")[-1]
+            selector_by_line[(owner_name, line, is_constructor)] = selector
+
+        def resolve_callee(
+            raw_callee: str,
+            current_class: str,
+            var_types: dict[str, str],
+            argument_types: list[str] | None = None,
+        ) -> str:
+            if not raw_callee:
+                return raw_callee
+
+            if raw_callee.startswith("this."):
+                method_name = raw_callee.split(".", 1)[1]
+                selector = self._select_java_selector(
+                    self._get_java_selectors_for_member(rel_path, current_class, method_name),
+                    argument_types,
+                )
+                if selector:
+                    return f"{rel_path}:{selector}"
+                if advanced_resolution:
+                    inherited = self._resolve_java_member_on_type(
+                        rel_path,
+                        current_class,
+                        method_name,
+                        argument_types,
+                    )
+                    if inherited:
+                        return inherited
+
+            if "." not in raw_callee:
+                local_selector = self._select_java_selector(
+                    self._get_java_selectors_for_member(rel_path, current_class, raw_callee),
+                    argument_types,
+                )
+                if local_selector:
+                    return f"{rel_path}:{local_selector}"
+
+                constructor_selector = self._select_java_selector(
+                    self._get_java_selectors_for_member(rel_path, raw_callee, raw_callee),
+                    argument_types,
+                )
+                if constructor_selector:
+                    return f"{rel_path}:{constructor_selector}"
+
+                if raw_callee in definitions:
+                    return f"{rel_path}:{raw_callee}"
+
+                suffix_match = self._get_java_file_local_member_matches(
+                    rel_path,
+                    raw_callee,
+                    argument_types,
+                )
+                if suffix_match:
+                    return suffix_match
+
+                if advanced_resolution:
+                    inherited = self._resolve_java_member_on_type(
+                        rel_path,
+                        current_class,
+                        raw_callee,
+                        argument_types,
+                    )
+                    if inherited:
+                        return inherited
+
+                    static_target = self._resolve_java_static_import_with_args(
+                        rel_path,
+                        raw_callee,
+                        argument_types,
+                    )
+                    if static_target:
+                        return static_target
+
+                    target_file, target_fqcn = self._resolve_java_type_reference(
+                        rel_path,
+                        raw_callee,
+                    )
+                    local_type = (
+                        self._java_fqcn_to_local.get(target_fqcn)
+                        if target_fqcn
+                        else None
+                    )
+                    if target_file and local_type:
+                        constructor_selector = self._select_java_selector(
+                            self._get_java_selectors_for_member(
+                                target_file,
+                                local_type,
+                                local_type.split(".")[-1],
+                            ),
+                            argument_types,
+                        )
+                        if constructor_selector:
+                            return f"{target_file}:{constructor_selector}"
+
+                return raw_callee
+
+            receiver, member = raw_callee.rsplit(".", 1)
+            if receiver == "this":
+                selector = self._select_java_selector(
+                    self._get_java_selectors_for_member(rel_path, current_class, member),
+                    argument_types,
+                )
+                if selector:
+                    return f"{rel_path}:{selector}"
+                if advanced_resolution:
+                    inherited = self._resolve_java_member_on_type(
+                        rel_path,
+                        current_class,
+                        member,
+                        argument_types,
+                    )
+                    if inherited:
+                        return inherited
+
+            if receiver.startswith("this.") and advanced_resolution:
+                field_name = receiver.split(".", 1)[1]
+                field_type = self._resolve_java_field_type(
+                    rel_path,
+                    current_class,
+                    field_name,
+                )
+                if field_type:
+                    inferred = self._resolve_java_member_on_type(
+                        rel_path,
+                        field_type,
+                        member,
+                        argument_types,
+                    )
+                    if inferred:
+                        return inferred
+
+            if receiver == "super" and advanced_resolution:
+                inherited = self._resolve_java_member_on_type(
+                    rel_path,
+                    current_class,
+                    member,
+                    argument_types,
+                )
+                if inherited:
+                    return inherited
+
+            selector = self._select_java_selector(
+                self._get_java_selectors_for_member(rel_path, receiver, member),
+                argument_types,
+            )
+            if selector:
+                return f"{rel_path}:{selector}"
+
+            if advanced_resolution:
+                if receiver in var_types:
+                    inferred = self._resolve_java_member_on_type(
+                        rel_path,
+                        var_types[receiver],
+                        member,
+                        argument_types,
+                    )
+                    if inferred:
+                        return inferred
+
+                field_type = self._resolve_java_field_type(
+                    rel_path,
+                    current_class,
+                    receiver,
+                )
+                if field_type:
+                    inferred = self._resolve_java_member_on_type(
+                        rel_path,
+                        field_type,
+                        member,
+                        argument_types,
+                    )
+                    if inferred:
+                        return inferred
+
+                target_file, target_fqcn = self._resolve_java_type_reference(
+                    rel_path,
+                    receiver,
+                )
+                local_type = (
+                    self._java_fqcn_to_local.get(target_fqcn)
+                    if target_fqcn
+                    else None
+                )
+                if target_file and local_type:
+                    selector = self._select_java_selector(
+                        self._get_java_selectors_for_member(target_file, local_type, member),
+                        argument_types,
+                    )
+                    if selector:
+                        return f"{target_file}:{selector}"
+
+            return raw_callee
+
+        def resolve_method_invocation(
+            node,
+            current_class: str,
+            var_types: dict[str, str],
+        ) -> str:
+            name_node = node.child_by_field_name("name")
+            object_node = node.child_by_field_name("object")
+            method_name = parser._get_text(name_node) if name_node else ""
+            receiver = parser._get_text(object_node) if object_node else ""
+            raw_callee = f"{receiver}.{method_name}" if receiver else method_name
+            argument_types = infer_argument_types(node, current_class, var_types)
+
+            if advanced_resolution and object_node is not None and method_name:
+                receiver_type = infer_expression_type(
+                    object_node,
+                    current_class,
+                    var_types,
+                )
+                if receiver_type not in {"?", "null"}:
+                    inferred = self._resolve_java_member_on_type(
+                        rel_path,
+                        receiver_type,
+                        method_name,
+                        argument_types,
+                    )
+                    if inferred:
+                        return inferred
+
+            return resolve_callee(
+                raw_callee,
+                current_class,
+                var_types,
+                argument_types,
+            )
+
+        def collect_calls(
+            node,
+            current_class: str,
+            calls: list[str],
+            var_types: dict[str, str],
+        ) -> None:
+            if node.type == "method_invocation":
+                resolved_callee = resolve_method_invocation(
+                    node,
+                    current_class,
+                    var_types,
+                )
+                if resolved_callee:
+                    calls.append(resolved_callee)
+            elif node.type == "object_creation_expression":
+                type_node = node.child_by_field_name("type")
+                raw_callee = parser._get_text(type_node) if type_node else ""
+                if raw_callee:
+                    calls.append(
+                        resolve_callee(
+                            raw_callee,
+                            current_class,
+                            var_types,
+                            infer_argument_types(node, current_class, var_types),
+                        )
+                    )
+
+            for child in getattr(node, "children", []) or []:
+                if getattr(child, "is_named", False):
+                    collect_calls(child, current_class, calls, var_types)
+
+        def process_type(type_node, prefix: str | None = None) -> None:
+            name_node = type_node.child_by_field_name("name")
+            type_name = parser._get_text(name_node) if name_node else ""
+            if not type_name:
+                return
+
+            qualified_type = f"{prefix}.{type_name}" if prefix else type_name
+            body_type = (
+                "record_body" if type_node.type == "record_declaration" else "class_body"
+            )
+            body_node = parser._find_child_by_type(type_node, body_type)
+            if body_node is None:
+                return
+
+            for child in body_node.children:
+                if child.type == "method_declaration":
+                    method_name = parser._get_text(child.child_by_field_name("name"))
+                    if not method_name:
+                        continue
+                    caller_selector = selector_by_line.get(
+                        (qualified_type, parser._get_line(child), False),
+                        f"{qualified_type}.{method_name}",
+                    )
+                    caller_key = f"{rel_path}:{caller_selector}"
+                    calls: list[str] = []
+                    var_types = collect_var_types(child)
+                    collect_calls(child, qualified_type, calls, var_types)
+                    file_graph[caller_key] = calls
+                elif child.type in {
+                    "constructor_declaration",
+                    "compact_constructor_declaration",
+                }:
+                    caller_selector = selector_by_line.get(
+                        (qualified_type, parser._get_line(child), True),
+                        f"{qualified_type}.{type_name}",
+                    )
+                    caller_key = f"{rel_path}:{caller_selector}"
+                    calls: list[str] = []
+                    var_types = collect_var_types(child)
+                    collect_calls(child, qualified_type, calls, var_types)
+                    file_graph[caller_key] = calls
+                elif child.type in {"class_declaration", "record_declaration"}:
+                    process_type(child, qualified_type)
+
+        for child in root.children:
+            if child.type in {"class_declaration", "record_declaration"}:
+                process_type(child)
+
+        return file_graph
 
     def _analyze_definitions_js_ts(self, file_path: Path, rel_path: str) -> None:
         """Extract JS/TS definitions and import/export metadata.
@@ -1065,6 +2623,53 @@ class CallGraphBuilder:
                     continue
                 _add_js_nodes_esprima(file_path, rel_path)
 
+        # [20260307_FEATURE] Emit canonical Java callable nodes so builder-level Java slices are observable.
+        for file_path in self._iter_source_files():
+            rel_path = str(file_path.relative_to(self.root_path))
+            suffix = file_path.suffix.lower()
+            if suffix != ".java":
+                continue
+
+            _, java_result = self._load_java_parse_result(file_path)
+            if java_result is None:
+                continue
+
+            for callable_name, line, end_line, is_entry_point in self._iter_java_callable_details(
+                java_result
+            ):
+                key = f"{rel_path}:{callable_name}"
+                node_info[key] = CallNode(
+                    name=callable_name,
+                    file=rel_path,
+                    line=line,
+                    end_line=end_line,
+                    is_entry_point=is_entry_point,
+                )
+
+        # [20260307_FEATURE] Emit generic IR-backed callable nodes for the broader
+        # normalizer-backed polyglot language set.
+        for file_path in self._iter_source_files():
+            rel_path = str(file_path.relative_to(self.root_path))
+            suffix = file_path.suffix.lower()
+            if suffix not in self._GENERIC_IR_EXTENSION_LANGUAGE_MAP:
+                continue
+
+            module = self._load_ir_module(file_path, rel_path)
+            if module is None:
+                continue
+
+            for callable_name, line, end_line, is_entry_point in self._iter_ir_callable_details(
+                module
+            ):
+                key = f"{rel_path}:{callable_name}"
+                node_info[key] = CallNode(
+                    name=callable_name,
+                    file=rel_path,
+                    line=line,
+                    end_line=end_line,
+                    is_entry_point=is_entry_point,
+                )
+
         # If entry_point is specified, filter to reachable nodes
         if entry_point:
             reachable = self._get_reachable_nodes(base_graph, entry_point, depth)
@@ -1242,7 +2847,10 @@ class CallGraphBuilder:
         if ":" not in entry_point:
             # Find the full key
             for key in graph.keys():
-                if key.endswith(f":{entry_point}"):
+                short_name = key.rsplit(":", 1)[-1]
+                if key.endswith(f":{entry_point}") or short_name.endswith(
+                    f".{entry_point}"
+                ):
                     entry_point = key
                     break
 

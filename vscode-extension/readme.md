@@ -1,6 +1,8 @@
 # Code Scalpel for VS Code
 
-MCP server toolkit for AI agents - surgical code analysis, security scanning, and intelligent refactoring.
+Code Scalpel is a 22-core-tool MCP server toolkit for AI agents, focused on surgical code analysis, security scanning, and intelligent refactoring.
+
+The extension also works with a built-in capability-introspection surface so agents can inspect current tier/license limits without changing the 22-core-tool product count.
 
 ## Features
 
@@ -65,9 +67,9 @@ This extension integrates with the Model Context Protocol (MCP) for AI agent com
 
 ## Support
 
-- [GitHub Issues](https://github.com/3DTechus/code-scalpel/issues)
-- [Documentation](https://github.com/3DTechus/code-scalpel#readme)
+- [GitHub Issues](https://github.com/3D-Tech-Solutions/code-scalpel/issues)
+- [Documentation](https://github.com/3D-Tech-Solutions/code-scalpel#readme)
 
 ## License
 
-MIT License - see [LICENSE](https://github.com/3DTechus/code-scalpel/blob/HEAD/LICENSE) for details.
+MIT License - see [LICENSE](https://github.com/3D-Tech-Solutions/code-scalpel/blob/HEAD/LICENSE) for details.

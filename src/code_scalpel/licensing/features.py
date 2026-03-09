@@ -139,13 +139,14 @@ TOOL_CAPABILITIES: Dict[str, Dict[str, Dict[str, Any]]] = _ToolCapabilitiesProxy
 
 
 def _convert_sentinel(value: Any) -> Any:
-    """Convert the -1 sentinel used in TOML back to Python None.
+    """Convert the UNLIMITED sentinel used in limits.toml to Python None.
 
-    Only bare integer -1 is converted.  Strings such as ``"all"`` and lists
-    are passed through unchanged.
+    Convention: ``-1`` in limits.toml means UNLIMITED (annotated "# UNLIMITED"
+    throughout that file).  Only bare integer -1 is converted; strings such as
+    ``"all"`` and lists are passed through unchanged.
     """
     if isinstance(value, int) and value == -1:
-        return None
+        return None  # -1  →  UNLIMITED  →  None (no enforcement)
     return value
 
 

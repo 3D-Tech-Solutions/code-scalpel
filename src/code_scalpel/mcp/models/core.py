@@ -886,6 +886,26 @@ class SymbolReference(BaseModel):
     )
 
 
+class SymbolDisambiguationCandidate(BaseModel):
+    """A structured candidate for resolving symbol ambiguity."""
+
+    kind: str = Field(description="Candidate kind, e.g. method or class")
+    file: str = Field(description="File path containing the candidate")
+    line: int = Field(description="Line number for the candidate definition")
+    column: int = Field(default=0, description="Column number for the candidate")
+    context: str = Field(description="Definition line used for disambiguation")
+    owner_name: str | None = Field(
+        default=None,
+        description="Owning class/interface/record name when applicable",
+    )
+    qualified_name: str = Field(
+        description="Qualified candidate name, e.g. Helper.tool(int)"
+    )
+    selector: str = Field(
+        description="Selector users can use to disambiguate the candidate"
+    )
+
+
 class SymbolReferencesResult(BaseModel):
     """Result of get_symbol_references - all usages of a symbol."""
 
@@ -953,6 +973,19 @@ class SymbolReferencesResult(BaseModel):
     )
     truncation_warning: str | None = Field(
         default=None, description="Warning if results truncated"
+    )
+    ambiguity_kind: str | None = Field(
+        default=None,
+        description="Structured ambiguity category when singular definition metadata is unavailable",
+    )
+    ambiguity_candidates: list[SymbolDisambiguationCandidate] = Field(
+        default_factory=list,
+        description="Structured candidates that can be used to disambiguate the symbol",
+    )
+    # [20260308_FEATURE] Neutral warnings for ambiguity and other non-fatal conditions.
+    warnings: list[str] = Field(
+        default_factory=list,
+        description="Non-fatal warnings (e.g., ambiguous symbol identity metadata)",
     )
     # [20251226_FEATURE] Enterprise tier: Impact analysis fields
     risk_score: int | None = Field(

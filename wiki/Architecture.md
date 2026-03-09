@@ -207,7 +207,7 @@ async def extract_code(
 | Language | Parser | Features |
 |----------|--------|----------|
 | Python | `tree-sitter-python` | Full AST + PDG + symbolic |
-| JavaScript/TypeScript | `esprima` + `tree-sitter` | Full AST + call graphs |
+| JavaScript/TypeScript | `esprima` + `tree-sitter` | Full AST + partial shared graph/dependency paths |
 | Java | `tree-sitter-java` | AST + basic analysis |
 | Go | `tree-sitter-go` | AST parsing |
 | Rust | `tree-sitter-rust` | AST parsing |

@@ -56,6 +56,20 @@ def _ktest():
     return KotlinTestParser, TestStatus, TestFramework
 
 
+def _detekt():
+    from code_scalpel.code_parsers.kotlin_parsers.kotlin_parsers_Detekt import (
+        DetektParser, DetektSeverity,
+    )
+    return DetektParser, DetektSeverity
+
+
+def _ktlint():
+    from code_scalpel.code_parsers.kotlin_parsers.kotlin_parsers_ktlint import (
+        KtlintParser, KtlintSeverity,
+    )
+    return KtlintParser, KtlintSeverity
+
+
 # ---------------------------------------------------------------------------
 # __init__.py lazy-export smoke test
 # ---------------------------------------------------------------------------
@@ -65,7 +79,7 @@ class TestKotlinParsersModule:
 
     @pytest.mark.parametrize("name", [
         "DiktatParser", "GradleBuildParser", "ComposeLinterParser",
-        "KonsistParser", "KotlinTestParser",
+        "KonsistParser", "KotlinTestParser", "DetektParser", "KtlintParser",
     ])
     def test_module_exports_parser(self, name):
         import code_scalpel.code_parsers.kotlin_parsers as m
@@ -76,6 +90,26 @@ class TestKotlinParsersModule:
         import code_scalpel.code_parsers.kotlin_parsers as m
         with pytest.raises(AttributeError):
             _ = m.NonExistentKotlinParser  # type: ignore[attr-defined]
+
+
+class TestKotlinParserRegistry:
+    """Registry coverage for all Kotlin parser tools."""
+
+    @pytest.mark.parametrize("tool_name, class_name", [
+        ("diktat", "DiktatParser"),
+        ("compose", "ComposeLinterParser"),
+        ("gradle", "GradleBuildParser"),
+        ("konsist", "KonsistParser"),
+        ("test", "KotlinTestParser"),
+        ("kotlin-test", "KotlinTestParser"),
+        ("detekt", "DetektParser"),
+        ("ktlint", "KtlintParser"),
+    ])
+    def test_get_parser_supports_all_tools(self, tool_name, class_name):
+        from code_scalpel.code_parsers.kotlin_parsers import KotlinParserRegistry
+
+        parser = KotlinParserRegistry().get_parser(tool_name)
+        assert parser.__class__.__name__ == class_name
 
 
 # ---------------------------------------------------------------------------
@@ -453,6 +487,211 @@ class TestKotlinTestParser:
 """
         metrics = parser.parse_coverage_report(xml_report)
         assert metrics.line_coverage >= 0.0
+
+
+# ---------------------------------------------------------------------------
+# DetektParser
+# ---------------------------------------------------------------------------
+
+class TestDetektParser:
+    """Tests for DetektParser."""
+
+    def test_parse_xml_report(self, tmp_path):
+        DetektParser, DetektSeverity = _detekt()
+        report_file = tmp_path / "detekt.xml"
+        report_file.write_text(
+            """\
+<checkstyle>
+  <file name="src/App.kt">
+    <error line="12" column="5" severity="warning"
+           message="Too many functions"
+           source="detekt.complexity.TooManyFunctions"/>
+  </file>
+</checkstyle>
+"""
+        )
+        report = DetektParser().parse_xml_report(str(report_file))
+        assert report.total_count == 1
+        assert report.findings[0].rule_id == "TooManyFunctions"
+        assert report.findings[0].severity == DetektSeverity.WARNING
+
+    def test_parse_sarif_report(self, tmp_path):
+        DetektParser, _ = _detekt()
+        report_file = tmp_path / "detekt.sarif"
+        report_file.write_text(json.dumps({
+            "runs": [{
+                "results": [{
+                    "ruleId": "MagicNumber",
+                    "level": "error",
+                    "message": {"text": "Avoid magic numbers"},
+                    "locations": [{"physicalLocation": {
+                        "artifactLocation": {"uri": "src/App.kt"},
+                        "region": {"startLine": 7, "startColumn": 3},
+                    }}],
+                }]
+            }]
+        }))
+        report = DetektParser().parse_sarif_report(str(report_file))
+        assert report.total_count == 1
+        assert report.findings[0].location == "src/App.kt:7:3"
+
+    def test_parse_text_report(self):
+        DetektParser, _ = _detekt()
+        parser = DetektParser()
+        report = parser.parse_text_report(
+            "src/App.kt:4:9: warning: Prefer val over var [VarCouldBeVal]"
+        )
+        assert report.total_count == 1
+        assert report.findings[0].rule_id == "VarCouldBeVal"
+
+    def test_parse_config(self, tmp_path):
+        DetektParser, _ = _detekt()
+        config_file = tmp_path / "detekt.yml"
+        config_file.write_text(
+            """\
+build:
+  maxIssues: 5
+  excludeCorrectable: true
+  parallel: false
+complexity:
+  active: true
+  LongMethod:
+    active: true
+    threshold: 15
+excludes:
+  - '**/generated/**'
+includes: ['**/*.kt']
+"""
+        )
+        config = DetektParser().parse_config(str(config_file))
+        assert config.max_issues == 5
+        assert config.exclude_correctable is True
+        assert config.parallel is False
+        assert config.rule_sets["complexity"] is True
+        assert config.rules["complexity"]["LongMethod"]["threshold"] == 15
+        assert "**/generated/**" in config.excludes
+
+    def test_analyze_project_returns_empty_report_without_cli(self, tmp_path):
+        DetektParser, _ = _detekt()
+        parser = DetektParser(detekt_path=None)
+        parser._detekt_path = None
+        report = parser.analyze_project(str(tmp_path))
+        assert report.total_count == 0
+
+    def test_generate_baseline_creates_file_without_cli(self, tmp_path):
+        DetektParser, _ = _detekt()
+        parser = DetektParser(detekt_path=None)
+        parser._detekt_path = None
+        baseline_path = tmp_path / "detekt-baseline.xml"
+        result = parser.generate_baseline(str(tmp_path), str(baseline_path))
+        assert baseline_path.exists()
+        assert result == str(baseline_path)
+
+
+# ---------------------------------------------------------------------------
+# KtlintParser
+# ---------------------------------------------------------------------------
+
+class TestKtlintParser:
+    """Tests for KtlintParser."""
+
+    def test_parse_json_output(self):
+        KtlintParser, KtlintSeverity = _ktlint()
+        payload = json.dumps([
+            {
+                "file": "src/App.kt",
+                "violations": [
+                    {
+                        "line": 3,
+                        "column": 1,
+                        "message": "Wildcard import",
+                        "rule": "standard:no-wildcard-imports",
+                        "canBeAutoCorrected": True,
+                    }
+                ],
+            }
+        ])
+        report = KtlintParser().parse_json_output(payload)
+        assert report.total_count == 1
+        assert report.violations[0].severity == KtlintSeverity.ERROR
+        assert report.violations[0].can_be_auto_corrected is True
+
+    def test_parse_json_report(self, tmp_path):
+        KtlintParser, _ = _ktlint()
+        report_file = tmp_path / "ktlint.json"
+        report_file.write_text(json.dumps([
+            {
+                "file": "src/App.kt",
+                "violations": [
+                    {
+                        "line": 9,
+                        "column": 2,
+                        "message": "Missing spacing",
+                        "rule": "standard:spacing-between-declarations-with-comments",
+                    }
+                ],
+            }
+        ]))
+        report = KtlintParser().parse_json_report(str(report_file))
+        assert report.total_count == 1
+        assert report.files_checked == 1
+
+    def test_parse_text_output(self):
+        KtlintParser, _ = _ktlint()
+        parser = KtlintParser()
+        report = parser.parse_text_output(
+            "src/App.kt:2:5: Unexpected indentation (standard:indent)"
+        )
+        assert report.total_count == 1
+        assert report.violations[0].full_rule_id == "standard:indent"
+
+    def test_parse_editorconfig(self, tmp_path):
+        KtlintParser, _ = _ktlint()
+        config_file = tmp_path / ".editorconfig"
+        config_file.write_text(
+            """\
+root = true
+
+[*.{kt,kts}]
+indent_size = 2
+indent_style = tab
+max_line_length = 120
+ktlint_disabled_rules = standard:no-wildcard-imports,standard:filename
+ktlint_experimental = enabled
+ktlint_code_style = android_studio
+"""
+        )
+        config = KtlintParser().parse_editorconfig(str(config_file))
+        assert config.indent_size == 2
+        assert config.indent_style == "tab"
+        assert config.max_line_length == 120
+        assert config.experimental_rules is True
+        assert "standard:no-wildcard-imports" in config.disabled_rules
+
+    def test_check_directory_returns_empty_report_without_cli(self, tmp_path):
+        KtlintParser, _ = _ktlint()
+        parser = KtlintParser(ktlint_path=None)
+        parser._ktlint_path = None
+        report = parser.check_directory(str(tmp_path))
+        assert report.total_count == 0
+
+    def test_format_code_without_cli_returns_original(self):
+        KtlintParser, _ = _ktlint()
+        parser = KtlintParser(ktlint_path=None)
+        parser._ktlint_path = None
+        source = "fun main(){ println(\"hi\") }\n"
+        formatted, was_modified = parser.format_code(source)
+        assert formatted == source
+        assert was_modified is False
+
+    def test_generate_baseline_creates_file_without_cli(self, tmp_path):
+        KtlintParser, _ = _ktlint()
+        parser = KtlintParser(ktlint_path=None)
+        parser._ktlint_path = None
+        baseline_path = tmp_path / ".ktlint-baseline.xml"
+        result = parser.generate_baseline(str(tmp_path), str(baseline_path))
+        assert baseline_path.exists()
+        assert result == str(baseline_path)
 
 
 # ---------------------------------------------------------------------------

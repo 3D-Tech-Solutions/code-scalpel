@@ -2,6 +2,8 @@
 Module Path Resolver - Map language module names to file paths.
 
 [20251216_FEATURE] v2.0.2 - Resource template support for code:/// URIs.
+[20260306_FEATURE] Extended code:/// resolution to the full file-backed
+polyglot language set used by extract_code resources.
 
 This module provides resolution of module names to file paths across different
 programming languages, enabling parameterized URI access to code symbols.
@@ -9,6 +11,39 @@ programming languages, enabling parameterized URI access to code symbols.
 
 from pathlib import Path
 from typing import Optional
+
+
+def _normalize_module_path(module: str) -> str:
+    """Normalize language module notation into a relative path fragment."""
+    return module.replace("::", "/").replace(".", "/")
+
+
+def _resolve_by_extensions(
+    module: str,
+    project_root: Path,
+    extensions: tuple[str, ...],
+    *,
+    allow_index: bool = False,
+    search_roots: tuple[str, ...] = ("", "src"),
+) -> Optional[Path]:
+    """Resolve a module using a small set of file extensions and roots."""
+    module_path = _normalize_module_path(module)
+
+    for root in search_roots:
+        base = project_root / root if root else project_root
+
+        for extension in extensions:
+            candidate = base / f"{module_path}{extension}"
+            if candidate.exists():
+                return candidate
+
+        if allow_index:
+            for extension in extensions:
+                candidate = base / module_path / f"index{extension}"
+                if candidate.exists():
+                    return candidate
+
+    return None
 
 
 def resolve_module_path(
@@ -20,7 +55,7 @@ def resolve_module_path(
     [20251216_FEATURE] v2.0.2 - Multi-language module resolution.
 
     Args:
-        language: Programming language ("python", "javascript", "typescript", "java")
+        language: Programming language
         module: Module name (e.g., "utils", "components/UserCard", "services.auth")
         project_root: Project root directory
 
@@ -47,6 +82,24 @@ def resolve_module_path(
         return _resolve_typescript_module(module, project_root)
     elif language == "java":
         return _resolve_java_module(module, project_root)
+    elif language in ("c",):
+        return _resolve_c_module(module, project_root)
+    elif language in ("cpp", "c++", "cc", "cxx"):
+        return _resolve_cpp_module(module, project_root)
+    elif language in ("csharp", "cs"):
+        return _resolve_csharp_module(module, project_root)
+    elif language == "go":
+        return _resolve_go_module(module, project_root)
+    elif language in ("kotlin", "kt"):
+        return _resolve_kotlin_module(module, project_root)
+    elif language == "php":
+        return _resolve_php_module(module, project_root)
+    elif language in ("ruby", "rb"):
+        return _resolve_ruby_module(module, project_root)
+    elif language == "swift":
+        return _resolve_swift_module(module, project_root)
+    elif language == "rust":
+        return _resolve_rust_module(module, project_root)
     else:
         return None
 
@@ -61,7 +114,7 @@ def _resolve_python_module(module: str, project_root: Path) -> Optional[Path]:
     - services.auth -> services/auth.py
     """
     # Replace dots with path separators
-    module_path = module.replace(".", "/")
+    module_path = _normalize_module_path(module)
 
     # Try direct file
     candidate = project_root / f"{module_path}.py"
@@ -95,7 +148,7 @@ def _resolve_javascript_module(module: str, project_root: Path) -> Optional[Path
     - lib/helpers -> lib/helpers.js or lib/helpers/index.js
     """
     # Convert module notation to path
-    module_path = module.replace(".", "/")
+    module_path = _normalize_module_path(module)
 
     # Try direct .js file
     candidate = project_root / f"{module_path}.js"
@@ -143,7 +196,7 @@ def _resolve_typescript_module(module: str, project_root: Path) -> Optional[Path
     - lib/api -> lib/api.ts or lib/api/index.ts
     """
     # Convert module notation to path
-    module_path = module.replace(".", "/")
+    module_path = _normalize_module_path(module)
 
     # Try direct .ts file
     candidate = project_root / f"{module_path}.ts"
@@ -195,7 +248,7 @@ def _resolve_java_module(module: str, project_root: Path) -> Optional[Path]:
     - utils.Calculator -> utils/Calculator.java
     """
     # Replace dots with path separators
-    module_path = module.replace(".", "/")
+    module_path = _normalize_module_path(module)
 
     # Try direct .java file
     candidate = project_root / f"{module_path}.java"
@@ -213,6 +266,99 @@ def _resolve_java_module(module: str, project_root: Path) -> Optional[Path]:
         return candidate
 
     return None
+
+
+def _resolve_c_module(module: str, project_root: Path) -> Optional[Path]:
+    """Resolve C translation unit or header paths."""
+    return _resolve_by_extensions(
+        module,
+        project_root,
+        (".c", ".h"),
+        search_roots=("", "src", "include"),
+    )
+
+
+def _resolve_cpp_module(module: str, project_root: Path) -> Optional[Path]:
+    """Resolve C++ source or header paths."""
+    return _resolve_by_extensions(
+        module,
+        project_root,
+        (".cpp", ".cc", ".cxx", ".hpp", ".hh", ".hxx", ".h"),
+        search_roots=("", "src", "include"),
+    )
+
+
+def _resolve_csharp_module(module: str, project_root: Path) -> Optional[Path]:
+    """Resolve C# modules to .cs files."""
+    return _resolve_by_extensions(
+        module,
+        project_root,
+        (".cs",),
+        search_roots=("", "src"),
+    )
+
+
+def _resolve_go_module(module: str, project_root: Path) -> Optional[Path]:
+    """Resolve Go modules to .go files."""
+    return _resolve_by_extensions(
+        module,
+        project_root,
+        (".go",),
+        search_roots=("", "src", "cmd", "pkg", "internal"),
+    )
+
+
+def _resolve_kotlin_module(module: str, project_root: Path) -> Optional[Path]:
+    """Resolve Kotlin modules to .kt or .kts files."""
+    return _resolve_by_extensions(
+        module,
+        project_root,
+        (".kt", ".kts"),
+        search_roots=("", "src", "src/main/kotlin", "src/test/kotlin"),
+    )
+
+
+def _resolve_php_module(module: str, project_root: Path) -> Optional[Path]:
+    """Resolve PHP modules to .php family files."""
+    return _resolve_by_extensions(
+        module,
+        project_root,
+        (".php", ".phtml", ".php5", ".php7"),
+        allow_index=True,
+        search_roots=("", "src", "app"),
+    )
+
+
+def _resolve_ruby_module(module: str, project_root: Path) -> Optional[Path]:
+    """Resolve Ruby modules to .rb or related files."""
+    return _resolve_by_extensions(
+        module,
+        project_root,
+        (".rb", ".rake"),
+        allow_index=True,
+        search_roots=("", "lib", "app", "src"),
+    )
+
+
+def _resolve_swift_module(module: str, project_root: Path) -> Optional[Path]:
+    """Resolve Swift modules to .swift files."""
+    return _resolve_by_extensions(
+        module,
+        project_root,
+        (".swift",),
+        search_roots=("", "Sources", "src"),
+    )
+
+
+def _resolve_rust_module(module: str, project_root: Path) -> Optional[Path]:
+    """Resolve Rust modules to .rs files."""
+    return _resolve_by_extensions(
+        module,
+        project_root,
+        (".rs",),
+        allow_index=True,
+        search_roots=("", "src", "examples"),
+    )
 
 
 def get_mime_type(language: str) -> str:
@@ -236,6 +382,18 @@ def get_mime_type(language: str) -> str:
         "tsx": "text/x-tsx",
         "jsx": "text/x-jsx",
         "java": "text/x-java",
+        "c": "text/x-c",
+        "cpp": "text/x-c++src",
+        "csharp": "text/x-csharp",
+        "cs": "text/x-csharp",
+        "go": "text/x-go",
+        "kotlin": "text/x-kotlin",
+        "kt": "text/x-kotlin",
+        "php": "application/x-php",
+        "ruby": "text/x-ruby",
+        "rb": "text/x-ruby",
+        "swift": "text/x-swift",
+        "rust": "text/x-rustsrc",
     }
 
     return mime_types.get(language.lower(), "text/plain")

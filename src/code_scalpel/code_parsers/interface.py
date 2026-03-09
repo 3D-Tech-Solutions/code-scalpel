@@ -18,6 +18,10 @@ class Language(Enum):
     CSHARP = "csharp"  # [20260225_FEATURE]
     GO = "go"  # [20260302_FEATURE]
     KOTLIN = "kotlin"  # [20260303_FEATURE]
+    PHP = "php"  # [20260304_FEATURE]
+    RUBY = "ruby"  # [20260304_FEATURE]
+    SWIFT = "swift"  # [20260304_FEATURE] Swift language support
+    RUST = "rust"  # [20260305_FEATURE] Rust language support
     UNKNOWN = "unknown"
 
 

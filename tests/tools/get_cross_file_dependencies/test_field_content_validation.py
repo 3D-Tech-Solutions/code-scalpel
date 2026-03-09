@@ -344,6 +344,595 @@ class TestDependencyChainContent:
                     len(chain) <= result.max_depth_reached + 1
                 ), f"Chain length {len(chain)} exceeds depth limit {result.max_depth_reached}+1"
 
+    @pytest.mark.asyncio
+    async def test_typescript_dependency_chains_use_relative_file_modules(
+        self, pro_server, tmp_path
+    ):
+        """Initial TS parity slice should preserve relative file-backed module paths."""
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        (src_dir / "util.ts").write_text(
+            "export function helper(): number {\n    return 1;\n}\n",
+            encoding="utf-8",
+        )
+        target_file = src_dir / "main.ts"
+        target_file.write_text(
+            'import { helper } from "./util";\n\n'
+            "export function entry(): number {\n    return helper();\n}\n",
+            encoding="utf-8",
+        )
+
+        result = await pro_server.get_cross_file_dependencies(
+            target_file=str(target_file),
+            target_symbol="entry",
+            project_root=str(tmp_path),
+            include_code=False,
+            include_diagram=False,
+        )
+
+        assert result.success is True
+        extracted = {(symbol.name, symbol.file) for symbol in result.extracted_symbols}
+        assert ("entry", "src/main.ts") in extracted
+        assert ("helper", "src/util.ts") in extracted
+        assert result.import_graph == {"src/main.ts": ["src/util.ts"]}
+        assert ["src/main.ts", "src/util.ts"] in result.dependency_chains
+
+    @pytest.mark.asyncio
+    async def test_java_dependency_chains_use_relative_file_modules(
+        self, pro_server, tmp_path
+    ):
+        """[20260308_TEST] Java graph-backed slices should preserve relative file-backed module paths."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+        (package_dir / "Helper.java").write_text(
+            "package demo;\n\n"
+            "public class Helper {\n"
+            "    public static void tool() {\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        target_file = package_dir / "App.java"
+        target_file.write_text(
+            "package demo;\n\n"
+            "import static demo.Helper.tool;\n\n"
+            "public class App {\n"
+            "    public static void entry() {\n"
+            "        tool();\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        result = await pro_server.get_cross_file_dependencies(
+            target_file=str(target_file),
+            target_symbol="entry",
+            project_root=str(tmp_path),
+            include_code=False,
+            include_diagram=False,
+        )
+
+        assert result.success is True
+        assert result.target_file == "demo/App.java"
+        extracted = {(symbol.name, symbol.file) for symbol in result.extracted_symbols}
+        assert ("App.entry", "demo/App.java") in extracted
+        assert ("Helper.tool", "demo/Helper.java") in extracted
+        assert result.import_graph == {"demo/App.java": ["demo/Helper.java"]}
+        assert ["demo/App.java", "demo/Helper.java"] in result.dependency_chains
+
+    @pytest.mark.asyncio
+    async def test_java_dependency_mermaid_preserves_relative_file_labels(
+        self, pro_server, tmp_path
+    ):
+        """[20260308_TEST] Java graph-backed dependency slices should preserve relative file metadata in Mermaid-backed output."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+        (package_dir / "Helper.java").write_text(
+            "package demo;\n\n"
+            "public class Helper {\n"
+            "    public static void tool() {\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        target_file = package_dir / "App.java"
+        target_file.write_text(
+            "package demo;\n\n"
+            "import static demo.Helper.tool;\n\n"
+            "public class App {\n"
+            "    public static void entry() {\n"
+            "        tool();\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        result = await pro_server.get_cross_file_dependencies(
+            target_file=str(target_file),
+            target_symbol="entry",
+            project_root=str(tmp_path),
+            include_code=False,
+            include_diagram=True,
+        )
+
+        assert result.success is True
+        assert result.target_file == "demo/App.java"
+        assert result.import_graph == {"demo/App.java": ["demo/Helper.java"]}
+        assert result.mermaid.startswith("graph TD")
+        assert "demo_App_java" in result.mermaid
+        assert "demo_Helper_java" in result.mermaid
+
+    @pytest.mark.asyncio
+    async def test_java_ambiguous_bare_method_name_returns_guidance(
+        self, pro_server, tmp_path
+    ):
+        """[20260308_TEST] Java dependency extraction should reject ambiguous bare method names with actionable guidance."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+        target_file = package_dir / "App.java"
+        target_file.write_text(
+            "package demo;\n\n"
+            "public class App {\n"
+            "    public void run() {\n"
+            "    }\n"
+            "}\n\n"
+            "class Worker {\n"
+            "    void run() {\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        result = await pro_server.get_cross_file_dependencies(
+            target_file=str(target_file),
+            target_symbol="run",
+            project_root=str(tmp_path),
+            include_code=False,
+            include_diagram=False,
+        )
+
+        assert result.success is False
+        assert result.error is not None
+        assert "ambiguous" in result.error.lower()
+        assert "class.method" in result.error.lower()
+
+    @pytest.mark.asyncio
+    async def test_java_overloaded_dependency_slice_uses_signature_selector(
+        self, pro_server, tmp_path
+    ):
+        """[20260308_TEST] Java graph-backed dependency slices should carry overload-aware signature identities."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+        (package_dir / "Helper.java").write_text(
+            "package demo;\n\n"
+            "public class Helper {\n"
+            "    public static void tool(int value) {\n"
+            "    }\n\n"
+            "    public static void tool(String value) {\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        target_file = package_dir / "App.java"
+        target_file.write_text(
+            "package demo;\n\n"
+            "import static demo.Helper.tool;\n\n"
+            "public class App {\n"
+            "    public static void entry() {\n"
+            "        tool(1);\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        result = await pro_server.get_cross_file_dependencies(
+            target_file=str(target_file),
+            target_symbol="entry",
+            project_root=str(tmp_path),
+            include_code=False,
+            include_diagram=False,
+        )
+
+        assert result.success is True
+        extracted = {(symbol.name, symbol.file) for symbol in result.extracted_symbols}
+        assert ("App.entry", "demo/App.java") in extracted
+        assert ("Helper.tool(int)", "demo/Helper.java") in extracted
+        assert ("Helper.tool(String)", "demo/Helper.java") not in extracted
+
+    @pytest.mark.asyncio
+    async def test_java_structured_selector_targets_exact_overload(
+        self, pro_server, tmp_path
+    ):
+        """[20260308_TEST] Java dependency extraction should accept structured selectors like Helper.tool(int)."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+        target_file = package_dir / "Helper.java"
+        target_file.write_text(
+            "package demo;\n\n"
+            "public class Helper {\n"
+            "    public static void tool(int value) {\n"
+            "    }\n\n"
+            "    public static void tool(String value) {\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        result = await pro_server.get_cross_file_dependencies(
+            target_file=str(target_file),
+            target_symbol="Helper.tool(int)",
+            project_root=str(tmp_path),
+            include_code=False,
+            include_diagram=False,
+        )
+
+        assert result.success is True
+        extracted = {(symbol.name, symbol.file) for symbol in result.extracted_symbols}
+        assert extracted == {("Helper.tool(int)", "demo/Helper.java")}
+
+    @pytest.mark.asyncio
+    async def test_java_dependency_slice_uses_method_return_types_for_overloaded_calls(
+        self, pro_server, tmp_path
+    ):
+        """[20260308_TEST] Java dependency extraction should use method return types to select overloaded call targets."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+        (package_dir / "Factory.java").write_text(
+            "package demo;\n\n"
+            "public class Factory {\n"
+            "    public static String make() {\n"
+            "        return \"ok\";\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        (package_dir / "Helper.java").write_text(
+            "package demo;\n\n"
+            "public class Helper {\n"
+            "    public static void tool(int value) {\n"
+            "    }\n\n"
+            "    public static void tool(String value) {\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        target_file = package_dir / "App.java"
+        target_file.write_text(
+            "package demo;\n\n"
+            "import static demo.Factory.make;\n"
+            "import static demo.Helper.tool;\n\n"
+            "public class App {\n"
+            "    public static void entry() {\n"
+            "        tool(make());\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        result = await pro_server.get_cross_file_dependencies(
+            target_file=str(target_file),
+            target_symbol="entry",
+            project_root=str(tmp_path),
+            include_code=False,
+            include_diagram=False,
+        )
+
+        assert result.success is True
+        extracted = {(symbol.name, symbol.file) for symbol in result.extracted_symbols}
+        assert ("Factory.make", "demo/Factory.java") in extracted
+        assert ("Helper.tool(String)", "demo/Helper.java") in extracted
+        assert ("Helper.tool(int)", "demo/Helper.java") not in extracted
+
+    @pytest.mark.asyncio
+    async def test_java_dependency_slice_uses_method_return_types_for_overloaded_constructors(
+        self, pro_server, tmp_path
+    ):
+        """[20260308_TEST] Java dependency extraction should use method return types to select overloaded constructors."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+        (package_dir / "Factory.java").write_text(
+            "package demo;\n\n"
+            "public class Factory {\n"
+            "    public static String make() {\n"
+            "        return \"ok\";\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        target_file = package_dir / "Helper.java"
+        target_file.write_text(
+            "package demo;\n\n"
+            "public class Helper {\n"
+            "    public Helper(int value) {\n"
+            "    }\n\n"
+            "    public Helper(String value) {\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        (package_dir / "App.java").write_text(
+            "package demo;\n\n"
+            "import static demo.Factory.make;\n\n"
+            "public class App {\n"
+            "    public static void entry() {\n"
+            "        new Helper(make());\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        result = await pro_server.get_cross_file_dependencies(
+            target_file=str(package_dir / "App.java"),
+            target_symbol="entry",
+            project_root=str(tmp_path),
+            include_code=False,
+            include_diagram=False,
+        )
+
+        assert result.success is True
+        extracted = {(symbol.name, symbol.file) for symbol in result.extracted_symbols}
+        assert ("Factory.make", "demo/Factory.java") in extracted
+        assert ("Helper.Helper(String)", "demo/Helper.java") in extracted
+        assert ("Helper.Helper(int)", "demo/Helper.java") not in extracted
+
+    @pytest.mark.asyncio
+    async def test_java_dependency_slice_uses_chained_builder_return_types_for_overloaded_calls(
+        self, pro_server, tmp_path
+    ):
+        """[20260308_TEST] Java dependency extraction should use chained builder-style method returns to select overloaded call targets."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+        (package_dir / "Builder.java").write_text(
+            "package demo;\n\n"
+            "public class Builder {\n"
+            "    public String make() {\n"
+            "        return \"ok\";\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        (package_dir / "Helper.java").write_text(
+            "package demo;\n\n"
+            "public class Helper {\n"
+            "    public static void tool(int value) {\n"
+            "    }\n\n"
+            "    public static void tool(String value) {\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        target_file = package_dir / "App.java"
+        target_file.write_text(
+            "package demo;\n\n"
+            "import static demo.Helper.tool;\n\n"
+            "public class App {\n"
+            "    public static void entry() {\n"
+            "        tool(new Builder().make());\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        result = await pro_server.get_cross_file_dependencies(
+            target_file=str(target_file),
+            target_symbol="entry",
+            project_root=str(tmp_path),
+            include_code=False,
+            include_diagram=False,
+        )
+
+        assert result.success is True
+        extracted = {(symbol.name, symbol.file) for symbol in result.extracted_symbols}
+        assert ("Builder.make", "demo/Builder.java") in extracted
+        assert ("Helper.tool(String)", "demo/Helper.java") in extracted
+        assert ("Helper.tool(int)", "demo/Helper.java") not in extracted
+
+    @pytest.mark.asyncio
+    async def test_java_dependency_slice_uses_cast_types_for_overloaded_constructors(
+        self, pro_server, tmp_path
+    ):
+        """[20260308_TEST] Java dependency extraction should use explicit casts to select overloaded constructors."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+        (package_dir / "Helper.java").write_text(
+            "package demo;\n\n"
+            "public class Helper {\n"
+            "    public Helper(int value) {\n"
+            "    }\n\n"
+            "    public Helper(String value) {\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        target_file = package_dir / "App.java"
+        target_file.write_text(
+            "package demo;\n\n"
+            "public class App {\n"
+            "    public static void entry() {\n"
+            "        Object raw = \"ok\";\n"
+            "        new Helper((String) raw);\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        result = await pro_server.get_cross_file_dependencies(
+            target_file=str(target_file),
+            target_symbol="entry",
+            project_root=str(tmp_path),
+            include_code=False,
+            include_diagram=False,
+        )
+
+        assert result.success is True
+        extracted = {(symbol.name, symbol.file) for symbol in result.extracted_symbols}
+        assert ("Helper.Helper(String)", "demo/Helper.java") in extracted
+        assert ("Helper.Helper(int)", "demo/Helper.java") not in extracted
+
+    @pytest.mark.asyncio
+    async def test_java_dependency_slice_uses_static_fluent_builder_return_types_for_overloaded_calls(
+        self, pro_server, tmp_path
+    ):
+        """[20260308_TEST] Java dependency extraction should use static builder entrypoints and longer fluent chains for overloaded call targets."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+        (package_dir / "Builder.java").write_text(
+            "package demo;\n\n"
+            "public class Builder {\n"
+            "    public static Builder start() {\n"
+            "        return new Builder();\n"
+            "    }\n\n"
+            "    public Builder step() {\n"
+            "        return this;\n"
+            "    }\n\n"
+            "    public String make() {\n"
+            "        return \"ok\";\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        (package_dir / "Helper.java").write_text(
+            "package demo;\n\n"
+            "public class Helper {\n"
+            "    public static void tool(int value) {\n"
+            "    }\n\n"
+            "    public static void tool(String value) {\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        target_file = package_dir / "App.java"
+        target_file.write_text(
+            "package demo;\n\n"
+            "import static demo.Helper.tool;\n\n"
+            "public class App {\n"
+            "    public static void entry() {\n"
+            "        tool(Builder.start().step().make());\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        result = await pro_server.get_cross_file_dependencies(
+            target_file=str(target_file),
+            target_symbol="entry",
+            project_root=str(tmp_path),
+            include_code=False,
+            include_diagram=False,
+        )
+
+        assert result.success is True
+        extracted = {(symbol.name, symbol.file) for symbol in result.extracted_symbols}
+        assert ("Builder.start", "demo/Builder.java") in extracted
+        assert ("Builder.step", "demo/Builder.java") in extracted
+        assert ("Builder.make", "demo/Builder.java") in extracted
+        assert ("Helper.tool(String)", "demo/Helper.java") in extracted
+        assert ("Helper.tool(int)", "demo/Helper.java") not in extracted
+
+    @pytest.mark.asyncio
+    async def test_java_dependency_slice_uses_static_fluent_builder_return_types_for_overloaded_constructors(
+        self, pro_server, tmp_path
+    ):
+        """[20260308_TEST] Java dependency extraction should use static builder entrypoints and longer fluent chains for overloaded constructors."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+        (package_dir / "Builder.java").write_text(
+            "package demo;\n\n"
+            "public class Builder {\n"
+            "    public static Builder start() {\n"
+            "        return new Builder();\n"
+            "    }\n\n"
+            "    public Builder step() {\n"
+            "        return this;\n"
+            "    }\n\n"
+            "    public String make() {\n"
+            "        return \"ok\";\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        (package_dir / "Helper.java").write_text(
+            "package demo;\n\n"
+            "public class Helper {\n"
+            "    public Helper(int value) {\n"
+            "    }\n\n"
+            "    public Helper(String value) {\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        target_file = package_dir / "App.java"
+        target_file.write_text(
+            "package demo;\n\n"
+            "public class App {\n"
+            "    public static void entry() {\n"
+            "        new Helper(Builder.start().step().make());\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        result = await pro_server.get_cross_file_dependencies(
+            target_file=str(target_file),
+            target_symbol="entry",
+            project_root=str(tmp_path),
+            include_code=False,
+            include_diagram=False,
+        )
+
+        assert result.success is True
+        extracted = {(symbol.name, symbol.file) for symbol in result.extracted_symbols}
+        assert ("Builder.start", "demo/Builder.java") in extracted
+        assert ("Builder.step", "demo/Builder.java") in extracted
+        assert ("Builder.make", "demo/Builder.java") in extracted
+        assert ("Helper.Helper(String)", "demo/Helper.java") in extracted
+        assert ("Helper.Helper(int)", "demo/Helper.java") not in extracted
+
+    @pytest.mark.asyncio
+    async def test_java_override_dependencies_prefer_local_child_method(
+        self, pro_server, tmp_path
+    ):
+        """[20260308_TEST] Java graph-backed dependency slices should prefer overridden child methods over superclass fallbacks."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+        (package_dir / "Base.java").write_text(
+            "package demo;\n\n"
+            "public class Base {\n"
+            "    protected void helper() {\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        target_file = package_dir / "Child.java"
+        target_file.write_text(
+            "package demo;\n\n"
+            "public class Child extends Base {\n"
+            "    @Override\n"
+            "    protected void helper() {\n"
+            "    }\n\n"
+            "    public void run() {\n"
+            "        helper();\n"
+            "        this.helper();\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        result = await pro_server.get_cross_file_dependencies(
+            target_file=str(target_file),
+            target_symbol="run",
+            project_root=str(tmp_path),
+            include_code=False,
+            include_diagram=False,
+        )
+
+        assert result.success is True
+        extracted = {(symbol.name, symbol.file) for symbol in result.extracted_symbols}
+        assert ("Child.run", "demo/Child.java") in extracted
+        assert ("Child.helper", "demo/Child.java") in extracted
+        assert ("Base.helper", "demo/Base.java") not in extracted
+        assert result.import_graph == {}
+
 
 class TestCircularImportContent:
     """Validate circular import detection content."""

@@ -204,7 +204,7 @@ async def get_file_context(file_path: str) -> ToolResponseEnvelope:
 
 
 @mcp.tool(
-    description="Find all references, definitions, and call sites for a named symbol across the project."
+    description="Find all references, definitions, and call sites for a named symbol across the project, with an initial local JS/TS parity slice."
 )
 @with_oracle_resilience(tool_id="get_symbol_references", strategy=SymbolStrategy)
 async def get_symbol_references(
@@ -215,6 +215,10 @@ async def get_symbol_references(
     ctx: Context | None = None,
 ) -> ToolResponseEnvelope:
     """Find all references to a symbol across the project.
+
+    [20260308_DOCS] This workflow remains Python-first overall, but now includes
+    an initial local JavaScript, TypeScript, and Java parity slice for
+    definition/import/call-site discovery in non-Python source files.
 
     **Tier Behavior:**
      - Community: Limited to 200 files searched, 200 references returned, basic symbol location

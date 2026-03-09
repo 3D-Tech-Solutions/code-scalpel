@@ -135,6 +135,23 @@ class CallGraphResultModel(BaseModel):
     enterprise_metrics_enabled: bool = Field(
         default=False, description="Whether enterprise metrics were enabled"
     )
+    # [20260308_FEATURE] Polyglot foundation metadata for graph-runtime parity.
+    language_parity: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Current get_call_graph parity level by language. "
+            "Expected values include 'advanced', 'runtime_slice', "
+            "'method_local_slice', and 'local_slice'."
+        ),
+    )
+    parity_legend: dict[str, str] = Field(
+        default_factory=dict,
+        description="Human-readable meaning for each language parity level.",
+    )
+    runtime_scope_summary: str | None = Field(
+        default=None,
+        description="Short summary of the current polyglot get_call_graph scope.",
+    )
     error: str | None = Field(default=None, description="Error message if failed")
 
 
@@ -216,6 +233,25 @@ class GraphNeighborhoodResult(BaseModel):
     # [20251226_FEATURE] Optional higher-tier metadata
     hot_nodes: list[str] = Field(
         default_factory=list, description="High-degree nodes in the returned subgraph"
+    )
+
+    # [20260307_FEATURE] Stage 10.1 runtime metadata parity for graph neighborhoods.
+    tier_applied: str = Field(
+        default="community", description="Tier used for neighborhood extraction"
+    )
+    max_k_applied: int | None = Field(
+        default=None, description="Max k-hop limit applied (None = unlimited)"
+    )
+    max_nodes_applied: int | None = Field(
+        default=None, description="Max nodes limit applied (None = unlimited)"
+    )
+    advanced_resolution_enabled: bool = Field(
+        default=False,
+        description="Whether advanced graph resolution was enabled for the request",
+    )
+    enterprise_features_enabled: bool = Field(
+        default=False,
+        description="Whether enterprise graph-neighborhood features were enabled",
     )
 
     error: str | None = Field(default=None, description="Error message if failed")
@@ -619,6 +655,27 @@ class CrossFileDependenciesResult(BaseModel):
     transitive_depth: int = Field(
         default=0,
         description="Max transitive depth actually analyzed after tier limits",
+    )
+    # [20260307_FEATURE] Stage 10.1 runtime metadata parity for graph-backed dependencies.
+    tier_applied: str = Field(
+        default="community",
+        description="Tier used for dependency extraction",
+    )
+    max_depth_applied: int | None = Field(
+        default=None,
+        description="Max depth limit applied (None = unlimited)",
+    )
+    max_files_applied: int | None = Field(
+        default=None,
+        description="Max files limit applied (None = unlimited)",
+    )
+    pro_features_enabled: bool = Field(
+        default=False,
+        description="Whether Pro-tier dependency features were enabled",
+    )
+    enterprise_features_enabled: bool = Field(
+        default=False,
+        description="Whether Enterprise-tier dependency features were enabled",
     )
     # Pro tier dependency insights
     alias_resolutions: list[AliasResolutionModel] = Field(

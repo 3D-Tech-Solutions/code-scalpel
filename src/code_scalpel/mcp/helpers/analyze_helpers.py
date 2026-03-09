@@ -10,7 +10,13 @@ import re
 import time
 from typing import Any, Optional
 
+from code_scalpel.code_parsers.factory import ParserFactory
+from code_scalpel.code_parsers.interface import Language as ParserLanguage
 from code_scalpel.licensing.features import get_tool_capabilities, has_capability
+from code_scalpel.mcp.helpers.language_helpers import (
+    SUPPORTED_POLYGLOT_LANGUAGES,
+    detect_tool_language,
+)
 
 # [20260213_BUGFIX] Use protocol._get_current_tier which honors CODE_SCALPEL_TIER env var
 # (jwt_validator.get_current_tier bypasses env-var downgrade logic)
@@ -440,7 +446,23 @@ def _analyze_clike_code(code: str, language: str) -> AnalysisResult:
             error=f"{language.upper()} analysis failed: {exc}",
         )
 
-    from code_scalpel.ir.nodes import IRClassDef, IRFunctionDef, IRImport
+    return _analysis_result_from_ir_module(ir_module, code)
+
+
+def _analysis_result_from_ir_module(ir_module: Any, code: str) -> AnalysisResult:
+    """Build a basic AnalysisResult from a unified IR module."""
+    from code_scalpel.ir.nodes import IRClassDef, IRFunctionDef, IRImport, IRModule
+
+    if not isinstance(ir_module, IRModule):
+        return AnalysisResult(
+            success=False,
+            functions=[],
+            classes=[],
+            imports=[],
+            complexity=0,
+            lines_of_code=0,
+            error="Parser did not return a unified IR module.",
+        )
 
     functions: list[str] = []
     function_details: list[FunctionInfo] = []
@@ -448,7 +470,7 @@ def _analyze_clike_code(code: str, language: str) -> AnalysisResult:
     class_details: list[ClassInfo] = []
     imports: list[str] = []
 
-    def _walk(nodes: Any, inside_class: Optional[str] = None) -> None:
+    def _walk(nodes: Any) -> None:
         for node in nodes:
             if isinstance(node, IRFunctionDef) and node.name:
                 start = node.loc.line if node.loc else 0
@@ -462,12 +484,14 @@ def _analyze_clike_code(code: str, language: str) -> AnalysisResult:
                         is_async=node.is_async,
                     )
                 )
-                _walk(node.body, inside_class)
+                _walk(node.body)
             elif isinstance(node, IRClassDef) and node.name:
                 start = node.loc.line if node.loc else 0
                 end = (node.loc.end_line or start) if node.loc else 0
                 methods = [
-                    n.name for n in node.body if isinstance(n, IRFunctionDef) and n.name
+                    child.name
+                    for child in node.body
+                    if isinstance(child, IRFunctionDef) and child.name
                 ]
                 classes.append(node.name)
                 class_details.append(
@@ -478,7 +502,7 @@ def _analyze_clike_code(code: str, language: str) -> AnalysisResult:
                         methods=methods,
                     )
                 )
-                _walk(node.body, node.name)
+                _walk(node.body)
             elif isinstance(node, IRImport) and node.module:
                 imports.append(node.module)
 
@@ -489,11 +513,88 @@ def _analyze_clike_code(code: str, language: str) -> AnalysisResult:
         functions=functions,
         classes=classes,
         imports=imports,
-        complexity=len(functions),
+        complexity=max(1, len(functions)) if functions else 0,
         lines_of_code=len(code.splitlines()),
         function_details=function_details,
         class_details=class_details,
     )
+
+
+def _analyze_adapter_backed_code(code: str, language: str) -> AnalysisResult:
+    """Analyze languages backed by IParser adapters and unified IR normalizers."""
+    language_map = {
+        "go": ParserLanguage.GO,
+        "kotlin": ParserLanguage.KOTLIN,
+        "php": ParserLanguage.PHP,
+        "ruby": ParserLanguage.RUBY,
+        "swift": ParserLanguage.SWIFT,
+        "rust": ParserLanguage.RUST,
+    }
+
+    parser_language = language_map.get(language)
+    if parser_language is None:
+        return AnalysisResult(
+            success=False,
+            functions=[],
+            classes=[],
+            imports=[],
+            complexity=0,
+            lines_of_code=0,
+            error=f"Unsupported adapter-backed language '{language}'.",
+        )
+
+    try:
+        parser = ParserFactory.get_parser(parser_language)
+        parse_result = parser.parse(code)
+        ast_tree = getattr(parse_result, "ast", None)
+        if ast_tree is None:
+            ast_tree = getattr(parse_result, "ast_tree", None)
+
+        errors = list(getattr(parse_result, "errors", []) or [])
+        if errors and ast_tree is None:
+            first_error = errors[0]
+            if isinstance(first_error, dict):
+                message = first_error.get("message", str(first_error))
+            else:
+                message = str(first_error)
+            return AnalysisResult(
+                success=False,
+                functions=[],
+                classes=[],
+                imports=[],
+                complexity=0,
+                lines_of_code=0,
+                error=message,
+            )
+
+        result = _analysis_result_from_ir_module(ast_tree, code)
+        warnings = list(getattr(parse_result, "warnings", []) or [])
+        if warnings:
+            result.parser_warnings = warnings
+        return result
+    except ImportError as exc:
+        return AnalysisResult(
+            success=False,
+            functions=[],
+            classes=[],
+            imports=[],
+            complexity=0,
+            lines_of_code=0,
+            error=(
+                f"{language} support requires the corresponding parser dependencies. "
+                f"Error: {exc}"
+            ),
+        )
+    except Exception as exc:
+        return AnalysisResult(
+            success=False,
+            functions=[],
+            classes=[],
+            imports=[],
+            complexity=0,
+            lines_of_code=0,
+            error=f"{language} analysis failed: {exc}",
+        )
 
 
 def _analyze_java_code(code: str) -> AnalysisResult:
@@ -1078,36 +1179,13 @@ def _analyze_code_sync(
                 ),
             )
 
-    # [20251221_FEATURE] v3.1.0 - Use unified_extractor for language detection
-    if language == "auto" or language is None:
-        # [20251228_BUGFIX] Avoid deprecated shim imports.
-        from code_scalpel.surgery.unified_extractor import Language, detect_language
-
-        detected = detect_language(None, code)
-        lang_map = {
-            Language.PYTHON: "python",
-            Language.JAVASCRIPT: "javascript",
-            Language.TYPESCRIPT: "typescript",
-            Language.JAVA: "java",
-            Language.C: "c",  # [20260225_FEATURE]
-            Language.CPP: "cpp",  # [20260225_FEATURE]
-            Language.CSHARP: "csharp",  # [20260225_FEATURE]
-        }
-        language = lang_map.get(detected, "python")
+    # [20260306_REFACTOR] Use the central language detector shared across MCP tools.
+    language = detect_tool_language(code=code, language=language, default="python")
 
     # [20260110_FEATURE] v1.0 - Explicit language validation (BEFORE code validation)
     # Must happen before _validate_code() to prevent parsing unsupported languages as Python
     # [20260225_FEATURE] Added c/cpp/csharp now that IR normalizers are wired up
-    SUPPORTED_LANGUAGES = {
-        "python",
-        "javascript",
-        "typescript",
-        "java",
-        "c",
-        "cpp",
-        "csharp",
-    }
-    if language.lower() not in SUPPORTED_LANGUAGES:
+    if language.lower() not in SUPPORTED_POLYGLOT_LANGUAGES:
         return AnalysisResult(
             success=False,
             functions=[],
@@ -1115,7 +1193,10 @@ def _analyze_code_sync(
             imports=[],
             complexity=0,
             lines_of_code=0,
-            error=f"Unsupported language '{language}'. Supported: {', '.join(sorted(SUPPORTED_LANGUAGES))}. Roadmap: Go/Rust.",
+            error=(
+                f"Unsupported language '{language}'. Supported: "
+                f"{', '.join(sorted(SUPPORTED_POLYGLOT_LANGUAGES))}."
+            ),
         )
 
     valid, error = _validate_code(code)
@@ -1236,6 +1317,38 @@ def _analyze_code_sync(
             if has_capability("analyze_code", "framework_detection", tier):
                 result.frameworks = _detect_frameworks_from_code(
                     code, "typescript", result.imports
+                )
+
+            if has_capability("analyze_code", "api_surface_analysis", tier):
+                result.api_surface = _compute_api_surface_from_symbols(
+                    result.functions, result.classes
+                )
+
+            if has_capability("analyze_code", "priority_ordering", tier):
+                result.issues = _priority_sort(result.issues)
+                result.code_smells = _priority_sort(result.code_smells)
+                result.dead_code_hints = _priority_sort(result.dead_code_hints)
+                result.prioritized = True
+
+            if has_capability("analyze_code", "complexity_trends", tier):
+                result.complexity_trends = _update_and_get_complexity_trends(
+                    file_path=file_path,
+                    cyclomatic=result.complexity,
+                    cognitive=getattr(result, "cognitive_complexity", 0) or 0,
+                )
+        if cache and result.success:
+            cache.set(code, "analysis", result.model_dump(), cache_config)
+        return result
+
+    if language.lower() in {"go", "kotlin", "php", "ruby", "swift", "rust"}:
+        result = _analyze_adapter_backed_code(code, language.lower())
+        if result.success:
+            result.language_detected = language.lower()
+            result.tier_applied = tier
+
+            if has_capability("analyze_code", "framework_detection", tier):
+                result.frameworks = _detect_frameworks_from_code(
+                    code, language.lower(), result.imports
                 )
 
             if has_capability("analyze_code", "api_surface_analysis", tier):

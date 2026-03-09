@@ -57,9 +57,83 @@ def test_java_resolution_and_unknown_language(tmp_path: Path) -> None:
         resolve_module_path("java", "com.example.Service", tmp_path)
         == java_main / "Service.java"
     )
-    assert resolve_module_path("ruby", "foo", tmp_path) is None
+    assert resolve_module_path("unknown-language", "foo", tmp_path) is None
     assert get_mime_type("unknown") == "text/plain"
     assert get_mime_type("tsx") == "text/x-tsx"
+
+
+def test_additional_polyglot_resolution_variants(tmp_path: Path) -> None:
+    """[20260306_TEST] code:/// resolver should cover the newer file-backed languages."""
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "main.go").write_text("package pkg\n")
+
+    (tmp_path / "src" / "main" / "kotlin" / "com" / "example").mkdir(
+        parents=True
+    )
+    (tmp_path / "src" / "main" / "kotlin" / "com" / "example" / "Service.kt").write_text(
+        "class Service\n"
+    )
+
+    (tmp_path / "app" / "Http").mkdir(parents=True)
+    (tmp_path / "app" / "Http" / "Kernel.php").write_text("<?php\n")
+
+    (tmp_path / "lib" / "billing").mkdir(parents=True)
+    (tmp_path / "lib" / "billing" / "invoice.rb").write_text("class Invoice\nend\n")
+
+    (tmp_path / "Sources" / "App").mkdir(parents=True)
+    (tmp_path / "Sources" / "App" / "ViewModel.swift").write_text("struct ViewModel {}\n")
+
+    (tmp_path / "src" / "core").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "src" / "core" / "mod.rs").write_text("pub fn run() {}\n")
+
+    (tmp_path / "include" / "engine").mkdir(parents=True)
+    (tmp_path / "include" / "engine" / "math.hpp").write_text("// header\n")
+
+    (tmp_path / "src" / "Services").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "src" / "Services" / "Worker.cs").write_text("class Worker {}\n")
+
+    assert resolve_module_path("go", "pkg/main", tmp_path) == tmp_path / "pkg" / "main.go"
+    assert (
+        resolve_module_path("kotlin", "com.example.Service", tmp_path)
+        == tmp_path / "src" / "main" / "kotlin" / "com" / "example" / "Service.kt"
+    )
+    assert (
+        resolve_module_path("php", "Http/Kernel", tmp_path)
+        == tmp_path / "app" / "Http" / "Kernel.php"
+    )
+    assert (
+        resolve_module_path("ruby", "billing.invoice", tmp_path)
+        == tmp_path / "lib" / "billing" / "invoice.rb"
+    )
+    assert (
+        resolve_module_path("swift", "App/ViewModel", tmp_path)
+        == tmp_path / "Sources" / "App" / "ViewModel.swift"
+    )
+    assert (
+        resolve_module_path("rust", "core/mod", tmp_path)
+        == tmp_path / "src" / "core" / "mod.rs"
+    )
+    assert (
+        resolve_module_path("cpp", "engine/math", tmp_path)
+        == tmp_path / "include" / "engine" / "math.hpp"
+    )
+    assert (
+        resolve_module_path("csharp", "Services/Worker", tmp_path)
+        == tmp_path / "src" / "Services" / "Worker.cs"
+    )
+
+
+def test_additional_polyglot_mime_types() -> None:
+    """[20260306_TEST] MIME resolution should cover the newer file-backed languages."""
+    assert get_mime_type("go") == "text/x-go"
+    assert get_mime_type("kotlin") == "text/x-kotlin"
+    assert get_mime_type("php") == "application/x-php"
+    assert get_mime_type("ruby") == "text/x-ruby"
+    assert get_mime_type("swift") == "text/x-swift"
+    assert get_mime_type("rust") == "text/x-rustsrc"
+    assert get_mime_type("c") == "text/x-c"
+    assert get_mime_type("cpp") == "text/x-c++src"
+    assert get_mime_type("csharp") == "text/x-csharp"
 
 
 def test_direct_resolution_variants(tmp_path: Path) -> None:

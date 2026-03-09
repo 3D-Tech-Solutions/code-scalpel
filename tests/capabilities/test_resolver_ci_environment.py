@@ -19,7 +19,7 @@ class TestResolverLimitsFileOverride:
         """Resolver should load from default limits.toml when no override."""
         capabilities = get_all_capabilities("community")
         assert capabilities is not None
-        assert len(capabilities) == 22
+        assert len(capabilities) == 23
 
     def test_resolver_respects_custom_limits_file(
         self, clear_capabilities_cache, tmp_path, monkeypatch

@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from code_scalpel.parsing import ParsingError, parse_python_code
+from code_scalpel.mcp.helpers.language_helpers import detect_tool_language
 
 # Fallback Levenshtein if available
 try:
@@ -1897,22 +1898,11 @@ def _security_scan_sync(
                 )
             code = path.read_text(encoding="utf-8")
 
-            ext = path.suffix.lower()
-            extension_map = {
-                ".py": "python",
-                ".pyi": "python",
-                ".pyw": "python",
-                ".js": "javascript",
-                ".mjs": "javascript",
-                ".cjs": "javascript",
-                ".jsx": "javascript",
-                ".ts": "typescript",
-                ".tsx": "typescript",
-                ".mts": "typescript",
-                ".cts": "typescript",
-                ".java": "java",
-            }
-            detected_language = extension_map.get(ext, "python")
+            detected_language = detect_tool_language(
+                file_path=str(path),
+                code=code,
+                default="python",
+            )
         except Exception as e:
             return SecurityResult(
                 success=False,
@@ -1922,17 +1912,7 @@ def _security_scan_sync(
                 error=f"Failed to read file: {str(e)}.",
             )
     else:
-        # Auto-detect language from code content
-        from code_scalpel.surgery.unified_extractor import Language, detect_language
-
-        detected = detect_language(None, code)
-        lang_map = {
-            Language.PYTHON: "python",
-            Language.JAVASCRIPT: "javascript",
-            Language.TYPESCRIPT: "typescript",
-            Language.JAVA: "java",
-        }
-        detected_language = lang_map.get(detected, "python")
+        detected_language = detect_tool_language(code=code, default="python")
 
     if code is None:
         return SecurityResult(

@@ -24,6 +24,7 @@ tree-sitter
 tree-sitter-java
 tree-sitter-javascript  # [20251218_BUGFIX] Add missing JavaScript tree-sitter binding
 tree-sitter-typescript  # [20251218_BUGFIX] Add missing TypeScript tree-sitter binding
+tree-sitter-kotlin  # [20260306_BUGFIX] Kotlin normalizer/adapter require tree_sitter_kotlin
 mcp>=1.23.0
 pydantic>=2.11.0  # [20251230_BUGFIX] Required by mcp>=1.25.0
 pydantic-settings>=2.5.2  # [20251230_BUGFIX] Required by mcp>=1.25.0

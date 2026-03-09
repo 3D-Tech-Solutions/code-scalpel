@@ -1,10 +1,19 @@
 # [20260201_REFACTOR] Tier limits rebalanced per data-driven calibration
 # See docs/architecture/tier_limit_justification.md for methodology
 #
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# SENTINEL CONVENTION
+#   -1  = UNLIMITED  (annotated "# UNLIMITED" throughout this file)
+#         At runtime, _convert_sentinel() in licensing/features.py converts
+#         -1 → None before the value reaches any tool or enforcement logic.
+#         Absence of a key is also treated as unlimited by callers.
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#
 # Design Principles:
 #   Community: Covers solo dev projects ≤500 files (performance budget: <5s)
 #   Pro: Matches Enterprise limits (value = advanced features, not scale caps)
 #   Enterprise: Same limits as Pro + 139 governance capabilities (see features.toml)
+#   All 23 MCP tools available at every tier — differences are limits and features only.
 #
 # Limit derivation: f(project_size, performance_target, user_persona)
 
@@ -33,9 +42,13 @@ languages = [
     "go",
     "kotlin",
     "php",  # [20260303_FEATURE]
+    "ruby",  # [20260304_FEATURE]
+    "swift",  # [20260304_FEATURE]
+    "rust",  # [20260305_FEATURE]
 ]
 # [20260303_REFACTOR] static_tools via analyze_code (merged from run_static_analysis)
-static_tools_available = ["cppcheck", "clang-tidy", "clang-sa", "cpplint"]
+# [20260304_FEATURE] All tools listed; enterprise-only execution (coverity, sonarqube, resharper) gated in _ENTERPRISE_EXEC_TOOLS
+static_tools_available = ["cppcheck", "clang-tidy", "clang-sa", "cpplint", "coverity", "sonarqube", "roslyn", "stylecop", "scs", "fxcop", "resharper", "sonarqube-csharp", "gofmt", "golint", "govet", "staticcheck", "golangci", "gosec"]
 max_tool_findings = 50
 
 [community.get_file_context]
@@ -98,6 +111,9 @@ languages = [
     "go",
     "kotlin",
     "php",  # [20260303_FEATURE]
+    "ruby",  # [20260304_FEATURE]
+    "swift",  # [20260304_FEATURE]
+    "rust",  # [20260305_FEATURE]
 ]
 max_sinks = 50
 
@@ -149,6 +165,14 @@ test_frameworks = [
     "pytest",
 ]
 
+[community.get_capabilities]
+# [20260304_FEATURE] get_capabilities available at all tiers — no functional limits
+available = true
+
+[community.write_perfect_code]
+# [20260304_FEATURE] write_perfect_code available at all tiers per all-tools-at-all-tiers policy
+cache_ttl_seconds = 300
+
 # ─── PRO TIER ────────────────────────────────────────────────────────
 # Target: Teams, professional use, any project size
 # Limits match Enterprise — value = advanced features (see features.toml)
@@ -171,9 +195,13 @@ languages = [
     "go",
     "kotlin",
     "php",  # [20260303_FEATURE]
+    "ruby",  # [20260304_FEATURE]
+    "swift",  # [20260304_FEATURE]
+    "rust",  # [20260305_FEATURE]
 ]
 # [20260303_REFACTOR] static_tools via analyze_code (merged from run_static_analysis)
-static_tools_available = ["cppcheck", "clang-tidy", "clang-sa", "cpplint"]
+# [20260304_FEATURE] All tools listed; enterprise-only execution (coverity, sonarqube, resharper) gated in _ENTERPRISE_EXEC_TOOLS
+static_tools_available = ["cppcheck", "clang-tidy", "clang-sa", "cpplint", "coverity", "sonarqube", "roslyn", "stylecop", "scs", "fxcop", "resharper", "sonarqube-csharp", "gofmt", "golint", "govet", "staticcheck", "golangci", "gosec"]
 max_tool_findings = -1
 
 [pro.get_file_context]
@@ -223,6 +251,9 @@ languages = [
     "go",
     "kotlin",
     "php",  # [20260303_FEATURE]
+    "ruby",  # [20260304_FEATURE]
+    "swift",  # [20260304_FEATURE]
+    "rust",  # [20260305_FEATURE]
 ]
 max_sinks = -1               # Unlimited (match Enterprise)
 
@@ -277,6 +308,10 @@ test_frameworks = [
     "unittest",
 ]
 
+[pro.get_capabilities]
+# [20260304_FEATURE] get_capabilities available at all tiers — no functional limits
+available = true
+
 [pro.write_perfect_code]
 cache_ttl_seconds = 300
 
@@ -300,8 +335,24 @@ max_symbol_count = 1000000
 
 [enterprise.analyze_code]
 max_file_size_mb = 100
+languages = [
+    "python",
+    "javascript",
+    "typescript",
+    "java",
+    "c",
+    "cpp",
+    "csharp",
+    "go",
+    "kotlin",
+    "php",
+    "ruby",  # [20260304_FEATURE]
+    "swift",  # [20260304_FEATURE]
+    "rust",  # [20260305_FEATURE]
+]
 # [20260303_REFACTOR] static_tools via analyze_code (merged from run_static_analysis)
-static_tools_available = ["cppcheck", "clang-tidy", "clang-sa", "cpplint", "coverity", "sonarqube"]
+# [20260304_FEATURE] Enterprise-only tools (coverity, sonarqube, resharper) execution is gated in code, not here
+static_tools_available = ["cppcheck", "clang-tidy", "clang-sa", "cpplint", "coverity", "sonarqube", "roslyn", "stylecop", "scs", "fxcop", "resharper", "sonarqube-csharp", "gofmt", "golint", "govet", "staticcheck", "golangci", "gosec"]
 max_tool_findings = -1
 
 [enterprise.get_file_context]
@@ -370,6 +421,10 @@ constraint_types = "all"
 [enterprise.generate_unit_tests]
 test_frameworks = "all"
 
+[enterprise.get_capabilities]
+# [20260304_FEATURE] get_capabilities available at all tiers — no functional limits
+available = true
+
 [enterprise.write_perfect_code]
 cache_ttl_seconds = 300
 
@@ -394,6 +449,9 @@ languages = [
     "go",
     "kotlin",
     "php",  # [20260303_FEATURE]
+    "ruby",  # [20260304_FEATURE]
+    "swift",  # [20260304_FEATURE]
+    "rust",  # [20260305_FEATURE]
 ]
 max_sinks = -1               # Fixed: was 50 (same as Community)
 

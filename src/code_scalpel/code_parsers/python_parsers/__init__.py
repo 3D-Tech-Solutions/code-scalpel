@@ -454,3 +454,50 @@ def get_parser_info() -> dict[str, dict[str, str]]:
             "status": "⏳ NOT IMPLEMENTED (stub)",
         },
     }
+
+
+# =============================================================================
+# Parser Registry
+# =============================================================================
+
+
+class PythonParserRegistry:
+    """Registry for Python static-analysis tool parsers.
+
+    [20260304_FEATURE] Polyglot Phase 2: lazy-load factory for Python tools.
+    Registers parsers that have execute_* methods (they run the tool themselves).
+    Parse-output-only parsers (pylint, bandit, mypy, flake8, ruff, etc.) require
+    external tool output passed to parse_output() and are intentionally excluded.
+    """
+
+    _TOOL_MAP: dict = {
+        "vulture": ("python_parsers_vulture", "VultureParser"),
+        "isort": ("python_parsers_isort", "IsortParser"),
+        "radon": ("python_parsers_radon", "RadonParser"),
+        "radon-cc": ("python_parsers_radon", "RadonParser"),
+        "radon-mi": ("python_parsers_radon", "RadonParser"),
+        "pip-audit": ("python_parsers_safety", "SafetyParser"),
+        "safety": ("python_parsers_safety", "SafetyParser"),
+        "interrogate": ("python_parsers_interrogate", "InterrogateParser"),
+    }
+
+    def get_parser(self, tool_name: str):
+        """Return an instantiated parser for *tool_name*.
+
+        Args:
+            tool_name: One of the recognised tool identifiers (case-insensitive).
+
+        Raises:
+            ValueError: If *tool_name* is not a recognised executable tool.
+        """
+        import importlib
+
+        key = tool_name.lower()
+        if key not in self._TOOL_MAP:
+            raise ValueError(
+                f"Unknown Python parser tool: {tool_name!r}. "
+                f"Valid options: {sorted(set(self._TOOL_MAP.keys()))}"
+            )
+        module_name, class_name = self._TOOL_MAP[key]
+        module = importlib.import_module(f".{module_name}", package=__package__)
+        return getattr(module, class_name)()

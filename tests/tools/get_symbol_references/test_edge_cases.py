@@ -219,3 +219,374 @@ def other_func():
     assert result.success is True
     # Should find definition, both star imports, and both usages
     assert result.total_references >= 3
+
+
+@pytest.mark.asyncio
+async def test_typescript_definition_import_and_call_references(
+    make_project, patch_tier, patch_capabilities
+):
+    """[20260307_TEST] TypeScript symbol references should include local definition, import, and call sites."""
+    import code_scalpel.mcp.tools.context as server
+
+    project = make_project(
+        {
+            "src/target.ts": """
+export function target(): number {
+    return 1
+}
+""",
+            "src/consumer.ts": """
+import { target } from "./target"
+
+const value = target()
+""",
+        }
+    )
+
+    patch_tier("pro")
+    patch_capabilities(
+        {
+            "limits": {},
+            "capabilities": [
+                "usage_categorization",
+                "read_write_classification",
+                "import_classification",
+            ],
+        }
+    )
+
+    result = await server.get_symbol_references("target", project_root=str(project))
+
+    data = result.data if hasattr(result, "data") and isinstance(result.data, dict) else {}
+    assert data.get("success", getattr(result, "success", False)) is True
+    assert data.get("definition_file") == "src/target.ts"
+    assert data.get("tier_applied") == "pro"
+    assert data.get("max_files_applied") is None
+    assert data.get("max_references_applied") is None
+    category_counts = data.get("category_counts") or {}
+    assert category_counts.get("definition", 0) >= 1
+    assert category_counts.get("import", 0) >= 1
+    assert category_counts.get("call", 0) >= 1
+    references = data.get("references") or []
+    assert any(ref.get("file") == "src/consumer.ts" for ref in references)
+
+
+@pytest.mark.asyncio
+async def test_java_definition_import_and_call_references(
+    make_project, patch_tier, patch_capabilities
+):
+    """[20260308_TEST] Java symbol references should include local definition, import, and call sites."""
+    import code_scalpel.mcp.tools.context as server
+
+    project = make_project(
+        {
+            "src/demo/Helper.java": """
+package demo;
+
+public class Helper {
+    public static int tool() {
+        return 1;
+    }
+}
+""",
+            "src/demo/App.java": """
+package demo;
+
+import static demo.Helper.tool;
+
+public class App {
+    public int run() {
+        return tool();
+    }
+}
+""",
+        }
+    )
+
+    patch_tier("pro")
+    patch_capabilities(
+        {
+            "limits": {},
+            "capabilities": [
+                "usage_categorization",
+                "read_write_classification",
+                "import_classification",
+            ],
+        }
+    )
+
+    result = await server.get_symbol_references("tool", project_root=str(project))
+
+    data = result.data if hasattr(result, "data") and isinstance(result.data, dict) else {}
+    assert data.get("success", getattr(result, "success", False)) is True
+    assert data.get("definition_file") == "src/demo/Helper.java"
+    assert data.get("tier_applied") == "pro"
+    category_counts = data.get("category_counts") or {}
+    assert category_counts.get("definition", 0) >= 1
+    assert category_counts.get("import", 0) >= 1
+    assert category_counts.get("call", 0) >= 1
+    references = data.get("references") or []
+    assert any(ref.get("file") == "src/demo/App.java" for ref in references)
+
+
+@pytest.mark.asyncio
+async def test_java_overloaded_methods_clear_singular_definition_metadata(
+    make_project, patch_tier, patch_capabilities
+):
+    """[20260308_TEST] Java overload ambiguity should avoid claiming a singular definition."""
+    import code_scalpel.mcp.tools.context as server
+
+    project = make_project(
+        {
+            "src/demo/Helper.java": """
+package demo;
+
+public class Helper {
+    public void tool() {
+    }
+
+    public void tool(int value) {
+    }
+
+    public void run() {
+        tool();
+        tool(1);
+    }
+}
+""",
+        }
+    )
+
+    patch_tier("pro")
+    patch_capabilities(
+        {
+            "limits": {},
+            "capabilities": [
+                "usage_categorization",
+                "read_write_classification",
+                "import_classification",
+            ],
+        }
+    )
+
+    result = await server.get_symbol_references("tool", project_root=str(project))
+
+    data = result.data if hasattr(result, "data") and isinstance(result.data, dict) else {}
+    assert data.get("success", getattr(result, "success", False)) is True
+    assert data.get("definition_file") is None
+    assert data.get("definition_line") is None
+    assert data.get("ambiguity_kind") == "multiple_definitions"
+    warnings = data.get("warnings", getattr(result, "warnings", [])) or []
+    assert any(
+        "ambiguous java definition metadata" in warning.lower()
+        for warning in warnings
+    )
+    candidates = data.get("ambiguity_candidates") or []
+    selectors = {candidate.get("selector") for candidate in candidates}
+    assert "Helper.tool()" in selectors
+    assert "Helper.tool(int)" in selectors
+    references = data.get("references") or []
+    definition_refs = [ref for ref in references if ref.get("is_definition")]
+    assert len(definition_refs) >= 2
+    category_counts = data.get("category_counts") or {}
+    assert category_counts.get("definition", 0) >= 2
+
+
+@pytest.mark.asyncio
+async def test_java_inherited_override_clears_singular_definition_metadata(
+    make_project, patch_tier, patch_capabilities
+):
+    """[20260308_TEST] Java inherited overrides should avoid claiming a singular definition."""
+    import code_scalpel.mcp.tools.context as server
+
+    project = make_project(
+        {
+            "src/demo/Base.java": """
+package demo;
+
+public class Base {
+    protected void helper() {
+    }
+}
+""",
+            "src/demo/Child.java": """
+package demo;
+
+public class Child extends Base {
+    @Override
+    protected void helper() {
+    }
+
+    public void run() {
+        helper();
+        this.helper();
+    }
+}
+""",
+        }
+    )
+
+    patch_tier("pro")
+    patch_capabilities(
+        {
+            "limits": {},
+            "capabilities": [
+                "usage_categorization",
+                "read_write_classification",
+                "import_classification",
+            ],
+        }
+    )
+
+    result = await server.get_symbol_references("helper", project_root=str(project))
+
+    data = result.data if hasattr(result, "data") and isinstance(result.data, dict) else {}
+    assert data.get("success", getattr(result, "success", False)) is True
+    assert data.get("definition_file") is None
+    assert data.get("definition_line") is None
+    assert data.get("ambiguity_kind") == "multiple_definitions"
+    warnings = data.get("warnings", getattr(result, "warnings", [])) or []
+    assert any(
+        "ambiguous java definition metadata" in warning.lower()
+        for warning in warnings
+    )
+    candidates = data.get("ambiguity_candidates") or []
+    selectors = {candidate.get("selector") for candidate in candidates}
+    assert "Base.helper()" in selectors
+    assert "Child.helper()" in selectors
+    references = data.get("references") or []
+    definition_files = {ref.get("file") for ref in references if ref.get("is_definition")}
+    assert {"src/demo/Base.java", "src/demo/Child.java"} <= definition_files
+
+
+@pytest.mark.asyncio
+async def test_java_structured_selector_resolves_exact_overload(
+    make_project, patch_tier, patch_capabilities
+):
+    """[20260309_TEST] Java structured selectors should resolve an exact overload without leaving singular definition metadata ambiguous."""
+    import code_scalpel.mcp.tools.context as server
+
+    project = make_project(
+        {
+            "src/demo/Helper.java": """
+package demo;
+
+public class Helper {
+    public static void tool(int value) {
+    }
+
+    public static void tool(String value) {
+    }
+}
+""",
+            "src/demo/App.java": """
+package demo;
+
+import static demo.Helper.tool;
+
+public class App {
+    public void run() {
+        tool(1);
+        tool("x");
+    }
+}
+""",
+        }
+    )
+
+    patch_tier("pro")
+    patch_capabilities(
+        {
+            "limits": {},
+            "capabilities": [
+                "usage_categorization",
+                "read_write_classification",
+                "import_classification",
+            ],
+        }
+    )
+
+    result = await server.get_symbol_references(
+        "Helper.tool(int)", project_root=str(project)
+    )
+
+    data = result.data if hasattr(result, "data") and isinstance(result.data, dict) else {}
+    assert data.get("success", getattr(result, "success", False)) is True
+    assert data.get("definition_file") == "src/demo/Helper.java"
+    assert data.get("definition_line") is not None
+    assert data.get("ambiguity_kind") is None
+    references = data.get("references") or []
+    assert any(
+        ref.get("file") == "src/demo/App.java" and "tool(1)" in ref.get("context", "")
+        for ref in references
+    )
+    assert not any(
+        ref.get("file") == "src/demo/App.java" and 'tool("x")' in ref.get("context", "")
+        for ref in references
+    )
+
+
+@pytest.mark.asyncio
+async def test_java_structured_selector_colon_form_resolves_exact_overload(
+    make_project, patch_tier, patch_capabilities
+):
+    """[20260309_TEST] Java structured selectors should accept Class:method(type) as an exact overload key."""
+    import code_scalpel.mcp.tools.context as server
+
+    project = make_project(
+        {
+            "src/demo/Helper.java": """
+package demo;
+
+public class Helper {
+    public static void tool(int value) {
+    }
+
+    public static void tool(String value) {
+    }
+}
+""",
+            "src/demo/App.java": """
+package demo;
+
+import static demo.Helper.tool;
+
+public class App {
+    public void run() {
+        tool(1);
+        tool("x");
+    }
+}
+""",
+        }
+    )
+
+    patch_tier("pro")
+    patch_capabilities(
+        {
+            "limits": {},
+            "capabilities": [
+                "usage_categorization",
+                "read_write_classification",
+                "import_classification",
+            ],
+        }
+    )
+
+    result = await server.get_symbol_references(
+        "Helper:tool(int)", project_root=str(project)
+    )
+
+    data = result.data if hasattr(result, "data") and isinstance(result.data, dict) else {}
+    assert data.get("success", getattr(result, "success", False)) is True
+    assert data.get("definition_file") == "src/demo/Helper.java"
+    assert data.get("ambiguity_kind") is None
+    references = data.get("references") or []
+    assert any(
+        ref.get("file") == "src/demo/App.java" and "tool(1)" in ref.get("context", "")
+        for ref in references
+    )
+    assert not any(
+        ref.get("file") == "src/demo/App.java" and 'tool("x")' in ref.get("context", "")
+        for ref in references
+    )

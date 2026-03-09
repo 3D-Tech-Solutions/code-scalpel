@@ -1,4 +1,5 @@
 import textwrap
+from importlib.util import find_spec
 
 import pytest
 
@@ -7,6 +8,10 @@ from code_scalpel.mcp.helpers import analyze_helpers
 from code_scalpel.mcp.helpers.analyze_helpers import _analyze_code_sync
 
 # [20260121_TEST] Tier validation for analyze_code
+
+
+def _parser_module_available(module_name: str) -> bool:
+    return find_spec(module_name) is not None
 
 
 def _python_sample():
@@ -44,6 +49,26 @@ def _java_sample():
         public class Foo {
             public int add(int x) { return x + 1; }
         }
+        """)
+
+
+def _go_sample():
+    return textwrap.dedent("""
+        package main
+
+        import "fmt"
+
+        func add(x int) int { return x + 1 }
+        func main() { fmt.Println(add(1)) }
+        """)
+
+
+def _rust_sample():
+    return textwrap.dedent("""
+        use std::fmt;
+
+        fn add(x: i32) -> i32 { x + 1 }
+        fn main() { println!("{}", add(1)); }
         """)
 
 
@@ -112,10 +137,11 @@ class TestAnalyzeCodeCommunityTier:
         assert "limit of 1 MB" in result.error
 
     def test_unsupported_language_error(self):
-        result = _analyze_code_sync("fn main(){}", language="rust")
+        result = _analyze_code_sync("object Main extends App", language="scala")
         assert not result.success
         assert "Unsupported language" in result.error
-        assert "Go/Rust" in result.error
+        assert "swift" in result.error
+        assert "rust" in result.error
 
 
 class TestAnalyzeCodeProTier:
@@ -254,6 +280,8 @@ class TestAnalyzeCodeLanguageConsistency:
             ("javascript", _javascript_sample()),
             ("typescript", _typescript_sample()),
             ("java", _java_sample()),
+            ("go", _go_sample()),
+            ("rust", _rust_sample()),
         ],
     )
     def test_languages_all_tiers(self, lang, sample, monkeypatch):
@@ -262,6 +290,16 @@ class TestAnalyzeCodeLanguageConsistency:
                 analyze_helpers, "get_current_tier_from_license", lambda t=tier: t
             )
             result = _analyze_code_sync(sample, language=lang)
+            if lang == "go" and not _parser_module_available("tree_sitter_go"):
+                assert not result.success
+                assert "unsupported language" not in result.error.lower()
+                assert "tree_sitter_go" in result.error
+                continue
+            if lang == "rust" and not _parser_module_available("tree_sitter_rust"):
+                assert not result.success
+                assert "unsupported language" not in result.error.lower()
+                assert "tree_sitter_rust" in result.error
+                continue
             assert result.success
             assert result.language_detected == lang
             assert result.tier_applied == tier
@@ -272,17 +310,22 @@ class TestAnalyzeCodeErrorHandling:
         monkeypatch.setattr(
             analyze_helpers, "get_current_tier_from_license", lambda: "community"
         )
-        result = _analyze_code_sync("fn main(){}", language="go")
+        result = _analyze_code_sync("object Main extends App", language="scala")
         assert not result.success
         assert "supported" in result.error.lower()
 
-    def test_graceful_rejection(self, monkeypatch):
+    def test_supported_new_language(self, monkeypatch):
         monkeypatch.setattr(
             analyze_helpers, "get_current_tier_from_license", lambda: "community"
         )
-        result = _analyze_code_sync("bad", language="rust")
-        assert not result.success
-        assert result.functions == []
+        result = _analyze_code_sync(_rust_sample(), language="rust")
+        if _parser_module_available("tree_sitter_rust"):
+            assert result.success
+            assert "main" in result.functions
+        else:
+            assert not result.success
+            assert "unsupported language" not in result.error.lower()
+            assert "tree_sitter_rust" in result.error
 
 
 class TestAnalyzeCodeConfigurationAlignment:

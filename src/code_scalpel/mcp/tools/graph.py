@@ -47,6 +47,13 @@ async def _get_call_graph_tool(
 ) -> Any:
     """Build a call graph showing function relationships in the project.
 
+    [20260308_DOCS] Current graph runtime has multiple parity levels. Python still
+    receives the deepest call/node semantics today. JavaScript, TypeScript, and
+    Java have dedicated runtime slices. C, C++, C#, Go, Kotlin, PHP, Ruby, Swift,
+    and Rust currently expose local callable nodes and same-file call edges via
+    the shared IR-backed fallback. Parity is not yet uniform across all supported
+    languages.
+
     **Tier Behavior:**
     - Community: Max depth 10, max nodes 200, basic call graph only
     - Pro: All Community + path queries, focus mode, call context, confidence scoring
@@ -77,6 +84,9 @@ async def _get_call_graph_tool(
         - circular_imports (list[list[str]], optional): Detected circular dependencies
         - metadata (dict): Graph metadata
         - truncated (bool): Whether results were truncated
+        - language_parity (dict[str, str]): Current parity level by language
+        - parity_legend (dict[str, str]): Human-readable meaning for parity labels
+        - runtime_scope_summary (str): Short summary of the current polyglot scope
         - tier_applied (str): Tier used
         - error (str): Error message if graph building failed
         - tier_applied (str): Tier used for analysis
@@ -137,7 +147,7 @@ async def _get_call_graph_tool(
 
 
 get_call_graph = mcp.tool(
-    description="Generate a call graph showing function relationships, entry points, and circular imports."
+    description="Generate a call graph with advanced Python support, dedicated JS/TS and Java runtime slices, and local-call parity for the broader polyglot IR-backed language set."
 )(
     with_oracle_resilience(tool_id="get_call_graph", strategy=PathStrategy)(
         envelop_tool_function(
@@ -161,6 +171,13 @@ async def _get_graph_neighborhood_tool(
 ) -> Any:
     """Extract k-hop neighborhood subgraph around a center node.
 
+    [20260306_DOCS] This tool remains Python-first overall, with an initial
+    parity slice for local JavaScript/TypeScript function nodes and a narrow
+    Java method-node slice. Supported canonical IDs include
+    ``python::pkg.module::function::name``,
+    ``typescript::src/api/client::function::fetchUsers``, and
+    ``java::demo/App::method::App:main``.
+
     **Tier Behavior:**
     - Community: Max k=2, max nodes=100
     - Pro: All Community + extended neighborhood
@@ -168,11 +185,18 @@ async def _get_graph_neighborhood_tool(
 
     **Tier Capabilities:**
     - Community: Limited neighborhood (max_k=2, max_nodes=100)
-    - Pro: Unlimited neighborhood (max_k=unlimited, max_nodes=unlimited)
-    - Enterprise: Unlimited neighborhood (max_k=unlimited, max_nodes=unlimited)
+    - Pro: Unlimited neighborhood with advanced resolution features
+    - Enterprise: Unlimited neighborhood with enterprise graph features
 
     **Args:**
-        center_node_id (str): ID of the center node (format: language::module::type::name).
+        center_node_id (str): ID of the center node. Current runtime support is
+            for local Python function nodes, local JavaScript/TypeScript
+            function nodes, local JavaScript/TypeScript method nodes when
+            advanced resolution is enabled, and local Java method nodes in the
+            format language::module::type::name (for example,
+            python::app.routes::function::handle_request,
+            typescript::src/api/client::function::fetchUsers, or
+            java::demo/App::method::App:main).
         k (int): Maximum hops from center. Default: 2.
         max_nodes (int): Maximum nodes to include. Default: 100.
         direction (str): "outgoing", "incoming", or "both". Default: "both".
@@ -189,8 +213,10 @@ async def _get_graph_neighborhood_tool(
         - mermaid (str): Mermaid diagram of neighborhood
         - truncated (bool): Whether results were truncated
         - tier_applied (str): Tier used
+        - max_k_applied (int, optional): Max k-hop limit applied
+        - max_nodes_applied (int, optional): Max nodes limit applied
+        - advanced_resolution_enabled (bool): Whether advanced graph resolution was enabled
         - error (str): Error message if extraction failed
-        - tier_applied (str): Tier used for analysis
         - duration_ms (int): Analysis duration in milliseconds
     """
     # Pre-validation: Check node ID format early to fail fast
@@ -201,14 +227,34 @@ async def _get_graph_neighborhood_tool(
     if not isinstance(center_node_id, str):
         center_node_id = str(center_node_id)
 
-    node_id_pattern = r"^[a-z]+::[^:]+::(function|class|method)::[^:]+$"
-    if not re.match(node_id_pattern, center_node_id):
+    node_id_pattern = r"^(?P<language>[a-z]+)::(?P<module>[^:]+)::(?P<kind>function|class|method)::(?P<name>.+)$"
+    match = re.match(node_id_pattern, center_node_id)
+    if not match:
         # Raise ValidationError to trigger oracle suggestions
         from code_scalpel.mcp.validators.core import ValidationError
 
         raise ValidationError(
             f"Invalid node ID format: '{center_node_id}'. "
             "Expected format: language::module::type::name (e.g., python::app.routes::function::handle_request)"
+        )
+
+    language = match.group("language")
+    kind = match.group("kind")
+
+    if (
+        (kind == "function" and language not in {"python", "javascript", "typescript"})
+        or (kind == "method" and language not in {"javascript", "typescript", "java"})
+        or kind == "class"
+    ):
+        from code_scalpel.mcp.validators.core import ValidationError
+
+        raise ValidationError(
+            "get_graph_neighborhood currently supports local Python function nodes plus local JavaScript/TypeScript function and method nodes and local Java method nodes only. "
+            f"Received '{center_node_id}'. Use a canonical Python node ID such as "
+            "python::app.routes::function::handle_request, a canonical JS/TS function node ID such as "
+            "typescript::src/api/client::function::fetchUsers, or a JS/TS method node ID such as "
+            "typescript::src/services/user_service::method::UserService:fetchUsers, or a Java method node ID such as "
+            "java::demo/App::method::App:main."
         )
 
     # Pre-validation: Check parameter ranges
@@ -242,7 +288,7 @@ async def _get_graph_neighborhood_tool(
 
 
 get_graph_neighborhood = mcp.tool(
-    description="Extract the k-hop subgraph around a center node from the project's call graph."
+    description="Extract a Python-first k-hop subgraph around a local Python function node, a local JS/TS function or method node, or a local Java method node from the project's call graph."
 )(
     with_oracle_resilience(
         tool_id="get_graph_neighborhood", strategy=NodeIdFormatStrategy
@@ -268,6 +314,11 @@ async def _get_project_map_tool(
     ctx: Context | None = None,
 ) -> Any:
     """Generate a comprehensive map of the project structure.
+
+    [20260308_DOCS] This surface remains Python-first overall, but now includes
+    an initial local JS/TS slice plus a narrow Java slice for module discovery.
+    Pro and Enterprise can also derive Java file relationships from explicit
+    imports and static imports through the shared project-map relationship path.
 
     **Tier Behavior:**
     - Community: Up to 500 files, 100 modules, basic detail level
@@ -418,10 +469,16 @@ async def _get_cross_file_dependencies_tool(
 ) -> Any:
     """Analyze and extract cross-file dependencies for a symbol.
 
+    [20260308_DOCS] This dependency workflow remains Python-first overall.
+    It now includes an initial JavaScript/TypeScript slice plus a narrow Java
+    method slice using the shared graph runtime. Java Community support is
+    local-method only; Pro and Enterprise reuse the existing cross-file Java
+    call-graph resolution.
+
     **Tier Behavior:**
-    - Community: Max depth=1, max files=50
-    - Pro: All Community + extended depth and files
-    - Enterprise: All Pro + unlimited depth and files
+    - Community: Limited depth analysis (max_depth=3, max_files=200)
+    - Pro: Unlimited depth and files with richer dependency extras
+    - Enterprise: Unlimited depth and files with governance analysis
 
     **Tier Capabilities:**
     - Community: Limited depth analysis (max_depth=3, max_files=200)
@@ -431,6 +488,7 @@ async def _get_cross_file_dependencies_tool(
     **Args:**
         target_file (str): Path to file containing the target symbol (relative to project root).
         target_symbol (str): Name of the function or class to analyze.
+            Java graph-backed slices accept bare method names or Class.method / Class:method.
         project_root (str, optional): Project root directory. Default: server's project root.
         max_depth (int): Maximum depth of dependency resolution. Default: 3.
         include_code (bool): Include full source code in result. Default: True.
@@ -450,8 +508,9 @@ async def _get_cross_file_dependencies_tool(
         - mermaid (str): Mermaid diagram of dependencies
         - truncated (bool): Whether results were truncated
         - tier_applied (str): Tier used
+        - max_depth_applied (int, optional): Max depth limit applied
+        - max_files_applied (int, optional): Max files limit applied
         - error (str): Error message if analysis failed
-        - tier_applied (str): Tier used for analysis
         - duration_ms (int): Analysis duration in milliseconds
     """
     tier = _get_current_tier()
@@ -494,7 +553,7 @@ async def _get_cross_file_dependencies_tool(
 
 
 get_cross_file_dependencies = mcp.tool(
-    description="Trace cross-file dependency chains for a symbol with confidence scoring."
+    description="Trace Python-first cross-file dependency chains for a symbol, including an initial local JS/TS graph-backed parity slice."
 )(
     with_oracle_resilience(
         tool_id="get_cross_file_dependencies", strategy=PathStrategy

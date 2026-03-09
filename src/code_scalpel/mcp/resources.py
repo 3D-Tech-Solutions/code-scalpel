@@ -226,6 +226,9 @@ async def get_analysis_resource(path: str) -> str:
     """Get code analysis for a file by path."""
     import json
 
+    from code_scalpel.mcp.helpers.analyze_helpers import _analyze_code_sync
+    from code_scalpel.mcp.helpers.security_helpers import _security_scan_sync
+    from code_scalpel.mcp.helpers.language_helpers import detect_tool_language
     from code_scalpel.mcp.path_resolver import resolve_path
 
     server = _server()
@@ -236,11 +239,15 @@ async def get_analysis_resource(path: str) -> str:
 
         server._validate_path_security(file_path)
 
+        # [20260306_BUGFIX] Route file analysis resources through shared language detection.
         code = await _run_in_thread(file_path.read_text, encoding="utf-8")
+        language = detect_tool_language(file_path=str(file_path), code=code)
 
+        # [20260306_BUGFIX] Use the shared analyze helper directly so resource templates
+        # stay aligned with the MCP tool implementation rather than the legacy server shim.
         analysis, security = await asyncio.gather(
-            _run_in_thread(server._analyze_code_sync, code, "python"),
-            _run_in_thread(server._security_scan_sync, code),
+            _run_in_thread(_analyze_code_sync, code, language, str(file_path)),
+            _run_in_thread(_security_scan_sync, code, str(file_path)),
         )
 
         return json.dumps(
@@ -360,15 +367,15 @@ def _extract_code_sync(
 
 
 @mcp.resource("scalpel://symbol/{file_path}/{symbol_name}")
-def get_symbol_resource(file_path: str, symbol_name: str) -> str:
+async def get_symbol_resource(file_path: str, symbol_name: str) -> str:
     """
     Extract a specific symbol (function/class) from a file (Resource Template).
 
     [20251215_FEATURE] v2.0.0 - Surgical symbol extraction via URI template.
     """
-    import ast
     import json
 
+    from code_scalpel.mcp.helpers.language_helpers import detect_tool_language
     from code_scalpel.mcp.path_resolver import resolve_path
 
     server = _server()
@@ -380,30 +387,60 @@ def get_symbol_resource(file_path: str, symbol_name: str) -> str:
         # Security check
         server._validate_path_security(path)
 
+        # [20260306_FEATURE] Allow symbol resources to use the same polyglot routing as extract_code.
+        language = detect_tool_language(file_path=str(path))
+
         # Determine target type
         if "." in symbol_name:
-            target_type = "method"
+            target_types_to_try = ["method"]
         else:
-            # Try to detect from code
-            code = path.read_text(encoding="utf-8")
-            tree = ast.parse(code)
+            if language == "python":
+                import ast
 
-            target_type = "function"
-            for node in ast.walk(tree):
-                if isinstance(node, ast.ClassDef) and node.name == symbol_name:
-                    target_type = "class"
-                    break
+                code = await _run_in_thread(path.read_text, encoding="utf-8")
+                tree = ast.parse(code)
 
-        # Use extraction logic
-        result = _extract_code_sync(
-            target_type=target_type,
-            target_name=symbol_name,
-            file_path=str(path),
-            include_context=True,
-            include_token_estimate=True,
-        )
+                target_type = "function"
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.ClassDef) and node.name == symbol_name:
+                        target_type = "class"
+                        break
+                target_types_to_try = [target_type]
+            elif symbol_name and symbol_name[0].isupper():
+                target_types_to_try = ["class", "function"]
+            else:
+                target_types_to_try = ["function", "class"]
 
-        return json.dumps(result.model_dump(), indent=2)
+        result = None
+        last_error = None
+        for target_type in target_types_to_try:
+            result = await server.extract_code(
+                target_type=target_type,
+                target_name=symbol_name,
+                file_path=str(path),
+                language=language,
+                include_context=True,
+                include_token_estimate=True,
+            )
+            if result.success:
+                break
+            last_error = result.error
+
+        if result is None or not result.success:
+            return json.dumps(
+                {
+                    "error": last_error or "Extraction failed",
+                    "file_path": str(path),
+                    "symbol_name": symbol_name,
+                    "language": language,
+                },
+                indent=2,
+            )
+
+        # [20260306_BUGFIX] Preserve the legacy resource payload shape when extract_code returns an envelope.
+        payload = result.data if hasattr(result, "data") and result.data is not None else result
+        serialized = payload.model_dump() if hasattr(payload, "model_dump") else payload
+        return json.dumps(serialized, indent=2)
     except FileNotFoundError as e:
         return json.dumps({"error": str(e)})
     except PermissionError as e:

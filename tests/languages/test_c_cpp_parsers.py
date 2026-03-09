@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import pytest
 
+pytest.importorskip("tree_sitter_c", reason="tree_sitter_c not installed; skipping C/C++ parser tests")
+
 from code_scalpel.ir.nodes import (
     IRAssign,
     IRClassDef,

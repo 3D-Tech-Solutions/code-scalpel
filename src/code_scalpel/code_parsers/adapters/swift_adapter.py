@@ -1,43 +1,54 @@
-"""Swift Parser Adapter - IParser interface for Swift parser.
+"""Swift Parser Adapter - IParser interface for the Swift normalizer.
 
-[20251224_FEATURE] Stub adapter for Swift parsing support.
+[20260304_FEATURE] Real implementation replacing stub adapter.
 
 """
 
 from typing import Any, List
 
-from ..interface import IParser, ParseResult
+from ..interface import IParser, Language as IParserLanguage, ParseResult
 
 
 class SwiftParserAdapter(IParser):
     """
-    Adapter for Swift parsing (STUB - Not Yet Implemented).
+    Adapter wrapping SwiftNormalizer for the IParser interface.
 
-    [20251224_STUB] Placeholder for Swift parser integration.
-
-    To implement:
-        1. Choose backend and integrate parser
-        2. Implement parse() method
-        3. Add Swift-specific extraction methods
-        4. Support Swift version detection
-        5. Add framework pattern detection
+    [20260304_FEATURE] Full implementation using tree-sitter-swift.
     """
 
-    def __init__(self):
-        """Initialize the Swift parser adapter (stub)."""
-        raise NotImplementedError(
-            "SwiftParserAdapter not yet implemented. "
-            "See TODO items in this file for implementation roadmap."
-        )
+    def __init__(self) -> None:
+        """Initialise the adapter, loading SwiftNormalizer lazily."""
+        from code_scalpel.ir.normalizers.swift_normalizer import SwiftNormalizer
+
+        self._normalizer = SwiftNormalizer()
 
     def parse(self, code: str) -> ParseResult:
-        """Parse Swift code (stub)."""
-        raise NotImplementedError("Swift parsing not yet implemented")
+        """Parse Swift source code and return a ParseResult wrapping an IRModule."""
+        ir_module = self._normalizer.normalize(code)
+        return ParseResult(
+            ast=ir_module,
+            errors=[],
+            warnings=[],
+            metrics={},
+            language=IParserLanguage.SWIFT,
+        )
 
     def get_functions(self, ast_tree: Any) -> List[str]:
-        """Get function names from Swift AST (stub)."""
-        raise NotImplementedError("Swift function extraction not yet implemented")
+        """Return top-level function names from a parsed IRModule."""
+        from code_scalpel.ir.nodes import IRFunctionDef
+
+        return [
+            n.name
+            for n in getattr(ast_tree, "body", [])
+            if isinstance(n, IRFunctionDef)
+        ]
 
     def get_classes(self, ast_tree: Any) -> List[str]:
-        """Get class names from Swift AST (stub)."""
-        raise NotImplementedError("Swift class extraction not yet implemented")
+        """Return top-level class/struct/enum names from a parsed IRModule."""
+        from code_scalpel.ir.nodes import IRClassDef
+
+        return [
+            n.name
+            for n in getattr(ast_tree, "body", [])
+            if isinstance(n, IRClassDef)
+        ]
