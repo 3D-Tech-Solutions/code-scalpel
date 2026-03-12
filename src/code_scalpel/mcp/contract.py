@@ -482,6 +482,11 @@ def envelop_tool_function(
             if inspect.isawaitable(result):
                 result = await result
 
+            # [20260311_BUGFIX] Preserve pre-built envelopes returned by tool
+            # implementations instead of wrapping them again.
+            if isinstance(result, ToolResponseEnvelope):
+                return result
+
             duration_ms = int((time.perf_counter() - started) * 1000)
             success, err_msg = _maybe_get_success_and_error(result)
 

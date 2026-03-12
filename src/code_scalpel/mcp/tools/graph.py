@@ -6,7 +6,12 @@ import asyncio
 from typing import Any
 
 from code_scalpel.mcp.models.graph import GraphNeighborhoodResult
-from code_scalpel.mcp.contract import ToolResponseEnvelope, envelop_tool_function
+from code_scalpel.mcp.contract import (
+    ToolError,
+    ToolResponseEnvelope,
+    envelop_tool_function,
+    make_envelope,
+)
 from code_scalpel.mcp.oracle_middleware import (
     with_oracle_resilience,
     PathStrategy,
@@ -23,6 +28,7 @@ from code_scalpel.mcp.helpers.graph_helpers import (
     _get_graph_neighborhood_sync,
     _get_project_map_sync,
 )
+from code_scalpel.mcp.path_resolver import resolve_path
 from code_scalpel.mcp.protocol import mcp
 from code_scalpel import __version__ as _pkg_version
 from code_scalpel.mcp.protocol import _get_current_tier as _tier_getter
@@ -92,6 +98,37 @@ async def _get_call_graph_tool(
         - tier_applied (str): Tier used for analysis
         - duration_ms (int): Analysis duration in milliseconds
     """
+    if depth < 1:
+        return make_envelope(
+            data=None,
+            tool_id="get_call_graph",
+            tool_version=_pkg_version,
+            tier=_get_current_tier(),
+            duration_ms=0,
+            error=ToolError(
+                error="Parameter 'depth' must be >= 1.",
+                error_code="invalid_argument",
+                error_details={"depth": depth},
+            ),
+        )
+    if (paths_from is None) != (paths_to is None):
+        return make_envelope(
+            data=None,
+            tool_id="get_call_graph",
+            tool_version=_pkg_version,
+            tier=_get_current_tier(),
+            duration_ms=0,
+            error=ToolError(
+                error="Provide both 'paths_from' and 'paths_to' together for path queries.",
+                error_code="invalid_argument",
+                error_details={"paths_from": paths_from, "paths_to": paths_to},
+            ),
+        )
+    if project_root is not None:
+        from code_scalpel.mcp.helpers.session import _get_project_root
+
+        project_root = resolve_path(project_root, str(_get_project_root()))
+
     if ctx:
         await ctx.report_progress(0, 100, "Building call graph...")
 
@@ -230,50 +267,139 @@ async def _get_graph_neighborhood_tool(
     node_id_pattern = r"^(?P<language>[a-z]+)::(?P<module>[^:]+)::(?P<kind>function|class|method)::(?P<name>.+)$"
     match = re.match(node_id_pattern, center_node_id)
     if not match:
-        # Raise ValidationError to trigger oracle suggestions
-        from code_scalpel.mcp.validators.core import ValidationError
-
-        raise ValidationError(
-            f"Invalid node ID format: '{center_node_id}'. "
-            "Expected format: language::module::type::name (e.g., python::app.routes::function::handle_request)"
+        return make_envelope(
+            data=None,
+            tool_id="get_graph_neighborhood",
+            tool_version=_pkg_version,
+            tier=_get_current_tier(),
+            duration_ms=0,
+            error=ToolError(
+                error=(
+                    f"Invalid node ID format: '{center_node_id}'. "
+                    "Expected format: language::module::type::name "
+                    "(e.g., python::app.routes::function::handle_request)"
+                ),
+                error_code="correction_needed",
+                error_details={
+                    "hint": (
+                        "Use node IDs in the form language::module::type::name, "
+                        "for example python::app.routes::function::handle_request."
+                    )
+                },
+            ),
         )
 
     language = match.group("language")
     kind = match.group("kind")
 
     if (
-        (kind == "function" and language not in {"python", "javascript", "typescript"})
-        or (kind == "method" and language not in {"javascript", "typescript", "java"})
+        (kind == "function" and language not in {"python", "javascript", "typescript", "go"})
+        or (kind == "method" and language not in {"javascript", "typescript", "java", "go"})
         or kind == "class"
     ):
-        from code_scalpel.mcp.validators.core import ValidationError
-
-        raise ValidationError(
-            "get_graph_neighborhood currently supports local Python function nodes plus local JavaScript/TypeScript function and method nodes and local Java method nodes only. "
-            f"Received '{center_node_id}'. Use a canonical Python node ID such as "
-            "python::app.routes::function::handle_request, a canonical JS/TS function node ID such as "
-            "typescript::src/api/client::function::fetchUsers, or a JS/TS method node ID such as "
-            "typescript::src/services/user_service::method::UserService:fetchUsers, or a Java method node ID such as "
-            "java::demo/App::method::App:main."
+        return make_envelope(
+            data=None,
+            tool_id="get_graph_neighborhood",
+            tool_version=_pkg_version,
+            tier=_get_current_tier(),
+            duration_ms=0,
+            error=ToolError(
+                error=(
+                    "get_graph_neighborhood currently supports local Python function nodes plus "
+                    "local JavaScript/TypeScript function and method nodes, local Java method nodes, "
+                    "and local Go function/method nodes only. "
+                    f"Received '{center_node_id}'."
+                ),
+                error_code="correction_needed",
+                error_details={
+                    "hint": (
+                        "Use a canonical supported node ID such as "
+                        "python::app.routes::function::handle_request, "
+                        "typescript::src/api/client::function::fetchUsers, "
+                        "java::demo/App::method::App:main, or go::cmd/main::function::main."
+                    )
+                },
+            ),
         )
 
-    # Pre-validation: Check parameter ranges
     try:
         k = int(k)
         max_nodes = int(max_nodes)
     except (ValueError, TypeError):
-        raise ValueError(
-            "Invalid parameters: 'k' and 'max_nodes' must be valid integers"
+        return make_envelope(
+            data=None,
+            tool_id="get_graph_neighborhood",
+            tool_version=_pkg_version,
+            tier=_get_current_tier(),
+            duration_ms=0,
+            error=ToolError(
+                error="Invalid parameters: 'k' and 'max_nodes' must be valid integers.",
+                error_code="invalid_argument",
+                error_details={"k": k, "max_nodes": max_nodes},
+            ),
         )
 
     if k < 1:
-        raise ValueError("Parameter 'k' must be >= 1")
-    if max_nodes < 1:
-        raise ValueError("Parameter 'max_nodes' must be >= 1")
-    if direction not in ["outgoing", "incoming", "both"]:
-        raise ValueError(
-            f"Parameter 'direction' must be 'outgoing', 'incoming', or 'both', got '{direction}'"
+        return make_envelope(
+            data=None,
+            tool_id="get_graph_neighborhood",
+            tool_version=_pkg_version,
+            tier=_get_current_tier(),
+            duration_ms=0,
+            error=ToolError(
+                error="Parameter 'k' must be >= 1.",
+                error_code="invalid_argument",
+                error_details={"k": k},
+            ),
         )
+    if max_nodes < 1:
+        return make_envelope(
+            data=None,
+            tool_id="get_graph_neighborhood",
+            tool_version=_pkg_version,
+            tier=_get_current_tier(),
+            duration_ms=0,
+            error=ToolError(
+                error="Parameter 'max_nodes' must be >= 1.",
+                error_code="invalid_argument",
+                error_details={"max_nodes": max_nodes},
+            ),
+        )
+    if direction not in ["outgoing", "incoming", "both"]:
+        return make_envelope(
+            data=None,
+            tool_id="get_graph_neighborhood",
+            tool_version=_pkg_version,
+            tier=_get_current_tier(),
+            duration_ms=0,
+            error=ToolError(
+                error=(
+                    "Parameter 'direction' must be 'outgoing', 'incoming', or 'both', "
+                    f"got '{direction}'."
+                ),
+                error_code="invalid_argument",
+                error_details={"direction": direction},
+            ),
+        )
+
+    if project_root is not None:
+        from code_scalpel.mcp.helpers.session import _get_project_root
+
+        try:
+            project_root = resolve_path(project_root, str(_get_project_root()))
+        except FileNotFoundError as exc:
+            return make_envelope(
+                data=None,
+                tool_id="get_graph_neighborhood",
+                tool_version=_pkg_version,
+                tier=_get_current_tier(),
+                duration_ms=0,
+                error=ToolError(
+                    error=str(exc),
+                    error_code="correction_needed",
+                    error_details={"hint": str(exc)},
+                ),
+            )
 
     return await asyncio.to_thread(
         _get_graph_neighborhood_sync,

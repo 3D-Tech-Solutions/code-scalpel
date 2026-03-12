@@ -97,27 +97,28 @@ def _get_tool_function(tool_name: str):
         "extract_code": "code_scalpel.mcp.tools.extraction",
         "rename_symbol": "code_scalpel.mcp.tools.extraction",
         "update_symbol": "code_scalpel.mcp.tools.extraction",
-        "simulate_refactor": "code_scalpel.mcp.tools.extraction",
+        "simulate_refactor": "code_scalpel.mcp.tools.symbolic",
         # Analysis tools
         "analyze_code": "code_scalpel.mcp.tools.analyze",
         "get_file_context": "code_scalpel.mcp.tools.context",
         "get_call_graph": "code_scalpel.mcp.tools.graph",
         "get_cross_file_dependencies": "code_scalpel.mcp.tools.graph",
-        "get_symbol_references": "code_scalpel.mcp.tools.graph",
+        "get_symbol_references": "code_scalpel.mcp.tools.context",
         "get_graph_neighborhood": "code_scalpel.mcp.tools.graph",
-        "get_project_map": "code_scalpel.mcp.tools.context",
+        "get_project_map": "code_scalpel.mcp.tools.graph",
         "crawl_project": "code_scalpel.mcp.tools.context",
         # Security tools
         "security_scan": "code_scalpel.mcp.tools.security",
-        "cross_file_security_scan": "code_scalpel.mcp.tools.security",
+        "cross_file_security_scan": "code_scalpel.mcp.tools.graph",
         "type_evaporation_scan": "code_scalpel.mcp.tools.security",
-        "unified_sink_detect": "code_scalpel.mcp.tools.security",
         "symbolic_execute": "code_scalpel.mcp.tools.symbolic",
+        "unified_sink_detect": "code_scalpel.mcp.tools.security",
         # Testing & generation
-        "generate_unit_tests": "code_scalpel.mcp.tools.system",
+        "generate_unit_tests": "code_scalpel.mcp.tools.symbolic",
+        "get_capabilities": "code_scalpel.mcp.tools.system",
         # Validation tools
-        "validate_paths": "code_scalpel.mcp.tools.system",
-        "scan_dependencies": "code_scalpel.mcp.tools.system",
+        "validate_paths": "code_scalpel.mcp.tools.policy",
+        "scan_dependencies": "code_scalpel.mcp.tools.security",
         "code_policy_check": "code_scalpel.mcp.tools.policy",
         # Policy tools
         "verify_policy_integrity": "code_scalpel.mcp.tools.policy",
@@ -206,6 +207,13 @@ def _print_error(error: ToolError | str | Any, tier: str) -> None:
     if error_code:
         print(f"Error Code: {error_code}", file=sys.stderr)
 
+        guidance_lines = _format_error_guidance(error_code, error_details)
+        if guidance_lines:
+            print("", file=sys.stderr)
+            print("Oracle guidance:", file=sys.stderr)
+            for line in guidance_lines:
+                print(f"  - {line}", file=sys.stderr)
+
         # Print upgrade hint for tier-related errors
         if error_code == "upgrade_required":
             print("", file=sys.stderr)
@@ -221,6 +229,64 @@ def _print_error(error: ToolError | str | Any, tier: str) -> None:
             print(
                 "  https://github.com/cyanheads/code-scalpel#licensing", file=sys.stderr
             )
+
+
+def _format_error_guidance(
+    error_code: str | None, error_details: dict[str, Any] | None
+) -> list[str]:
+    """Convert structured tool error details into CLI-friendly Oracle guidance."""
+    if not error_code or not isinstance(error_details, dict):
+        return []
+
+    guidance: list[str] = []
+
+    hint = error_details.get("hint")
+    if isinstance(hint, str) and hint.strip():
+        guidance.append(hint.strip())
+
+    preferred_order = [
+        "available_tiers",
+        "available_tools",
+        "supported_languages",
+        "required_tier",
+        "direction",
+        "target_type",
+        "manifest_source",
+        "confidence_threshold",
+        "complexity_threshold",
+        "min_isolation_score",
+        "timeout",
+        "timeout_seconds",
+        "max_depth",
+        "max_paths",
+        "max_modules",
+        "max_files",
+        "k",
+        "paths_from",
+        "paths_to",
+    ]
+
+    handled = {"hint"}
+    for key in preferred_order:
+        if key in error_details and key not in handled:
+            value = error_details[key]
+            if isinstance(value, (list, tuple, set)):
+                rendered = ", ".join(str(item) for item in value)
+            else:
+                rendered = str(value)
+            guidance.append(f"{key.replace('_', ' ')}: {rendered}")
+            handled.add(key)
+
+    for key, value in error_details.items():
+        if key in handled:
+            continue
+        if isinstance(value, (list, tuple, set)):
+            rendered = ", ".join(str(item) for item in value)
+        else:
+            rendered = str(value)
+        guidance.append(f"{key.replace('_', ' ')}: {rendered}")
+
+    return guidance
 
 
 def _print_success_data(data: Any, tier: str | None, duration_ms: int | None) -> None:
@@ -259,6 +325,20 @@ def _print_tool_specific_output(data: Dict[str, Any]) -> None:
     Args:
         data: Tool result data as dictionary
     """
+    # Capabilities - print tier summary or per-tool details
+    if "capabilities" in data and "tier" in data:
+        print(f"Code Scalpel Capabilities - {str(data['tier']).upper()} Tier")
+        print(
+            f"Available: {data.get('available_count', 0)}/{data.get('tool_count', 0)}"
+        )
+        return
+
+    if "tool_name" in data and "tier_limits" in data:
+        print(f"Tool: {data['tool_name']}")
+        if data.get("short_description"):
+            print(str(data["short_description"]).strip())
+        return
+
     # Extract code tool - print extracted code
     if "full_code" in data:
         print(data["full_code"])
@@ -271,15 +351,26 @@ def _print_tool_specific_output(data: Dict[str, Any]) -> None:
         return
 
     # Analysis tool - print structured analysis
-    if "functions" in data or "classes" in data:
+    if "functions" in data or "classes" in data or "lines_of_code" in data:
+        print("Analysis Summary")
+        if "lines_of_code" in data:
+            print(f"Lines of code: {data.get('lines_of_code', 0)}")
+        if "complexity" in data:
+            print(f"Complexity: {data.get('complexity', 0)}")
         if data.get("functions"):
             print(f"Functions ({len(data['functions'])}):")
             for func in data["functions"]:
-                print(f"  - {func.get('name', 'unknown')}")
+                if isinstance(func, dict):
+                    print(f"  - {func.get('name', 'unknown')}")
+                else:
+                    print(f"  - {func}")
         if data.get("classes"):
             print(f"Classes ({len(data['classes'])}):")
             for cls in data["classes"]:
-                print(f"  - {cls.get('name', 'unknown')}")
+                if isinstance(cls, dict):
+                    print(f"  - {cls.get('name', 'unknown')}")
+                else:
+                    print(f"  - {cls}")
         return
 
     # Call graph - print Mermaid diagram or JSON
@@ -288,8 +379,12 @@ def _print_tool_specific_output(data: Dict[str, Any]) -> None:
         return
 
     # Security scan - print vulnerabilities
-    if "vulnerabilities" in data:
+    if "vulnerabilities" in data or "has_vulnerabilities" in data:
         vulns = data["vulnerabilities"]
+        if not vulns:
+            print("No vulnerabilities detected")
+            return
+
         print(f"Vulnerabilities found: {len(vulns)}")
         for vuln in vulns:
             severity = vuln.get("severity", "unknown")

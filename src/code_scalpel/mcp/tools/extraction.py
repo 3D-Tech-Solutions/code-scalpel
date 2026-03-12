@@ -18,6 +18,7 @@ from code_scalpel.mcp.oracle_middleware import (
     SymbolStrategy,
     RenameSymbolStrategy,
 )
+from code_scalpel.mcp.path_resolver import resolve_path
 from code_scalpel import __version__ as _pkg_version
 
 _extract_code = getattr(_helpers, "extract_code", None) or getattr(
@@ -121,6 +122,57 @@ async def extract_code(
     """
     started = time.perf_counter()
     try:
+        # [20260311_BUGFIX] Validate extract request shape before helper/result-model handling.
+        if file_path is None and (code is None or not str(code).strip()):
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            tier = _get_current_tier()
+            return make_envelope(
+                data=None,
+                tool_id="extract_code",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=duration_ms,
+                error=ToolError(
+                    error="Provide either 'file_path' or non-empty 'code'.",
+                    error_code="invalid_argument",
+                    error_details={"file_path": file_path, "code_provided": code is not None},
+                ),
+            )
+        if target_type not in {"function", "class", "method"}:
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            tier = _get_current_tier()
+            return make_envelope(
+                data=None,
+                tool_id="extract_code",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=duration_ms,
+                error=ToolError(
+                    error=(
+                        f"Invalid target_type '{target_type}'. Use 'function', 'class', or 'method'."
+                    ),
+                    error_code="invalid_argument",
+                    error_details={"target_type": target_type},
+                ),
+            )
+        if file_path is not None:
+            try:
+                file_path = resolve_path(file_path)
+            except FileNotFoundError as exc:
+                duration_ms = int((time.perf_counter() - started) * 1000)
+                tier = _get_current_tier()
+                return make_envelope(
+                    data=None,
+                    tool_id="extract_code",
+                    tool_version=_pkg_version,
+                    tier=tier,
+                    duration_ms=duration_ms,
+                    error=ToolError(
+                        error=str(exc),
+                        error_code="correction_needed",
+                        error_details={"hint": str(exc)},
+                    ),
+                )
         if _extract_code is None:
             from code_scalpel.mcp.models.core import ContextualExtractionResult
 

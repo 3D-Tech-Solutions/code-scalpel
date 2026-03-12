@@ -12,9 +12,11 @@ from code_scalpel.mcp.helpers.policy_helpers import (
     _validate_paths_sync,
     _verify_policy_integrity_sync,
 )
+from code_scalpel.mcp.models.policy import CodePolicyCheckResult
 from code_scalpel.mcp.protocol import mcp
 from code_scalpel.mcp.contract import ToolResponseEnvelope, ToolError, make_envelope
 from code_scalpel.mcp.oracle_middleware import with_oracle_resilience, PathStrategy
+from code_scalpel.mcp.path_resolver import resolve_path
 from code_scalpel import __version__ as _pkg_version
 
 
@@ -67,6 +69,23 @@ async def validate_paths(
     """
     started = time.perf_counter()
     try:
+        if not paths:
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            tier = _get_current_tier()
+            return make_envelope(
+                data=None,
+                tool_id="validate_paths",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=duration_ms,
+                error=ToolError(
+                    error="Parameter 'paths' must contain at least one path.",
+                    error_code="invalid_argument",
+                    error_details={"paths": paths},
+                ),
+            )
+        if project_root is not None:
+            project_root = resolve_path(project_root)
         tier = _get_current_tier()
         capabilities = get_tool_capabilities("validate_paths", tier) or {}
         result = await asyncio.to_thread(
@@ -79,6 +98,21 @@ async def validate_paths(
             tool_version=_pkg_version,
             tier=tier,
             duration_ms=duration_ms,
+        )
+    except FileNotFoundError as exc:
+        duration_ms = int((time.perf_counter() - started) * 1000)
+        tier = _get_current_tier()
+        return make_envelope(
+            data=None,
+            tool_id="validate_paths",
+            tool_version=_pkg_version,
+            tier=tier,
+            duration_ms=duration_ms,
+            error=ToolError(
+                error=str(exc),
+                error_code="correction_needed",
+                error_details={"hint": str(exc)},
+            ),
         )
     except Exception as exc:
         duration_ms = int((time.perf_counter() - started) * 1000)
@@ -141,6 +175,23 @@ async def verify_policy_integrity(
     """
     started = time.perf_counter()
     try:
+        if manifest_source not in {"file", "git", "env"}:
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            tier = _get_current_tier()
+            return make_envelope(
+                data=None,
+                tool_id="verify_policy_integrity",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=duration_ms,
+                error=ToolError(
+                    error="Parameter 'manifest_source' must be 'file', 'git', or 'env'.",
+                    error_code="invalid_argument",
+                    error_details={"manifest_source": manifest_source},
+                ),
+            )
+        if policy_dir is not None:
+            policy_dir = resolve_path(policy_dir)
         tier = _get_current_tier()
         capabilities = get_tool_capabilities("verify_policy_integrity", tier) or {}
         result = await asyncio.to_thread(
@@ -157,6 +208,21 @@ async def verify_policy_integrity(
             tool_version=_pkg_version,
             tier=tier,
             duration_ms=duration_ms,
+        )
+    except FileNotFoundError as exc:
+        duration_ms = int((time.perf_counter() - started) * 1000)
+        tier = _get_current_tier()
+        return make_envelope(
+            data=None,
+            tool_id="verify_policy_integrity",
+            tool_version=_pkg_version,
+            tier=tier,
+            duration_ms=duration_ms,
+            error=ToolError(
+                error=str(exc),
+                error_code="correction_needed",
+                error_details={"hint": str(exc)},
+            ),
         )
     except Exception as exc:
         duration_ms = int((time.perf_counter() - started) * 1000)
@@ -242,14 +308,91 @@ async def code_policy_check(
     """
     started = time.perf_counter()
     try:
+        if not paths:
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            tier = _get_current_tier()
+            return make_envelope(
+                data=None,
+                tool_id="code_policy_check",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=duration_ms,
+                error=ToolError(
+                    error="Parameter 'paths' must contain at least one path.",
+                    error_code="invalid_argument",
+                    error_details={"paths": paths},
+                ),
+            )
+        try:
+            paths = [resolve_path(path) for path in paths]
+        except FileNotFoundError as exc:
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            tier = _get_current_tier()
+            return make_envelope(
+                data=None,
+                tool_id="code_policy_check",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=duration_ms,
+                error=ToolError(
+                    error=str(exc),
+                    error_code="correction_needed",
+                    error_details={"hint": str(exc)},
+                ),
+            )
         tier = _get_current_tier()
         capabilities = get_tool_capabilities("code_policy_check", tier) or {}
 
         if compliance_standards and tier != "enterprise":
-            compliance_standards = None
+            message = (
+                "Compliance standards require Enterprise tier; requested "
+                f"{', '.join(compliance_standards)} on {tier}."
+            )
+            error_obj = ToolError(error=message, error_code="upgrade_required")
+            result = CodePolicyCheckResult(
+                success=False,
+                files_checked=0,
+                rules_applied=0,
+                summary=message,
+                tier=tier,
+                tier_applied=tier,
+                files_limit_applied=capabilities.get("limits", {}).get("max_files"),
+                rules_limit_applied=capabilities.get("limits", {}).get("max_rules"),
+                error=message,
+            )
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            return make_envelope(
+                data=result,
+                tool_id="code_policy_check",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=duration_ms,
+                error=error_obj,
+            )
 
         if generate_report and tier != "enterprise":
-            generate_report = False
+            message = f"Compliance PDF reports require Enterprise tier; current tier is {tier}."
+            error_obj = ToolError(error=message, error_code="upgrade_required")
+            result = CodePolicyCheckResult(
+                success=False,
+                files_checked=0,
+                rules_applied=0,
+                summary=message,
+                tier=tier,
+                tier_applied=tier,
+                files_limit_applied=capabilities.get("limits", {}).get("max_files"),
+                rules_limit_applied=capabilities.get("limits", {}).get("max_rules"),
+                error=message,
+            )
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            return make_envelope(
+                data=result,
+                tool_id="code_policy_check",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=duration_ms,
+                error=error_obj,
+            )
 
         result = await asyncio.to_thread(
             _code_policy_check_sync,

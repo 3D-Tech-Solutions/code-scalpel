@@ -160,8 +160,9 @@ class PathResolver:
         Returns:
             Tuple of (drive_letter, relative_path) or None if not a Windows path
         """
-        # Match Windows drive letter pattern: C:\ or C:/
-        win_match = re.match(r"^([A-Za-z]):[/\\](.*)$", path)
+        # [20260311_BUGFIX] Accept malformed '/C:/...' paths from Unix/WSL callers.
+        # Match Windows drive letter pattern: C:\, C:/, or /C:/
+        win_match = re.match(r"^/?([A-Za-z]):[/\\](.*)$", path)
         if win_match:
             drive = win_match.group(1).lower()
             rel_path = win_match.group(2).replace("\\", "/")

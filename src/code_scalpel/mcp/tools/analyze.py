@@ -13,6 +13,8 @@ from pathlib import Path
 from code_scalpel.mcp.helpers.analyze_helpers import _analyze_code_sync
 from code_scalpel.mcp.contract import ToolResponseEnvelope, ToolError, make_envelope
 from code_scalpel import __version__ as _pkg_version
+from code_scalpel.mcp.oracle_middleware import with_oracle_resilience, PathStrategy
+from code_scalpel.mcp.path_resolver import resolve_path
 from code_scalpel.mcp.protocol import _get_current_tier
 from code_scalpel.mcp.v1_1_kernel_adapter import get_adapter
 
@@ -463,6 +465,7 @@ def _find_similar_file_paths(
 @mcp.tool(
     description="Parse and extract code structure (functions, classes, imports) from source text or a file. Pass static_tools to also run external linters (cppcheck, clang-tidy, clang-sa, cpplint; coverity/sonarqube on Enterprise) against the file."
 )
+@with_oracle_resilience(tool_id="analyze_code", strategy=PathStrategy)
 async def analyze_code(
     code: str | None = None,
     language: str = "auto",
@@ -540,54 +543,117 @@ async def analyze_code(
     started = time.perf_counter()
     try:
         adapter = get_adapter()
+        tier = _get_current_tier()
+        supported_languages = {
+            "auto",
+            "python",
+            "javascript",
+            "typescript",
+            "java",
+            "c",
+            "cpp",
+            "csharp",
+            "go",
+            "kotlin",
+            "php",
+            "ruby",
+            "swift",
+            "rust",
+        }
 
         # 1. Validate input: either code or file_path must be provided
         if code is None and file_path is None:
-            raise ValueError("Either 'code' or 'file_path' must be provided")
+            return make_envelope(
+                data=None,
+                tool_id="analyze_code",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=int((time.perf_counter() - started) * 1000),
+                error=ToolError(
+                    error="Either 'code' or 'file_path' must be provided.",
+                    error_code="invalid_argument",
+                    error_details={
+                        "hint": "Provide source code directly or pass a file_path to analyze."
+                    },
+                ),
+            )
+
+        if static_tools and file_path is None:
+            return make_envelope(
+                data=None,
+                tool_id="analyze_code",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=int((time.perf_counter() - started) * 1000),
+                error=ToolError(
+                    error="'static_tools' requires 'file_path'.",
+                    error_code="invalid_argument",
+                    error_details={"static_tools": static_tools},
+                ),
+            )
+
+        normalized_language = (language or "auto").lower()
+        if normalized_language not in supported_languages:
+            return make_envelope(
+                data=None,
+                tool_id="analyze_code",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=int((time.perf_counter() - started) * 1000),
+                error=ToolError(
+                    error=(
+                        f"Unsupported language: {language}. Must be one of "
+                        f"{sorted(supported_languages)}"
+                    ),
+                    error_code="invalid_argument",
+                    error_details={"supported_languages": sorted(supported_languages)},
+                ),
+            )
 
         # If code is not provided, read from file_path
         if code is None and file_path is not None:
             # Get tier for limits
-            tier = _get_current_tier()
             from code_scalpel.mcp.helpers.analyze_helpers import get_tool_capabilities
+            from code_scalpel.mcp.helpers.session import _get_project_root
 
             capabilities = get_tool_capabilities("analyze_code", tier)
             limit_mb = capabilities.get("limits", {}).get("max_file_size_mb")
 
-            # Check file exists
-            if not os.path.isfile(file_path):
-                from code_scalpel.mcp.helpers.session import _get_project_root
-
-                project_root = _get_project_root()
+            project_root = _get_project_root()
+            try:
+                file_path = resolve_path(
+                    file_path,
+                    str(project_root) if project_root else None,
+                )
+            except FileNotFoundError as exc:
+                error_details: dict[str, Any] = {"hint": str(exc)}
                 if project_root:
                     try:
-                        project_files = _get_project_files(project_root, max_files=500)
+                        project_files = _get_project_files(
+                            str(project_root), max_files=500
+                        )
                         oracle_suggestion = _find_similar_file_paths(
                             file_path, project_files
                         )
                         if oracle_suggestion:
-                            error_msg = f"File not found: {file_path}"
-                            error_obj = ToolError(
-                                error=error_msg,
-                                error_code="not_found",
-                                error_details={"oracle_suggestion": oracle_suggestion},
-                            )
-                            duration_ms = int((time.perf_counter() - started) * 1000)
-                            tier = _get_current_tier()
-                            return make_envelope(
-                                data=None,
-                                tool_id="analyze_code",
-                                tool_version=_pkg_version,
-                                tier=tier,
-                                duration_ms=duration_ms,
-                                error=error_obj,
-                            )
+                            error_details["oracle_suggestion"] = oracle_suggestion
                     except Exception:
-                        # If Oracle pipeline fails, fall back to simple error
                         pass
 
-                # Fallback to simple error if Oracle pipeline unavailable
-                raise ValueError(f"File not found: {file_path}")
+                error_obj = ToolError(
+                    error=str(exc),
+                    error_code="correction_needed",
+                    error_details=error_details,
+                )
+                duration_ms = int((time.perf_counter() - started) * 1000)
+                return make_envelope(
+                    data=None,
+                    tool_id="analyze_code",
+                    tool_version=_pkg_version,
+                    tier=tier,
+                    duration_ms=duration_ms,
+                    error=error_obj,
+                )
 
             # Check file size before reading
             file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
@@ -609,7 +675,6 @@ async def analyze_code(
             if not is_valid and error_obj:
                 # Return error response with self-correction suggestions
                 duration_ms = int((time.perf_counter() - started) * 1000)
-                tier = _get_current_tier()
                 # Enhance error with suggestions
                 error_obj.error_details = error_obj.error_details or {}
                 error_obj.error_details["suggestions"] = suggestions
@@ -630,12 +695,10 @@ async def analyze_code(
         )
         # [20260303_REFACTOR] Run external static-analysis tools if requested.
         if static_tools and file_path:
-            tier = _get_current_tier()
             result.tool_findings = await asyncio.to_thread(
                 _run_static_tools, file_path, static_tools, tier
             )
         duration_ms = int((time.perf_counter() - started) * 1000)
-        tier = _get_current_tier()
         return make_envelope(
             data=result,
             tool_id="analyze_code",

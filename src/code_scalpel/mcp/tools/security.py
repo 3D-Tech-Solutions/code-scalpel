@@ -19,6 +19,7 @@ from code_scalpel.mcp.helpers.security_helpers import (
 from code_scalpel.mcp.protocol import mcp, _get_current_tier
 from code_scalpel.mcp.contract import ToolResponseEnvelope, ToolError, make_envelope
 from code_scalpel.mcp.oracle_middleware import with_oracle_resilience, PathStrategy
+from code_scalpel.mcp.path_resolver import resolve_path
 from code_scalpel import __version__ as _pkg_version
 
 
@@ -452,6 +453,55 @@ async def security_scan(
     try:
         tier = _get_current_tier()
         caps = get_tool_capabilities("security_scan", tier)
+
+        if code is None and file_path is None:
+            return make_envelope(
+                data=None,
+                tool_id="security_scan",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=int((time.perf_counter() - started) * 1000),
+                error=ToolError(
+                    error="Either 'code' or 'file_path' must be provided.",
+                    error_code="invalid_argument",
+                    error_details={"hint": "Provide source code directly or pass a file_path to scan."},
+                ),
+            )
+
+        if not 0.0 <= confidence_threshold <= 1.0:
+            return make_envelope(
+                data=None,
+                tool_id="security_scan",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=int((time.perf_counter() - started) * 1000),
+                error=ToolError(
+                    error="'confidence_threshold' must be between 0.0 and 1.0.",
+                    error_code="invalid_argument",
+                    error_details={"confidence_threshold": confidence_threshold},
+                ),
+            )
+
+        if file_path is not None:
+            from code_scalpel.mcp.helpers.session import _get_project_root
+
+            try:
+                file_path = resolve_path(file_path, str(_get_project_root()))
+            except FileNotFoundError as exc:
+                duration_ms = int((time.perf_counter() - started) * 1000)
+                return make_envelope(
+                    data=None,
+                    tool_id="security_scan",
+                    tool_version=_pkg_version,
+                    tier=tier,
+                    duration_ms=duration_ms,
+                    error=ToolError(
+                        error=str(exc),
+                        error_code="correction_needed",
+                        error_details={"hint": str(exc)},
+                    ),
+                )
+
         result = await asyncio.to_thread(
             _security_scan_sync, code, file_path, tier, caps, confidence_threshold
         )
