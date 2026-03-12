@@ -1,10 +1,35 @@
 import argparse
+import io
 import json
 import os
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 from code_scalpel.mcp.protocol import format_tier_for_display
+
+
+# [20260311_FEATURE] Keep CLI analyze choices aligned with the local analyzer
+# and MCP language surface instead of a stale Python/JS/Java-only subset.
+ANALYZE_LANGUAGE_CHOICES = [
+    "python",
+    "javascript",
+    "typescript",
+    "java",
+    "c",
+    "cpp",
+    "csharp",
+    "go",
+    "kotlin",
+    "php",
+    "ruby",
+    "swift",
+    "rust",
+]
+
+# [20260311_BUGFIX] Symbolic execution and unit-test generation are still backed
+# only by the narrower Python/JavaScript/Java engine paths.
+SYMBOLIC_LANGUAGE_CHOICES = ["python", "javascript", "java"]
 
 
 def analyze_file(
@@ -58,6 +83,7 @@ def analyze_file(
             ".php5": "php",
             ".phtml": "php",
             ".swift": "swift",
+            ".rs": "rust",
         }
         if ext in extension_map:
             language = extension_map[ext]
@@ -247,6 +273,7 @@ def analyze_code(
         "ruby",
         "kotlin",
         "swift",
+        "rust",
     ):
         return _analyze_polyglot(code, output_format, source, language)
 
@@ -1194,460 +1221,616 @@ def show_capabilities(
     tool_filter: str | None = None,
     json_output: bool = False,
 ) -> int:
-    """Show available tools and limits for the current or specified tier.
+    """Show available tools and limits via the MCP capability surface.
 
-    [20260127_FEATURE] v3.4.0 - CLI command to query tool capabilities
+    [20260311_REFACTOR] Keep the direct helper aligned with the main CLI command
+    by routing it through the shared CLI-to-MCP bridge instead of maintaining a
+    second standalone formatting path.
     """
-    from code_scalpel.capabilities import (
-        get_all_capabilities,
-        get_tool_capabilities,
-        get_tier_names,
+    from code_scalpel.cli_tools.tool_bridge import invoke_tool_with_format
+
+    return invoke_tool_with_format(
+        "get_capabilities",
+        {
+            "tier": tier,
+            "tool_name": tool_filter,
+        },
+        "json" if json_output else "text",
     )
-    from code_scalpel.mcp.protocol import _get_current_tier
+
+
+def _build_tool_args(
+    args: argparse.Namespace, field_map: dict[str, str]
+) -> dict[str, object]:
+    """Build MCP tool args from an argparse namespace.
+
+    [20260311_REFACTOR] Centralize CLI->MCP argument extraction so handler
+    updates stay localized and command drift does not reappear tool-by-tool.
+    """
+    return {
+        tool_key: getattr(args, arg_name) for tool_key, arg_name in field_map.items()
+    }
+
+
+def _invoke_cli_tool(
+    args: argparse.Namespace,
+    tool_name: str,
+    field_map: dict[str, str],
+    *,
+    default_output_format: str = "text",
+) -> int:
+    """Invoke an MCP-backed CLI command with shared argument and format handling."""
+    return _invoke_tool_args(
+        tool_name,
+        _build_tool_args(args, field_map),
+        output_format="json" if getattr(args, "json", False) else default_output_format,
+    )
+
+
+def _invoke_tool_args(
+    tool_name: str,
+    tool_args: dict[str, object],
+    *,
+    output_format: str = "text",
+) -> int:
+    """Invoke an MCP-backed CLI command with a prebuilt tool argument dict."""
+    from code_scalpel.cli_tools.tool_bridge import invoke_tool_with_format
+
+    return invoke_tool_with_format(
+        tool_name,
+        tool_args,
+        output_format,
+    )
+
+
+def _write_tool_output_file(
+    output_path: str,
+    tool_name: str,
+    tool_args: dict[str, object],
+    success_message: str,
+) -> int:
+    """Capture text-formatted tool output into a file after a successful CLI run.
+
+    [20260311_REFACTOR] Keep file emission for bridge-backed commands in one
+    place so stdout capture mechanics and error handling do not diverge.
+    """
+    from code_scalpel.cli_tools.tool_bridge import invoke_tool
+
+    buffer = io.StringIO()
+    original_stdout = sys.stdout
+    try:
+        sys.stdout = buffer
+        invoke_tool(tool_name, tool_args)
+    finally:
+        sys.stdout = original_stdout
 
     try:
-        # Use provided tier or current tier from license
-        if tier is None:
-            tier = _get_current_tier()
-        elif tier not in get_tier_names():
-            print(f"❌ Invalid tier: {tier}")
-            print(f"   Available tiers: {', '.join(get_tier_names())}")
-            return 1
-
-        # Get capabilities for the tier
-        if tool_filter:
-            # Show single tool
-            caps = get_tool_capabilities(tool_filter, tier=tier)
-            if not caps["available"]:
-                print(
-                    f"❌ Tool '{tool_filter}' is not available at {tier.upper()} tier"
-                )
-                return 1
-
-            if json_output:
-                print(json.dumps(caps, indent=2))
-            else:
-                print(f"Tool: {caps['tool_id'].upper()}")
-                print(f"Tier: {caps['tier'].upper()}")
-                print(f"Available: {'✅ Yes' if caps['available'] else '❌ No'}")
-                if caps["limits"]:
-                    print("Limits:")
-                    for key, value in caps["limits"].items():
-                        print(f"  {key}: {value}")
-            return 0
-        else:
-            # Show all tools
-            capabilities = get_all_capabilities(tier=tier)
-            available_count = sum(1 for c in capabilities.values() if c["available"])
-
-            if json_output:
-                # JSON output
-                result = {
-                    "tier": tier,
-                    "tool_count": len(capabilities),
-                    "available_count": available_count,
-                    "capabilities": capabilities,
-                }
-                print(json.dumps(result, indent=2))
-            else:
-                # Human-readable output
-                print("=" * 70)
-                print(f"Code Scalpel Capabilities - {tier.upper()} Tier")
-                print("=" * 70)
-                print(f"Total Tools: {len(capabilities)}")
-                print(f"Available: {available_count}/{len(capabilities)}")
-                print()
-
-                # Group by availability
-                available_tools = [
-                    (tid, cap)
-                    for tid, cap in sorted(capabilities.items())
-                    if cap["available"]
-                ]
-                unavailable_tools = [
-                    (tid, cap)
-                    for tid, cap in sorted(capabilities.items())
-                    if not cap["available"]
-                ]
-
-                if available_tools:
-                    print("✅ AVAILABLE TOOLS:")
-                    print("-" * 70)
-                    for tool_id, cap in available_tools:
-                        limits = cap["limits"]
-                        if limits:
-                            limits_str = ", ".join(
-                                f"{k}={v}" for k, v in list(limits.items())[:3]
-                            )
-                            if len(limits) > 3:
-                                limits_str += ", ..."
-                            print(f"  • {tool_id:40} [{limits_str}]")
-                        else:
-                            print(f"  • {tool_id:40} [unlimited]")
-                    print()
-
-                if unavailable_tools:
-                    print("❌ UNAVAILABLE TOOLS (upgrade required):")
-                    print("-" * 70)
-                    for tool_id, _ in unavailable_tools:
-                        print(f"  • {tool_id:40} [upgrade required]")
-                    print()
-
-                print("=" * 70)
-                if available_count < len(capabilities):
-                    print(
-                        f"💡 Tip: Upgrade to unlock {len(unavailable_tools)} more tools"
-                    )
-                    print("   Visit: https://code-scalpel.ai for pricing")
-                    print()
-
-            return 0
-
+        Path(output_path).write_text(buffer.getvalue(), encoding="utf-8")
     except Exception as e:
-        print(f"❌ Error: {str(e)}")
-        import traceback
-
-        traceback.print_exc()
+        print(f"Error writing output file: {e}", file=sys.stderr)
         return 1
+
+    print(success_message)
+    return 0
 
 
 # [20260205_FEATURE] Phase 1 Pilot: MCP Tool CLI Handlers
 def handle_extract_code(args: argparse.Namespace) -> int:
     """Handle 'codescalpel extract-code' command."""
-    from code_scalpel.cli_tools.tool_bridge import invoke_tool, invoke_tool_with_format
+    # [20260311_BUGFIX] Keep legacy --class behavior working while exposing the
+    # actual MCP target shape for function, class, and method extraction.
+    target_type = args.target_type
+    if getattr(args, "class_name", None) and target_type == "function":
+        target_type = "method"
 
-    # Determine target type (function or method)
-    target_type = "method" if args.class_name else "function"
+    tool_args = _build_tool_args(
+        args,
+        {
+            "target_name": "target_name",
+            "file_path": "file_path",
+            "code": "code",
+            "include_cross_file_deps": "include_cross_file_deps",
+            "include_context": "include_context",
+        },
+    )
+    tool_args["target_type"] = target_type
 
-    tool_args = {
-        "target_type": target_type,
-        "target_name": args.target_name,
-        "file_path": args.file_path,
-        "include_cross_file_deps": args.include_cross_file_deps,
-        "include_context": args.include_context,
-    }
-
-    output_format = "json" if args.json else "text"
-    exit_code = invoke_tool_with_format("extract_code", tool_args, output_format)
+    exit_code = _invoke_tool_args(
+        "extract_code",
+        tool_args,
+        output_format="json" if args.json else "text",
+    )
 
     # If output file specified, write result
     if exit_code == 0 and args.output and not args.json:
-        try:
-            with open(args.output, "w") as f:
-                # Re-run to capture output
-                import io
-                import sys
-
-                old_stdout = sys.stdout
-                sys.stdout = io.StringIO()
-                invoke_tool("extract_code", tool_args)
-                output = sys.stdout.getvalue()
-                sys.stdout = old_stdout
-
-                f.write(output)
-                print(f"✓ Extracted code written to {args.output}")
-        except Exception as e:
-            print(f"Error writing output file: {e}", file=sys.stderr)
-            return 1
+        return _write_tool_output_file(
+            args.output,
+            "extract_code",
+            tool_args,
+            f"✓ Extracted code written to {args.output}",
+        )
 
     return exit_code
 
 
+def handle_analyze(args: argparse.Namespace) -> int:
+    """Handle 'codescalpel analyze' command via the MCP tool boundary."""
+    tool_args = _build_tool_args(
+        args,
+        {
+            "code": "code",
+            "file_path": "file",
+        },
+    )
+    tool_args["language"] = args.language or "auto"
+
+    return _invoke_tool_args(
+        "analyze_code",
+        tool_args,
+        output_format="json" if args.json else "text",
+    )
+
+
+def handle_scan(args: argparse.Namespace) -> int:
+    """Handle 'codescalpel scan' command via the MCP tool boundary."""
+    return _invoke_cli_tool(
+        args,
+        "security_scan",
+        {
+            "code": "code",
+            "file_path": "file",
+            "confidence_threshold": "confidence_threshold",
+        },
+    )
+
+
+def handle_capabilities(args: argparse.Namespace) -> int:
+    """Handle 'codescalpel capabilities' command via the MCP tool boundary."""
+    return _invoke_cli_tool(
+        args,
+        "get_capabilities",
+        {
+            "tier": "tier",
+            "tool_name": "tool",
+        },
+    )
+
+
 def handle_get_call_graph(args: argparse.Namespace) -> int:
     """Handle 'codescalpel get-call-graph' command."""
-    from code_scalpel.cli_tools.tool_bridge import invoke_tool, invoke_tool_with_format
+    tool_args = _build_tool_args(
+        args,
+        {
+            "project_root": "project_root",
+            "entry_point": "entry_point",
+            "depth": "depth",
+            "paths_from": "paths_from",
+            "paths_to": "paths_to",
+        },
+    )
 
-    tool_args = {
-        "file_path": args.file_path,
-    }
-
-    output_format = "json" if args.json else args.format
-    exit_code = invoke_tool_with_format("get_call_graph", tool_args, output_format)
+    exit_code = _invoke_tool_args(
+        "get_call_graph",
+        tool_args,
+        output_format="json" if args.json else args.format,
+    )
 
     # If output file specified, write result
     if exit_code == 0 and args.output:
-        try:
-            with open(args.output, "w") as f:
-                import io
-                import sys
-
-                old_stdout = sys.stdout
-                sys.stdout = io.StringIO()
-                invoke_tool("get_call_graph", tool_args)
-                output = sys.stdout.getvalue()
-                sys.stdout = old_stdout
-
-                f.write(output)
-                print(f"✓ Call graph written to {args.output}")
-        except Exception as e:
-            print(f"Error writing output file: {e}", file=sys.stderr)
-            return 1
+        return _write_tool_output_file(
+            args.output,
+            "get_call_graph",
+            tool_args,
+            f"✓ Call graph written to {args.output}",
+        )
 
     return exit_code
 
 
 def handle_rename_symbol(args: argparse.Namespace) -> int:
     """Handle 'codescalpel rename-symbol' command."""
-    from code_scalpel.cli_tools.tool_bridge import invoke_tool_with_format
-
-    tool_args = {
-        "file_path": args.file_path,
-        "target_type": args.target_type,
-        "target_name": args.target_name,
-        "new_name": args.new_name,
-        "create_backup": args.create_backup,
-    }
-
-    output_format = "json" if args.json else "text"
-    return invoke_tool_with_format("rename_symbol", tool_args, output_format)
+    return _invoke_cli_tool(
+        args,
+        "rename_symbol",
+        {
+            "file_path": "file_path",
+            "target_type": "target_type",
+            "target_name": "target_name",
+            "new_name": "new_name",
+            "create_backup": "create_backup",
+        },
+    )
 
 
 # [20260205_FEATURE] Phase 2: Analysis Tool Handlers
 def handle_get_file_context(args: argparse.Namespace) -> int:
     """Handle 'codescalpel get-file-context' command."""
-    from code_scalpel.cli_tools.tool_bridge import invoke_tool_with_format
-
-    tool_args = {
-        "file_path": args.file_path,
-    }
-
-    output_format = "json" if args.json else "text"
-    return invoke_tool_with_format("get_file_context", tool_args, output_format)
+    return _invoke_cli_tool(
+        args,
+        "get_file_context",
+        {"file_path": "file_path"},
+    )
 
 
 def handle_get_symbol_references(args: argparse.Namespace) -> int:
     """Handle 'codescalpel get-symbol-references' command."""
-    from code_scalpel.cli_tools.tool_bridge import invoke_tool_with_format
-
-    tool_args = {
-        "symbol_name": args.symbol_name,
-        "project_root": args.project_root,
-        "scope_prefix": args.scope_prefix,
-        "include_tests": args.include_tests,
-    }
-
-    output_format = "json" if args.json else "text"
-    return invoke_tool_with_format("get_symbol_references", tool_args, output_format)
+    return _invoke_cli_tool(
+        args,
+        "get_symbol_references",
+        {
+            "symbol_name": "symbol_name",
+            "project_root": "project_root",
+            "scope_prefix": "scope_prefix",
+            "include_tests": "include_tests",
+        },
+    )
 
 
 def handle_get_graph_neighborhood(args: argparse.Namespace) -> int:
     """Handle 'codescalpel get-graph-neighborhood' command."""
-    from code_scalpel.cli_tools.tool_bridge import invoke_tool_with_format
-
-    tool_args = {
-        "node_id": args.node_id,
-        "project_root": args.project_root,
-        "k": args.k,
-        "direction": args.direction,
-    }
-
-    output_format = "json" if args.json else "text"
-    return invoke_tool_with_format("get_graph_neighborhood", tool_args, output_format)
+    return _invoke_cli_tool(
+        args,
+        "get_graph_neighborhood",
+        {
+            "center_node_id": "node_id",
+            "project_root": "project_root",
+            "k": "k",
+            "direction": "direction",
+            "max_nodes": "max_nodes",
+            "min_confidence": "min_confidence",
+        },
+    )
 
 
 def handle_get_project_map(args: argparse.Namespace) -> int:
     """Handle 'codescalpel get-project-map' command."""
-    from code_scalpel.cli_tools.tool_bridge import invoke_tool_with_format
-
-    tool_args = {
-        "project_root": args.project_root,
-        "entry_point": args.entry_point,
-        "depth": args.depth,
-    }
-
-    output_format = "json" if args.json else args.format
-    return invoke_tool_with_format("get_project_map", tool_args, output_format)
+    return _invoke_cli_tool(
+        args,
+        "get_project_map",
+        {
+            "project_root": "project_root",
+            "include_complexity": "include_complexity",
+            "complexity_threshold": "complexity_threshold",
+            "include_circular_check": "include_circular_check",
+            "detect_service_boundaries": "detect_service_boundaries",
+            "min_isolation_score": "min_isolation_score",
+        },
+        default_output_format=args.format,
+    )
 
 
 def handle_get_cross_file_dependencies(args: argparse.Namespace) -> int:
     """Handle 'codescalpel get-cross-file-dependencies' command."""
-    from code_scalpel.cli_tools.tool_bridge import invoke_tool_with_format
-
-    tool_args = {
-        "file_path": args.file_path,
-        "project_root": args.project_root,
-        "depth": args.depth,
-        "include_external": args.include_external,
-    }
-
-    output_format = "json" if args.json else "text"
-    return invoke_tool_with_format(
-        "get_cross_file_dependencies", tool_args, output_format
+    return _invoke_cli_tool(
+        args,
+        "get_cross_file_dependencies",
+        {
+            "target_file": "target_file",
+            "target_symbol": "target_symbol",
+            "project_root": "project_root",
+            "max_depth": "max_depth",
+            "include_code": "include_code",
+            "include_diagram": "include_diagram",
+            "confidence_decay_factor": "confidence_decay_factor",
+            "max_files": "max_files",
+            "timeout_seconds": "timeout_seconds",
+        },
     )
 
 
 def handle_crawl_project(args: argparse.Namespace) -> int:
     """Handle 'codescalpel crawl-project' command."""
-    from code_scalpel.cli_tools.tool_bridge import invoke_tool_with_format
-
-    tool_args = {
-        "root_path": args.root_path,
-        "exclude_dirs": args.exclude_dirs,
-        "complexity_threshold": args.complexity_threshold,
-        "include_report": args.include_report,
-        "pattern": args.pattern,
-        "pattern_type": args.pattern_type,
-    }
-
-    output_format = "json" if args.json else "text"
-    return invoke_tool_with_format("crawl_project", tool_args, output_format)
+    return _invoke_cli_tool(
+        args,
+        "crawl_project",
+        {
+            "root_path": "root_path",
+            "exclude_dirs": "exclude_dirs",
+            "complexity_threshold": "complexity_threshold",
+            "include_report": "include_report",
+            "pattern": "pattern",
+            "pattern_type": "pattern_type",
+        },
+    )
 
 
 # [20260205_FEATURE] Phase 3: Security Tool Handlers
 def handle_cross_file_security_scan(args: argparse.Namespace) -> int:
     """Handle 'codescalpel cross-file-security-scan' command."""
-    from code_scalpel.cli_tools.tool_bridge import invoke_tool_with_format
-
-    tool_args = {
-        "project_root": args.project_root,
-        "entry_point": args.entry_point,
-        "max_depth": args.max_depth,
-    }
-
-    output_format = "json" if args.json else "text"
-    return invoke_tool_with_format("cross_file_security_scan", tool_args, output_format)
+    return _invoke_cli_tool(
+        args,
+        "cross_file_security_scan",
+        {
+            "project_root": "project_root",
+            "entry_points": "entry_points",
+            "max_depth": "max_depth",
+            "include_diagram": "include_diagram",
+            "timeout_seconds": "timeout_seconds",
+            "max_modules": "max_modules",
+            "confidence_threshold": "confidence_threshold",
+        },
+    )
 
 
 def handle_type_evaporation_scan(args: argparse.Namespace) -> int:
     """Handle 'codescalpel type-evaporation-scan' command."""
-    from code_scalpel.cli_tools.tool_bridge import invoke_tool_with_format
-
-    tool_args = {
-        "frontend_file_path": args.frontend_file,
-        "backend_file_path": args.backend_file,
-        "frontend_code": args.frontend_code,
-        "backend_code": args.backend_code,
-    }
-
-    output_format = "json" if args.json else "text"
-    return invoke_tool_with_format("type_evaporation_scan", tool_args, output_format)
+    return _invoke_cli_tool(
+        args,
+        "type_evaporation_scan",
+        {
+            "frontend_file_path": "frontend_file",
+            "backend_file_path": "backend_file",
+            "frontend_code": "frontend_code",
+            "backend_code": "backend_code",
+        },
+    )
 
 
 def handle_unified_sink_detect(args: argparse.Namespace) -> int:
     """Handle 'codescalpel unified-sink-detect' command."""
-    from code_scalpel.cli_tools.tool_bridge import invoke_tool_with_format
-
-    tool_args = {
-        "code": args.code,
-        "language": args.language,
-        "confidence_threshold": args.confidence_threshold,
-    }
-
-    output_format = "json" if args.json else "text"
-    return invoke_tool_with_format("unified_sink_detect", tool_args, output_format)
+    return _invoke_cli_tool(
+        args,
+        "unified_sink_detect",
+        {
+            "code": "code",
+            "language": "language",
+            "confidence_threshold": "confidence_threshold",
+        },
+    )
 
 
 def handle_symbolic_execute(args: argparse.Namespace) -> int:
     """Handle 'codescalpel symbolic-execute' command."""
-    from code_scalpel.cli_tools.tool_bridge import invoke_tool_with_format
-
-    tool_args = {
-        "code": args.code,
-        "max_paths": args.max_paths,
-        "max_depth": args.max_depth,
-    }
-
-    output_format = "json" if args.json else "text"
-    return invoke_tool_with_format("symbolic_execute", tool_args, output_format)
+    return _invoke_cli_tool(
+        args,
+        "symbolic_execute",
+        {
+            "code": "code",
+            "language": "language",
+            "max_paths": "max_paths",
+            "max_depth": "max_depth",
+        },
+    )
 
 
 # [20260205_FEATURE] Phase 4: Refactoring & Testing Tool Handlers
 def handle_update_symbol(args: argparse.Namespace) -> int:
     """Handle 'codescalpel update-symbol' command."""
-    from code_scalpel.cli_tools.tool_bridge import invoke_tool_with_format
-
-    tool_args = {
-        "file_path": args.file_path,
-        "target_type": args.target_type,
-        "target_name": args.target_name,
-        "new_body": args.new_body,
-        "create_backup": args.create_backup,
-    }
-
-    output_format = "json" if args.json else "text"
-    return invoke_tool_with_format("update_symbol", tool_args, output_format)
+    return _invoke_cli_tool(
+        args,
+        "update_symbol",
+        {
+            "file_path": "file_path",
+            "target_type": "target_type",
+            "target_name": "target_name",
+            "new_code": "new_code",
+            "operation": "operation",
+            "new_name": "new_name",
+            "create_backup": "create_backup",
+        },
+    )
 
 
 def handle_simulate_refactor(args: argparse.Namespace) -> int:
     """Handle 'codescalpel simulate-refactor' command."""
-    from code_scalpel.cli_tools.tool_bridge import invoke_tool_with_format
-
-    tool_args = {
-        "file_path": args.file_path,
-        "changes": args.changes,
-    }
-
-    output_format = "json" if args.json else "text"
-    return invoke_tool_with_format("simulate_refactor", tool_args, output_format)
+    return _invoke_cli_tool(
+        args,
+        "simulate_refactor",
+        {
+            "original_code": "original_code",
+            "new_code": "new_code",
+            "patch": "patch",
+            "strict_mode": "strict_mode",
+        },
+    )
 
 
 def handle_generate_unit_tests(args: argparse.Namespace) -> int:
     """Handle 'codescalpel generate-unit-tests' command."""
-    from code_scalpel.cli_tools.tool_bridge import invoke_tool_with_format
-
-    tool_args = {
-        "file_path": args.file_path,
-        "function": args.function,
-        "framework": args.framework,
-        "coverage_target": args.coverage_target,
-    }
-
-    output_format = "json" if args.json else "text"
-    return invoke_tool_with_format("generate_unit_tests", tool_args, output_format)
+    return _invoke_cli_tool(
+        args,
+        "generate_unit_tests",
+        {
+            "file_path": "file_path",
+            "function_name": "function",
+            "language": "language",
+            "framework": "framework",
+        },
+    )
 
 
 # [20260205_FEATURE] Phase 5: Validation & Policy Tool Handlers
 def handle_validate_paths(args: argparse.Namespace) -> int:
     """Handle 'codescalpel validate-paths' command."""
-    from code_scalpel.cli_tools.tool_bridge import invoke_tool_with_format
-
-    tool_args = {
-        "file_path": args.file_path,
-        "fix": args.fix,
-    }
-
-    output_format = "json" if args.json else "text"
-    return invoke_tool_with_format("validate_paths", tool_args, output_format)
+    return _invoke_cli_tool(
+        args,
+        "validate_paths",
+        {
+            "paths": "paths",
+            "project_root": "project_root",
+        },
+    )
 
 
 def handle_scan_dependencies(args: argparse.Namespace) -> int:
     """Handle 'codescalpel scan-dependencies' command."""
-    from code_scalpel.cli_tools.tool_bridge import invoke_tool_with_format
-
-    tool_args = {
-        "project_root": args.project_root,
-        "include_dev": args.include_dev,
-        "check_security": args.check_security,
-    }
-
-    output_format = "json" if args.json else "text"
-    return invoke_tool_with_format("scan_dependencies", tool_args, output_format)
+    return _invoke_cli_tool(
+        args,
+        "scan_dependencies",
+        {
+            "path": "path",
+            "project_root": "project_root",
+            "include_dev": "include_dev",
+            "scan_vulnerabilities": "scan_vulnerabilities",
+            "timeout": "timeout",
+        },
+    )
 
 
 def handle_code_policy_check(args: argparse.Namespace) -> int:
     """Handle 'codescalpel code-policy-check' command."""
-    from code_scalpel.cli_tools.tool_bridge import invoke_tool_with_format
-
-    tool_args = {
-        "file_path": args.file_path,
-        "policy_dir": args.policy_dir,
-        "strict": args.strict,
-    }
-
-    output_format = "json" if args.json else "text"
-    return invoke_tool_with_format("code_policy_check", tool_args, output_format)
+    return _invoke_cli_tool(
+        args,
+        "code_policy_check",
+        {
+            "paths": "paths",
+            "rules": "rules",
+            "compliance_standards": "compliance_standards",
+            "generate_report": "generate_report",
+        },
+    )
 
 
 def handle_verify_policy_integrity(args: argparse.Namespace) -> int:
     """Handle 'codescalpel verify-policy-integrity' command."""
-    from code_scalpel.cli_tools.tool_bridge import invoke_tool_with_format
+    return _invoke_cli_tool(
+        args,
+        "verify_policy_integrity",
+        {
+            "policy_dir": "policy_dir",
+            "manifest_source": "manifest_source",
+        },
+    )
 
-    tool_args = {
-        "policy_dir": args.policy_dir,
+
+def handle_check(args: argparse.Namespace) -> int:
+    """Handle 'codescalpel check' command."""
+    return check_configuration(args.dir, args.json, args.fix)
+
+
+def handle_init(args: argparse.Namespace) -> int:
+    """Handle 'codescalpel init' command."""
+    return init_configuration(args.dir, args.force)
+
+
+def handle_verify_policies(args: argparse.Namespace) -> int:
+    """Handle 'codescalpel verify-policies' command."""
+    return verify_policies_command(args.dir, args.manifest_source)
+
+
+def handle_regenerate_manifest(args: argparse.Namespace) -> int:
+    """Handle 'codescalpel regenerate-manifest' command."""
+    return regenerate_manifest_command(args.dir, args.signed_by)
+
+
+def handle_server(args: argparse.Namespace) -> int:
+    """Handle 'codescalpel server' command."""
+    return start_server(args.host, args.port)
+
+
+def _filter_kwargs_for_callable(func, kwargs: dict[str, object]) -> dict[str, object]:
+    """Filter CLI-built kwargs to those accepted by a callable.
+
+    [20260311_REFACTOR] Preserve older tests and stubs that patch server
+    helpers with narrower signatures while keeping the CLI startup path table-
+    driven.
+    """
+    import inspect
+
+    try:
+        sig = inspect.signature(func)
+    except Exception:
+        return kwargs
+
+    for param in sig.parameters.values():
+        if param.kind == inspect.Parameter.VAR_KEYWORD:
+            return kwargs
+
+    allowed = set(sig.parameters.keys())
+    return {key: value for key, value in kwargs.items() if key in allowed}
+
+
+def handle_license(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
+    """Handle 'codescalpel license' command family."""
+    if args.license_command == "install":
+        return _license_install(
+            args.license_file, dest_path=args.dest, force=args.force
+        )
+
+    parser.print_help()
+    return 1
+
+
+def handle_mcp(args: argparse.Namespace) -> int:
+    """Handle 'codescalpel mcp' command."""
+    transport = args.transport
+    if args.http:
+        transport = "sse"
+
+    start_kwargs: dict[str, object] = {
+        "transport": transport,
+        "host": args.host,
+        "port": args.port,
+        "allow_lan": getattr(args, "allow_lan", False),
+        "root_path": getattr(args, "root", None),
+        "tier": getattr(args, "tier", None),
     }
+    if getattr(args, "license_file", None):
+        start_kwargs["license_file"] = args.license_file
+    if getattr(args, "ssl_cert", None) and getattr(args, "ssl_key", None):
+        start_kwargs.update(
+            {
+                "ssl_certfile": args.ssl_cert,
+                "ssl_keyfile": args.ssl_key,
+            }
+        )
+    if getattr(args, "mismatch_action", None):
+        start_kwargs["mismatch_action"] = args.mismatch_action
 
-    output_format = "json" if args.json else "text"
-    return invoke_tool_with_format("verify_policy_integrity", tool_args, output_format)
+    return start_mcp_server(
+        **_filter_kwargs_for_callable(start_mcp_server, start_kwargs)
+    )
+
+
+def handle_version(_args: argparse.Namespace) -> int:
+    """Handle 'codescalpel version' command."""
+    from . import __version__
+
+    print(f"Code Scalpel v{__version__}")
+    print(f"Python {sys.version}")
+    return 0
+
+
+def handle_release(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
+    """Handle 'codescalpel release' command family."""
+    from code_scalpel.release.cli import (
+        release_execute,
+        release_plan,
+        release_prepare,
+        release_publish,
+    )
+
+    if args.release_command == "plan":
+        return release_plan()
+    if args.release_command == "prepare":
+        return release_prepare()
+    if args.release_command == "execute":
+        return release_execute(
+            skip_github=args.skip_github,
+            skip_pypi=args.skip_pypi,
+        )
+    if args.release_command == "publish":
+        return release_publish(
+            tag=args.tag,
+            skip_github=args.skip_github,
+            skip_pypi=args.skip_pypi,
+        )
+
+    parser.print_help()
+    return 1
+
+
+def _dispatch_with_guard(
+    args: argparse.Namespace,
+    parser: argparse.ArgumentParser,
+    handler: Callable[[argparse.Namespace], int],
+    predicate: Callable[[argparse.Namespace], bool],
+) -> int:
+    """Run a CLI handler only when its command-specific inputs are valid."""
+    if predicate(args):
+        return handler(args)
+    parser.print_help()
+    return 1
 
 
 def main() -> int:
@@ -1693,7 +1876,7 @@ For more information, visit: https://github.com/3D-Tech-Solutions/code-scalpel
     analyze_parser.add_argument(
         "--language",
         "-l",
-        choices=["python", "javascript", "java"],
+        choices=ANALYZE_LANGUAGE_CHOICES,
         help="Source language (default: auto-detect or python)",
     )
 
@@ -1704,6 +1887,12 @@ For more information, visit: https://github.com/3D-Tech-Solutions/code-scalpel
     scan_parser.add_argument("file", nargs="?", help="Python file to scan")
     scan_parser.add_argument("--code", "-c", help="Code string to scan")
     scan_parser.add_argument("--json", "-j", action="store_true", help="Output as JSON")
+    scan_parser.add_argument(
+        "--confidence-threshold",
+        type=float,
+        default=0.7,
+        help="Minimum confidence threshold between 0.0 and 1.0 (default: 0.7)",
+    )
 
     # [20260205_FEATURE] Phase 1 Pilot: MCP Tool CLI Access
     # Extract Code command
@@ -1711,19 +1900,39 @@ For more information, visit: https://github.com/3D-Tech-Solutions/code-scalpel
         "extract-code",
         help="Surgically extract code with dependencies (MCP tool)",
     )
-    extract_parser.add_argument("file_path", help="Path to file containing code")
+    extract_parser.add_argument(
+        "file_path",
+        nargs="?",
+        help="Path to file containing code",
+    )
+    extract_parser.add_argument(
+        "--code",
+        help="Inline source code to extract from instead of a file",
+    )
+    extract_parser.add_argument(
+        "--name",
+        "-n",
+        dest="target_name",
+        help="Target symbol name to extract",
+    )
     extract_parser.add_argument(
         "--function",
         "-f",
         dest="target_name",
-        required=True,
-        help="Function name to extract",
+        help="Deprecated alias for --name when extracting a function or method",
     )
     extract_parser.add_argument(
         "--class",
         "-c",
         dest="class_name",
-        help="Class name (if extracting a method)",
+        help="Deprecated compatibility flag; if provided with --function, extraction defaults to method mode",
+    )
+    extract_parser.add_argument(
+        "--type",
+        dest="target_type",
+        choices=["function", "class", "method"],
+        default="function",
+        help="Target symbol type (default: function)",
     )
     extract_parser.add_argument(
         "--include-deps",
@@ -1747,13 +1956,35 @@ For more information, visit: https://github.com/3D-Tech-Solutions/code-scalpel
         action="store_true",
         help="Output as JSON",
     )
+    extract_parser.set_defaults(target_name=None)
 
     # Get Call Graph command
     call_graph_parser = subparsers.add_parser(
         "get-call-graph",
         help="Generate function call graph (MCP tool)",
     )
-    call_graph_parser.add_argument("file_path", help="Path to file to analyze")
+    call_graph_parser.add_argument(
+        "--project-root",
+        help="Project root directory (default: current directory)",
+    )
+    call_graph_parser.add_argument(
+        "--entry-point",
+        help="Optional entry point function or file:function target",
+    )
+    call_graph_parser.add_argument(
+        "--depth",
+        type=int,
+        default=10,
+        help="Maximum traversal depth (default: 10)",
+    )
+    call_graph_parser.add_argument(
+        "--paths-from",
+        help="Source function for path queries",
+    )
+    call_graph_parser.add_argument(
+        "--paths-to",
+        help="Sink function for path queries",
+    )
     call_graph_parser.add_argument(
         "--output",
         "-o",
@@ -1861,10 +2092,22 @@ For more information, visit: https://github.com/3D-Tech-Solutions/code-scalpel
         help="Number of hops (default: 2)",
     )
     graph_neighborhood_parser.add_argument(
+        "--max-nodes",
+        type=int,
+        default=100,
+        help="Maximum nodes to include (default: 100)",
+    )
+    graph_neighborhood_parser.add_argument(
         "--direction",
         choices=["incoming", "outgoing", "both"],
         default="both",
         help="Direction of edges to follow (default: both)",
+    )
+    graph_neighborhood_parser.add_argument(
+        "--min-confidence",
+        type=float,
+        default=0.0,
+        help="Minimum edge confidence to follow (default: 0.0)",
     )
     graph_neighborhood_parser.add_argument(
         "--json",
@@ -1883,14 +2126,33 @@ For more information, visit: https://github.com/3D-Tech-Solutions/code-scalpel
         help="Project root directory (default: current directory)",
     )
     project_map_parser.add_argument(
-        "--entry-point",
-        help="Entry point file for analysis",
+        "--no-complexity",
+        action="store_false",
+        dest="include_complexity",
+        help="Skip complexity analysis",
     )
     project_map_parser.add_argument(
-        "--depth",
+        "--complexity-threshold",
         type=int,
         default=10,
-        help="Maximum depth for analysis (default: 10)",
+        help="Complexity hotspot threshold (default: 10)",
+    )
+    project_map_parser.add_argument(
+        "--no-circular-check",
+        action="store_false",
+        dest="include_circular_check",
+        help="Skip circular dependency analysis",
+    )
+    project_map_parser.add_argument(
+        "--detect-service-boundaries",
+        action="store_true",
+        help="Request service boundary suggestions",
+    )
+    project_map_parser.add_argument(
+        "--min-isolation-score",
+        type=float,
+        default=0.6,
+        help="Isolation score threshold for service boundary detection (default: 0.6)",
     )
     project_map_parser.add_argument(
         "--format",
@@ -1911,23 +2173,55 @@ For more information, visit: https://github.com/3D-Tech-Solutions/code-scalpel
         help="Analyze cross-file dependencies (MCP tool)",
     )
     cross_deps_parser.add_argument(
-        "file_path",
-        help="File path to analyze",
+        "target_file",
+        help="Path to the file containing the target symbol",
+    )
+    cross_deps_parser.add_argument(
+        "target_symbol",
+        help="Function, method, or class name to analyze",
     )
     cross_deps_parser.add_argument(
         "--project-root",
         help="Project root directory (default: current directory)",
     )
     cross_deps_parser.add_argument(
-        "--depth",
+        "--max-depth",
         type=int,
         default=3,
         help="Maximum dependency depth (default: 3)",
     )
     cross_deps_parser.add_argument(
+        "--no-code",
+        action="store_false",
+        dest="include_code",
+        help="Exclude combined source code from output",
+    )
+    cross_deps_parser.add_argument(
+        "--no-diagram",
+        action="store_false",
+        dest="include_diagram",
+        help="Exclude Mermaid dependency diagram",
+    )
+    cross_deps_parser.add_argument(
+        "--confidence-decay-factor",
+        type=float,
+        default=0.9,
+        help="Confidence decay factor per depth level (default: 0.9)",
+    )
+    cross_deps_parser.add_argument(
+        "--max-files",
+        type=int,
+        help="Maximum number of files to include",
+    )
+    cross_deps_parser.add_argument(
+        "--timeout-seconds",
+        type=float,
+        help="Timeout for dependency analysis",
+    )
+    cross_deps_parser.add_argument(
         "--include-external",
         action="store_true",
-        help="Include external library dependencies",
+        help="Deprecated compatibility flag; external library inclusion is determined by the MCP tool",
     )
     cross_deps_parser.add_argument(
         "--json",
@@ -1991,13 +2285,39 @@ For more information, visit: https://github.com/3D-Tech-Solutions/code-scalpel
     )
     cross_file_scan_parser.add_argument(
         "--entry-point",
-        help="Entry point file for analysis",
+        dest="entry_points",
+        action="append",
+        help="Entry point to analyze; repeat for multiple entry points",
     )
     cross_file_scan_parser.add_argument(
         "--max-depth",
         type=int,
         default=5,
         help="Maximum analysis depth (default: 5)",
+    )
+    cross_file_scan_parser.add_argument(
+        "--no-diagram",
+        action="store_false",
+        dest="include_diagram",
+        help="Exclude Mermaid taint flow diagram",
+    )
+    cross_file_scan_parser.add_argument(
+        "--timeout-seconds",
+        type=float,
+        default=120.0,
+        help="Timeout for analysis in seconds (default: 120)",
+    )
+    cross_file_scan_parser.add_argument(
+        "--max-modules",
+        type=int,
+        default=500,
+        help="Maximum modules to analyze (default: 500)",
+    )
+    cross_file_scan_parser.add_argument(
+        "--confidence-threshold",
+        type=float,
+        default=0.7,
+        help="Minimum confidence for reporting (default: 0.7)",
     )
     cross_file_scan_parser.add_argument(
         "--json",
@@ -2068,7 +2388,13 @@ For more information, visit: https://github.com/3D-Tech-Solutions/code-scalpel
     )
     symbolic_parser.add_argument(
         "code",
-        help="Python code to analyze symbolically",
+        help="Source code to analyze symbolically",
+    )
+    symbolic_parser.add_argument(
+        "--language",
+        choices=SYMBOLIC_LANGUAGE_CHOICES,
+        default="python",
+        help="Source language (default: python)",
     )
     symbolic_parser.add_argument(
         "--max-paths",
@@ -2097,13 +2423,27 @@ For more information, visit: https://github.com/3D-Tech-Solutions/code-scalpel
         "file_path", help="Path to file containing symbol"
     )
     update_symbol_parser.add_argument("target_name", help="Symbol name to update")
-    update_symbol_parser.add_argument("new_body", help="New implementation body")
+    update_symbol_parser.add_argument(
+        "new_code",
+        nargs="?",
+        help="Replacement implementation for operation=replace",
+    )
     update_symbol_parser.add_argument(
         "--type",
         dest="target_type",
         choices=["function", "class", "method"],
         default="function",
         help="Type of symbol (default: function)",
+    )
+    update_symbol_parser.add_argument(
+        "--operation",
+        choices=["replace", "rename"],
+        default="replace",
+        help="Update operation to perform (default: replace)",
+    )
+    update_symbol_parser.add_argument(
+        "--new-name",
+        help="New symbol name for operation=rename",
     )
     update_symbol_parser.add_argument(
         "--no-backup",
@@ -2124,13 +2464,21 @@ For more information, visit: https://github.com/3D-Tech-Solutions/code-scalpel
         help="Simulate refactoring impact before applying (MCP tool)",
     )
     sim_refactor_parser.add_argument(
-        "file_path",
-        help="Path to file to refactor",
+        "original_code",
+        help="Original source code before the refactor",
     )
     sim_refactor_parser.add_argument(
-        "--changes",
-        required=True,
-        help="Description of changes to simulate",
+        "--new-code",
+        help="New source code after the refactor",
+    )
+    sim_refactor_parser.add_argument(
+        "--patch",
+        help="Patch or diff describing the refactor",
+    )
+    sim_refactor_parser.add_argument(
+        "--strict-mode",
+        action="store_true",
+        help="Enable stricter validation checks",
     )
     sim_refactor_parser.add_argument(
         "--json",
@@ -2153,16 +2501,16 @@ For more information, visit: https://github.com/3D-Tech-Solutions/code-scalpel
         help="Specific function to test",
     )
     gen_tests_parser.add_argument(
+        "--language",
+        choices=SYMBOLIC_LANGUAGE_CHOICES,
+        default="python",
+        help="Source language (default: python)",
+    )
+    gen_tests_parser.add_argument(
         "--framework",
         choices=["pytest", "unittest", "jest", "mocha"],
         default="pytest",
         help="Test framework (default: pytest)",
-    )
-    gen_tests_parser.add_argument(
-        "--coverage-target",
-        type=int,
-        default=80,
-        help="Target coverage percentage (default: 80)",
     )
     gen_tests_parser.add_argument(
         "--json",
@@ -2178,13 +2526,13 @@ For more information, visit: https://github.com/3D-Tech-Solutions/code-scalpel
         help="Validate import paths in project (MCP tool)",
     )
     validate_paths_parser.add_argument(
-        "file_path",
-        help="Path to file to validate",
+        "paths",
+        nargs="+",
+        help="One or more paths to validate",
     )
     validate_paths_parser.add_argument(
-        "--fix",
-        action="store_true",
-        help="Auto-fix invalid paths",
+        "--project-root",
+        help="Project root for relative path resolution",
     )
     validate_paths_parser.add_argument(
         "--json",
@@ -2199,6 +2547,10 @@ For more information, visit: https://github.com/3D-Tech-Solutions/code-scalpel
         help="Scan project dependencies for issues (MCP tool)",
     )
     scan_deps_parser.add_argument(
+        "--path",
+        help="Specific requirements or package file to scan",
+    )
+    scan_deps_parser.add_argument(
         "--project-root",
         help="Project root directory (default: current directory)",
     )
@@ -2208,9 +2560,16 @@ For more information, visit: https://github.com/3D-Tech-Solutions/code-scalpel
         help="Include development dependencies",
     )
     scan_deps_parser.add_argument(
-        "--check-security",
-        action="store_true",
-        help="Check for security vulnerabilities",
+        "--no-vulnerabilities",
+        action="store_false",
+        dest="scan_vulnerabilities",
+        help="Skip vulnerability lookups",
+    )
+    scan_deps_parser.add_argument(
+        "--timeout",
+        type=int,
+        default=30,
+        help="Dependency scan timeout in seconds (default: 30)",
     )
     scan_deps_parser.add_argument(
         "--json",
@@ -2225,18 +2584,26 @@ For more information, visit: https://github.com/3D-Tech-Solutions/code-scalpel
         help="Check code against policy rules (MCP tool)",
     )
     policy_check_parser.add_argument(
-        "file_path",
-        help="Path to file to check",
+        "paths",
+        nargs="+",
+        help="One or more paths to check",
     )
     policy_check_parser.add_argument(
-        "--policy-dir",
-        default=".code-scalpel",
-        help="Policy directory (default: .code-scalpel)",
+        "--rule",
+        dest="rules",
+        action="append",
+        help="Specific rule to enforce; repeat for multiple rules",
     )
     policy_check_parser.add_argument(
-        "--strict",
+        "--compliance-standard",
+        dest="compliance_standards",
+        action="append",
+        help="Compliance standard to audit; repeat for multiple standards",
+    )
+    policy_check_parser.add_argument(
+        "--generate-report",
         action="store_true",
-        help="Fail on any policy violation",
+        help="Generate a compliance report when supported by the current tier",
     )
     policy_check_parser.add_argument(
         "--json",
@@ -2254,6 +2621,12 @@ For more information, visit: https://github.com/3D-Tech-Solutions/code-scalpel
         "--policy-dir",
         default=".code-scalpel",
         help="Policy directory (default: .code-scalpel)",
+    )
+    verify_integrity_parser.add_argument(
+        "--manifest-source",
+        choices=["file", "git", "env"],
+        default="file",
+        help="Manifest source to verify against (default: file)",
     )
     verify_integrity_parser.add_argument(
         "--json",
@@ -2528,212 +2901,66 @@ For more information, visit: https://github.com/3D-Tech-Solutions/code-scalpel
 
     args = parser.parse_args()
 
-    if args.command == "analyze":
-        output_format = "json" if args.json else "text"
-        if args.code:
-            return analyze_code(
-                args.code, output_format, language=args.language or "python"
-            )
-        elif args.file:
-            return analyze_file(args.file, output_format, language=args.language)
-        else:
-            analyze_parser.print_help()
-            return 1
+    # [20260311_REFACTOR] Route CLI commands through a table-driven dispatcher so
+    # new commands do not require extending a fragile if/elif chain.
+    command_dispatch: dict[str, Callable[[], int]] = {
+        "analyze": lambda: _dispatch_with_guard(
+            args,
+            analyze_parser,
+            handle_analyze,
+            lambda namespace: bool(namespace.code or namespace.file),
+        ),
+        "scan": lambda: _dispatch_with_guard(
+            args,
+            scan_parser,
+            handle_scan,
+            lambda namespace: bool(namespace.code or namespace.file),
+        ),
+        "extract-code": lambda: _dispatch_with_guard(
+            args,
+            extract_parser,
+            handle_extract_code,
+            lambda namespace: bool(
+                namespace.target_name and (namespace.file_path or namespace.code)
+            ),
+        ),
+        "get-call-graph": lambda: handle_get_call_graph(args),
+        "rename-symbol": lambda: handle_rename_symbol(args),
+        "get-file-context": lambda: handle_get_file_context(args),
+        "get-symbol-references": lambda: handle_get_symbol_references(args),
+        "get-graph-neighborhood": lambda: handle_get_graph_neighborhood(args),
+        "get-project-map": lambda: handle_get_project_map(args),
+        "get-cross-file-dependencies": lambda: handle_get_cross_file_dependencies(args),
+        "crawl-project": lambda: handle_crawl_project(args),
+        "cross-file-security-scan": lambda: handle_cross_file_security_scan(args),
+        "type-evaporation-scan": lambda: handle_type_evaporation_scan(args),
+        "unified-sink-detect": lambda: handle_unified_sink_detect(args),
+        "symbolic-execute": lambda: handle_symbolic_execute(args),
+        "update-symbol": lambda: handle_update_symbol(args),
+        "simulate-refactor": lambda: handle_simulate_refactor(args),
+        "generate-unit-tests": lambda: handle_generate_unit_tests(args),
+        "validate-paths": lambda: handle_validate_paths(args),
+        "scan-dependencies": lambda: handle_scan_dependencies(args),
+        "code-policy-check": lambda: handle_code_policy_check(args),
+        "verify-policy-integrity": lambda: handle_verify_policy_integrity(args),
+        "check": lambda: handle_check(args),
+        "init": lambda: handle_init(args),
+        "verify-policies": lambda: handle_verify_policies(args),
+        "regenerate-manifest": lambda: handle_regenerate_manifest(args),
+        "server": lambda: handle_server(args),
+        "license": lambda: handle_license(args, license_parser),
+        "mcp": lambda: handle_mcp(args),
+        "capabilities": lambda: handle_capabilities(args),
+        "version": lambda: handle_version(args),
+        "release": lambda: handle_release(args, release_parser),
+    }
 
-    elif args.command == "scan":
-        output_format = "json" if args.json else "text"
-        if args.code:
-            return scan_code_security(args.code, output_format)
-        elif args.file:
-            return scan_security(args.file, output_format)
-        else:
-            scan_parser.print_help()
-            return 1
+    runner = command_dispatch.get(args.command)
+    if runner is not None:
+        return runner()
 
-    # [20260205_FEATURE] Phase 1 Pilot: MCP Tool CLI Handlers
-    elif args.command == "extract-code":
-        return handle_extract_code(args)
-
-    elif args.command == "get-call-graph":
-        return handle_get_call_graph(args)
-
-    elif args.command == "rename-symbol":
-        return handle_rename_symbol(args)
-
-    # [20260205_FEATURE] Phase 2: Analysis Tool Dispatchers
-    elif args.command == "get-file-context":
-        return handle_get_file_context(args)
-
-    elif args.command == "get-symbol-references":
-        return handle_get_symbol_references(args)
-
-    elif args.command == "get-graph-neighborhood":
-        return handle_get_graph_neighborhood(args)
-
-    elif args.command == "get-project-map":
-        return handle_get_project_map(args)
-
-    elif args.command == "get-cross-file-dependencies":
-        return handle_get_cross_file_dependencies(args)
-
-    elif args.command == "crawl-project":
-        return handle_crawl_project(args)
-
-    # [20260205_FEATURE] Phase 3: Security Tool Dispatchers
-    elif args.command == "cross-file-security-scan":
-        return handle_cross_file_security_scan(args)
-
-    elif args.command == "type-evaporation-scan":
-        return handle_type_evaporation_scan(args)
-
-    elif args.command == "unified-sink-detect":
-        return handle_unified_sink_detect(args)
-
-    elif args.command == "symbolic-execute":
-        return handle_symbolic_execute(args)
-
-    # [20260205_FEATURE] Phase 4: Refactoring & Testing Tool Dispatchers
-    elif args.command == "update-symbol":
-        return handle_update_symbol(args)
-
-    elif args.command == "simulate-refactor":
-        return handle_simulate_refactor(args)
-
-    elif args.command == "generate-unit-tests":
-        return handle_generate_unit_tests(args)
-
-    # [20260205_FEATURE] Phase 5: Validation & Policy Tool Dispatchers
-    elif args.command == "validate-paths":
-        return handle_validate_paths(args)
-
-    elif args.command == "scan-dependencies":
-        return handle_scan_dependencies(args)
-
-    elif args.command == "code-policy-check":
-        return handle_code_policy_check(args)
-
-    elif args.command == "verify-policy-integrity":
-        return handle_verify_policy_integrity(args)
-
-    elif args.command == "check":  # [20260224_FEATURE]
-        return check_configuration(args.dir, args.json, args.fix)
-
-    elif args.command == "init":  # [20251219_FEATURE] v3.0.2
-        return init_configuration(args.dir, args.force)
-
-    elif args.command == "verify-policies":  # [20241225_FEATURE] v3.3.0
-        return verify_policies_command(args.dir, args.manifest_source)
-
-    elif args.command == "regenerate-manifest":  # [20241225_FEATURE] v3.3.0
-        return regenerate_manifest_command(args.dir, args.signed_by)
-
-    elif args.command == "server":
-        return start_server(args.host, args.port)
-
-    elif args.command == "license":
-        if args.license_command == "install":
-            return _license_install(
-                args.license_file, dest_path=args.dest, force=args.force
-            )
-
-        license_parser.print_help()
-        return 1
-
-    elif args.command == "mcp":
-        transport = args.transport
-        if args.http:
-            transport = "sse"
-
-        allow_lan = getattr(args, "allow_lan", False)
-        root_path = getattr(args, "root", None)
-        tier = getattr(args, "tier", None)
-        ssl_certfile = getattr(args, "ssl_cert", None)
-        ssl_keyfile = getattr(args, "ssl_key", None)
-        license_file = getattr(args, "license_file", None)
-
-        # Build kwargs for server startup
-        start_kwargs = {
-            "transport": transport,
-            "host": args.host,
-            "port": args.port,
-            "allow_lan": allow_lan,
-            "root_path": root_path,
-            "tier": tier,
-        }
-        if license_file:
-            start_kwargs["license_file"] = license_file
-        if ssl_certfile and ssl_keyfile:
-            start_kwargs.update(
-                {
-                    "ssl_certfile": ssl_certfile,
-                    "ssl_keyfile": ssl_keyfile,
-                }
-            )
-        if getattr(args, "mismatch_action", None):
-            start_kwargs["mismatch_action"] = args.mismatch_action
-
-        # Keep main() compatible with older stubs/tests by filtering unknown kwargs.
-        import inspect
-
-        def _filter_kwargs_for_callable(func, kwargs: dict) -> dict:
-            try:
-                sig = inspect.signature(func)
-            except Exception:
-                return kwargs
-
-            for param in sig.parameters.values():
-                if param.kind == inspect.Parameter.VAR_KEYWORD:
-                    return kwargs
-
-            allowed = set(sig.parameters.keys())
-            return {k: v for k, v in kwargs.items() if k in allowed}
-
-        return start_mcp_server(
-            **_filter_kwargs_for_callable(start_mcp_server, start_kwargs)
-        )
-
-    elif args.command == "capabilities":
-        return show_capabilities(
-            tier=args.tier,
-            tool_filter=args.tool,
-            json_output=args.json,
-        )
-
-    elif args.command == "version":
-        print(f"Code Scalpel v{__version__}")
-        print(f"Python {sys.version}")
-        return 0
-
-    elif args.command == "release":  # [20260127_FEATURE] Phase 4 Release Pipeline
-        from code_scalpel.release.cli import (
-            release_plan,
-            release_prepare,
-            release_execute,
-            release_publish,
-        )
-
-        if args.release_command == "plan":
-            return release_plan()
-        elif args.release_command == "prepare":
-            return release_prepare()
-        elif args.release_command == "execute":
-            return release_execute(
-                skip_github=args.skip_github,
-                skip_pypi=args.skip_pypi,
-            )
-        elif args.release_command == "publish":
-            return release_publish(
-                tag=args.tag,
-                skip_github=args.skip_github,
-                skip_pypi=args.skip_pypi,
-            )
-        else:
-            release_parser.print_help()
-            return 1
-
-    else:
-        parser.print_help()
-        return 0
+    parser.print_help()
+    return 0
 
 
 if __name__ == "__main__":

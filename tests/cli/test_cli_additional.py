@@ -392,14 +392,73 @@ def test_main_server_dispatch(monkeypatch):
 
 
 def test_main_scan_code_dispatch(monkeypatch):
-    def _scan(code, output_format):  # noqa: ANN001
-        assert output_format == "json"
+    def _scan(args):  # noqa: ANN001
+        assert args.code == "print('x')"
+        assert args.json is True
         return 0
 
-    monkeypatch.setattr(cli, "scan_code_security", _scan)
+    monkeypatch.setattr(cli, "handle_scan", _scan)
     monkeypatch.setattr(
         cli.sys, "argv", ["code-scalpel", "scan", "--code", "print('x')", "--json"]
     )
 
     result = cli.main()
     assert result == 0
+
+
+def test_main_check_dispatch(monkeypatch):
+    called = {}
+
+    def _check(dir_path, json_output, fix):  # noqa: ANN001
+        called["dir"] = dir_path
+        called["json"] = json_output
+        called["fix"] = fix
+        return 0
+
+    monkeypatch.setattr(cli, "check_configuration", _check)
+    monkeypatch.setattr(
+        cli.sys,
+        "argv",
+        ["code-scalpel", "check", "--dir", "/tmp/project", "--json", "--fix"],
+    )
+
+    result = cli.main()
+
+    assert result == 0
+    assert called == {"dir": "/tmp/project", "json": True, "fix": True}
+
+
+def test_main_license_install_dispatch(monkeypatch, tmp_path):
+    called = {}
+    license_file = tmp_path / "license.jwt"
+    license_file.write_text("test-license")
+
+    def _install(path, dest_path=None, force=False):  # noqa: ANN001
+        called["path"] = path
+        called["dest"] = dest_path
+        called["force"] = force
+        return 0
+
+    monkeypatch.setattr(cli, "_license_install", _install)
+    monkeypatch.setattr(
+        cli.sys,
+        "argv",
+        [
+            "code-scalpel",
+            "license",
+            "install",
+            str(license_file),
+            "--dest",
+            str(tmp_path / "installed.jwt"),
+            "--force",
+        ],
+    )
+
+    result = cli.main()
+
+    assert result == 0
+    assert called == {
+        "path": str(license_file),
+        "dest": str(tmp_path / "installed.jwt"),
+        "force": True,
+    }
