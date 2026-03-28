@@ -445,7 +445,8 @@ async def _get_graph_neighborhood_tool(
                 ),
             )
 
-    return await asyncio.to_thread(
+    start_time = time.time()
+    result = await asyncio.to_thread(
         _get_graph_neighborhood_sync,
         center_node_id,
         k,
@@ -455,6 +456,34 @@ async def _get_graph_neighborhood_tool(
         project_root,
         query,
     )
+    duration_ms = (time.time() - start_time) * 1000
+
+    # Emit telemetry
+    try:
+        node_count = len(result.nodes) if result.nodes else 0
+        edge_count = len(result.edges) if result.edges else 0
+
+        telemetry.emit_tool_event(
+            tool_name="get_graph_neighborhood",
+            tier_applied=_get_current_tier(),
+            duration_ms=float(duration_ms),
+            status="success",
+            input_summary={
+                "center_node_id": center_node_id,
+                "k": k,
+                "max_nodes": max_nodes,
+                "direction": direction,
+            },
+            output_summary={
+                "node_count": node_count,
+                "edge_count": edge_count,
+                "depth_reached": getattr(result, 'depth_reached', 0),
+            },
+        )
+    except Exception:
+        pass  # Don't fail tool execution if telemetry fails
+
+    return result
 
 
 get_graph_neighborhood = mcp.tool(
@@ -529,6 +558,7 @@ async def _get_project_map_tool(
     """
     # [20260311_BUGFIX] Return guided invalid_argument responses for malformed
     # project-map shape inputs instead of relying on helper/result-model fallbacks.
+    start_time = time.time()
     if complexity_threshold < 1:
         return make_envelope(
             data=None,
@@ -646,6 +676,30 @@ async def _get_project_map_tool(
         msg = f"Analyzed {result.total_files} files, {result.total_lines} lines"
         await ctx.report_progress(100, 100, msg)
 
+    # Emit telemetry
+    try:
+        duration_ms = (time.time() - start_time) * 1000
+        module_count = len(result.modules) if hasattr(result, 'modules') and result.modules else 0
+
+        telemetry.emit_tool_event(
+            tool_name="get_project_map",
+            tier_applied=tier,
+            duration_ms=float(duration_ms),
+            status="success",
+            input_summary={
+                "complexity_threshold": complexity_threshold,
+                "detect_service_boundaries": detect_service_boundaries,
+                "include_circular_check": include_circular_check,
+            },
+            output_summary={
+                "file_count": result.total_files,
+                "total_lines": result.total_lines,
+                "module_count": module_count,
+            },
+        )
+    except Exception:
+        pass  # Don't fail tool execution if telemetry fails
+
     return result
 
 
@@ -721,6 +775,8 @@ async def _get_cross_file_dependencies_tool(
         - duration_ms (int): Analysis duration in milliseconds
     """
     from code_scalpel.mcp.helpers.session import _get_project_root
+
+    start_time = time.time()
 
     # [20260311_BUGFIX] Return guided invalid_argument responses for malformed
     # dependency-request shapes instead of relying on helper/result-model fallbacks.
@@ -834,6 +890,31 @@ async def _get_cross_file_dependencies_tool(
     elif isinstance(result, dict) and "success" not in result:
         result["success"] = True
 
+    # Emit telemetry
+    try:
+        duration_ms = (time.time() - start_time) * 1000
+        result_data = result.data if isinstance(result, ToolResponseEnvelope) else result
+        dependency_count = len(result_data.get("extracted_symbols", [])) if isinstance(result_data, dict) else 0
+
+        telemetry.emit_tool_event(
+            tool_name="get_cross_file_dependencies",
+            tier_applied=_get_current_tier(),
+            duration_ms=float(duration_ms),
+            status="success",
+            input_summary={
+                "target_file": target_file,
+                "target_symbol": target_symbol,
+                "max_depth": max_depth,
+                "include_code": include_code,
+            },
+            output_summary={
+                "dependency_count": dependency_count,
+                "max_depth_reached": getattr(result_data, 'max_depth_reached', max_depth) if not isinstance(result_data, dict) else result_data.get('max_depth_reached', max_depth),
+            },
+        )
+    except Exception:
+        pass  # Don't fail tool execution if telemetry fails
+
     return result
 
 
@@ -925,6 +1006,7 @@ async def _cross_file_security_scan_tool(
     """
     # [20260311_BUGFIX] Return guided invalid_argument responses for malformed
     # cross-file security scan shapes instead of relying on helper/result-model fallbacks.
+    start_time = time.time()
     if max_depth < 1:
         return make_envelope(
             data=None,
@@ -1012,6 +1094,31 @@ async def _cross_file_security_scan_tool(
             total=100,
             message=f"Scan complete: {vuln_count} cross-file vulnerabilities found",
         )
+
+    # Emit telemetry
+    try:
+        duration_ms = (time.time() - start_time) * 1000
+        vulnerability_count = getattr(result, 'vulnerability_count', 0)
+        high_confidence_count = len([v for v in (getattr(result, 'vulnerabilities', []) or []) if getattr(v, 'confidence', 0) >= 0.8])
+
+        telemetry.emit_tool_event(
+            tool_name="cross_file_security_scan",
+            tier_applied=tier,
+            duration_ms=float(duration_ms),
+            status="success",
+            input_summary={
+                "max_depth": max_depth,
+                "confidence_threshold": confidence_threshold,
+                "max_modules": max_modules,
+            },
+            output_summary={
+                "vulnerability_count": vulnerability_count,
+                "high_confidence_count": high_confidence_count,
+                "files_analyzed": getattr(result, 'files_analyzed', 0),
+            },
+        )
+    except Exception:
+        pass  # Don't fail tool execution if telemetry fails
 
     return result
 

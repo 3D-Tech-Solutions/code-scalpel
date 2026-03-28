@@ -18,6 +18,7 @@ from code_scalpel.mcp.contract import ToolResponseEnvelope, ToolError, make_enve
 from code_scalpel.mcp.oracle_middleware import with_oracle_resilience, PathStrategy
 from code_scalpel.mcp.path_resolver import resolve_path
 from code_scalpel import __version__ as _pkg_version
+from code_scalpel import telemetry
 
 
 @mcp.tool(
@@ -93,6 +94,26 @@ async def validate_paths(
             _validate_paths_sync, paths, project_root, tier, capabilities
         )
         duration_ms = int((time.perf_counter() - started) * 1000)
+
+        # Emit telemetry
+        try:
+            telemetry.emit_tool_event(
+                tool_name="validate_paths",
+                tier_applied=tier,
+                duration_ms=float(duration_ms),
+                status="success",
+                input_summary={
+                    "path_count": len(paths),
+                    "project_root_provided": project_root is not None,
+                },
+                output_summary={
+                    "accessible_count": len(result.accessible) if hasattr(result, 'accessible') and result.accessible else 0,
+                    "inaccessible_count": len(result.inaccessible) if hasattr(result, 'inaccessible') and result.inaccessible else 0,
+                },
+            )
+        except Exception:
+            pass  # Don't fail tool execution if telemetry fails
+
         return make_envelope(
             data=result,
             tool_id="validate_paths",
@@ -204,6 +225,26 @@ async def verify_policy_integrity(
             capabilities,
         )
         duration_ms = int((time.perf_counter() - started) * 1000)
+
+        # Emit telemetry
+        try:
+            telemetry.emit_tool_event(
+                tool_name="verify_policy_integrity",
+                tier_applied=tier,
+                duration_ms=float(duration_ms),
+                status="success" if getattr(result, 'success', False) else "failure",
+                input_summary={
+                    "policy_dir_provided": policy_dir is not None,
+                    "manifest_source": manifest_source,
+                },
+                output_summary={
+                    "verified": getattr(result, 'success', False),
+                    "files_verified": getattr(result, 'files_verified', 0),
+                },
+            )
+        except Exception:
+            pass  # Don't fail tool execution if telemetry fails
+
         return make_envelope(
             data=result,
             tool_id="verify_policy_integrity",
@@ -412,6 +453,27 @@ async def code_policy_check(
             report_config,
         )
         duration_ms = int((time.perf_counter() - started) * 1000)
+
+        # Emit telemetry
+        try:
+            telemetry.emit_tool_event(
+                tool_name="code_policy_check",
+                tier_applied=tier,
+                duration_ms=float(duration_ms),
+                status="success" if getattr(result, 'success', False) else "failure",
+                input_summary={
+                    "path_count": len(paths),
+                    "rule_count": len(rules) if rules else 0,
+                    "compliance_standards": compliance_standards or [],
+                },
+                output_summary={
+                    "files_checked": getattr(result, 'files_checked', 0),
+                    "violations_found": len(getattr(result, 'violations', [])),
+                },
+            )
+        except Exception:
+            pass  # Don't fail tool execution if telemetry fails
+
         return make_envelope(
             data=result,
             tool_id="code_policy_check",
