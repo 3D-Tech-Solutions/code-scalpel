@@ -1002,7 +1002,63 @@ def get_dashboard_html() -> str:
         .shutdown-success.active {
             display: block;
         }
+
+        /* Timeline Chart Styles */
+        .timeline-section {
+            background: #1e1e1e;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .timeline-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+        }
+
+        .granularity-controls {
+            display: flex;
+            gap: 4px;
+        }
+
+        .granularity-btn {
+            padding: 4px 12px;
+            font-size: 12px;
+            border: 1px solid #444;
+            background: transparent;
+            color: #aaa;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+
+        .granularity-btn:hover {
+            background: #333;
+            color: #fff;
+        }
+
+        .granularity-btn.active {
+            background: #007bff;
+            border-color: #007bff;
+            color: #fff;
+        }
+
+        .timeline-chart-wrapper {
+            position: relative;
+        }
+
+        .timeline-empty {
+            display: none;
+            text-align: center;
+            padding: 30px;
+            color: #666;
+            font-size: 13px;
+        }
     </style>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 </head>
 <body>
     <div class="container">
@@ -1092,6 +1148,25 @@ def get_dashboard_html() -> str:
             <div class="stat-card">
                 <div class="stat-label">Most Used <span class="most-used-badge" id="most-used-tool">—</span></div>
                 <div style="color: #999; font-size: 12px; margin-top: 5px;">Tool</div>
+            </div>
+        </div>
+
+        <!-- Timeline Section -->
+        <div class="timeline-section" id="timeline-section">
+            <div class="timeline-header">
+                <h3 class="section-title" style="margin: 0;">Tool Call Timeline</h3>
+                <div class="granularity-controls">
+                    <button class="granularity-btn active" id="btn-minute"
+                            onclick="setTimelineGranularity('minute', this)">By Minute</button>
+                    <button class="granularity-btn" id="btn-hour"
+                            onclick="setTimelineGranularity('hour', this)">By Hour</button>
+                </div>
+            </div>
+            <div class="timeline-chart-wrapper" id="timeline-chart-wrapper">
+                <canvas id="timeline-chart" height="100"></canvas>
+            </div>
+            <div class="timeline-empty" id="timeline-empty">
+                <span>No tool calls yet — run a tool to see the timeline</span>
             </div>
         </div>
 
@@ -1230,7 +1305,88 @@ def get_dashboard_html() -> str:
             document.getElementById('stat-success').textContent = successRate + '%';
             document.getElementById('stat-duration').textContent = avgDuration + 'ms';
             document.getElementById('most-used-tool').textContent = mostUsedTool;
+            renderTimeline();
         }
+
+        // ── Timeline Chart ────────────────────────────────────────────────────────────
+        let timelineChart = null;
+        let timelineGranularity = 'minute';
+
+        function bucketEventsByTime(evts, granularity) {
+            const success = {};
+            const failure = {};
+            evts.forEach(e => {
+                const d = new Date(e.timestamp * 1000);
+                const key = granularity === 'minute'
+                    ? d.getHours().toString().padStart(2,'0') + ':' + d.getMinutes().toString().padStart(2,'0')
+                    : d.getHours().toString().padStart(2,'0') + ':00';
+                if (e.status === 'success') success[key] = (success[key] || 0) + 1;
+                else failure[key] = (failure[key] || 0) + 1;
+            });
+            const labels = [...new Set([...Object.keys(success), ...Object.keys(failure)])].sort();
+            return {
+                labels,
+                success: labels.map(k => success[k] || 0),
+                failure: labels.map(k => failure[k] || 0),
+            };
+        }
+
+        function renderTimeline() {
+            const wrapper = document.getElementById('timeline-chart-wrapper');
+            const empty   = document.getElementById('timeline-empty');
+            if (events.length === 0) {
+                wrapper.style.display = 'none';
+                empty.style.display   = 'block';
+                if (timelineChart) { timelineChart.destroy(); timelineChart = null; }
+                return;
+            }
+            wrapper.style.display = 'block';
+            empty.style.display   = 'none';
+            const data = bucketEventsByTime(events, timelineGranularity);
+            if (timelineChart) {
+                timelineChart.data.labels           = data.labels;
+                timelineChart.data.datasets[0].data = data.success;
+                timelineChart.data.datasets[1].data = data.failure;
+                timelineChart.update('none');
+                return;
+            }
+            const ctx = document.getElementById('timeline-chart').getContext('2d');
+            timelineChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: data.labels,
+                    datasets: [
+                        { label: 'Success', data: data.success, backgroundColor: '#28a745', stack: 'calls' },
+                        { label: 'Failure', data: data.failure, backgroundColor: '#dc3545', stack: 'calls' },
+                    ],
+                },
+                options: {
+                    responsive: true,
+                    animation: { duration: 200 },
+                    plugins: {
+                        legend: { position: 'top', labels: { color: '#ccc', boxWidth: 14, font: { size: 12 } } },
+                        tooltip: {
+                            callbacks: {
+                                title: (items) => `${timelineGranularity === 'minute' ? 'Minute' : 'Hour'}: ${items[0].label}`,
+                            },
+                        },
+                    },
+                    scales: {
+                        x: { stacked: true, ticks: { color: '#888', font: { size: 11 } }, grid: { color: '#2a2a2a' } },
+                        y: { stacked: true, beginAtZero: true, ticks: { color: '#888', stepSize: 1, font: { size: 11 } }, grid: { color: '#2a2a2a' } },
+                    },
+                },
+            });
+        }
+
+        function setTimelineGranularity(granularity, btn) {
+            timelineGranularity = granularity;
+            document.querySelectorAll('.granularity-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            if (timelineChart) { timelineChart.destroy(); timelineChart = null; }
+            renderTimeline();
+        }
+        // ─────────────────────────────────────────────────────────────────────────────
 
         let filteredEvents = [];
 
