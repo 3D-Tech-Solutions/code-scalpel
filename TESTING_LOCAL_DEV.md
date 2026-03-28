@@ -122,6 +122,8 @@ Dashboard: http://localhost:7654
 - ✅ Dashboard URL is printed
 - ✅ Telemetry enabled message appears
 
+**Note:** Server will stay running in the terminal. See section 2.4 for stopping.
+
 ### 2.2 Test Dashboard is Accessible
 
 In another terminal:
@@ -145,6 +147,36 @@ curl http://localhost:7654/api/events | jq
 #   }
 # }
 ```
+
+### 2.4 Stop the Server Gracefully
+
+**Option A: Dashboard UI (Recommended)**
+1. Open the dashboard: http://localhost:7654
+2. Click the **⏹️ Stop Server** button (top-right corner)
+3. Confirm shutdown in the modal dialog
+4. Server will gracefully shut down, exporting the audit log
+5. The terminal will show the server has exited
+
+**Option B: Terminal (Ctrl+C)**
+```bash
+# Press Ctrl+C in the terminal where the server is running
+^C
+```
+
+This sends SIGINT to the process. The server will attempt graceful shutdown.
+
+**Option C: kill command**
+```bash
+# In another terminal
+ps aux | grep "code_scalpel.mcp.server"
+kill <PID>
+```
+
+**Graceful shutdown includes:**
+- ✓ Closing all WebSocket connections
+- ✓ Exporting audit log to JSONL file
+- ✓ Cleaning up resources
+- ✓ Saving telemetry data
 
 ## Part 3: Test with Real Tool Calls
 

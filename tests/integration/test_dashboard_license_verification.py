@@ -361,3 +361,153 @@ class TestLicenseEndpointErrorHandling:
                 except Exception:
                     pass
                 server.stop()
+
+
+class TestRemoteLicenseVerification:
+    """Test remote license verification features."""
+
+    def test_license_endpoint_includes_remote_verification_fields(self):
+        """Test that license endpoint includes remote verification fields when verifier is configured."""
+        with patch('code_scalpel.licensing.remote_verifier.remote_verifier_configured', return_value=False):
+            server = DashboardServer()
+            port = server.start()
+
+            try:
+                response = requests.get(f"http://localhost:{port}/api/license", timeout=5)
+                assert response.status_code == 200
+
+                data = response.json()
+                # Should indicate no remote verification
+                assert "remote_verified" in data
+                assert data["remote_verified"] is False
+            finally:
+                try:
+                    requests.get(f"http://localhost:{port}/shutdown", timeout=2)
+                except Exception:
+                    pass
+                server.stop()
+
+    def test_license_endpoint_with_remote_verifier_success(self):
+        """Test license endpoint when remote verifier is configured and succeeds."""
+        with patch('code_scalpel.licensing.remote_verifier.remote_verifier_configured', return_value=True):
+            with patch('code_scalpel.licensing.remote_verifier.authorize_token') as mock_authorize:
+                # Mock successful remote verification
+                mock_decision = MagicMock()
+                mock_decision.allowed = True
+                mock_decision.reason = "remote_verified"
+                mock_decision.entitlements = MagicMock()
+                mock_decision.entitlements.tier = "enterprise"
+                mock_authorize.return_value = mock_decision
+
+                with patch('code_scalpel.licensing.jwt_validator.JWTLicenseValidator') as MockValidator:
+                    mock_validator = MagicMock()
+                    mock_data = MagicMock()
+                    mock_data.is_valid = True
+                    mock_data.is_expired = False
+                    mock_data.error_message = None
+
+                    mock_validator.validate.return_value = mock_data
+                    mock_validator.find_license_file.return_value = Path("/home/user/.code-scalpel/license/license.jwt")
+                    mock_validator.load_license_token.return_value = "mock.jwt.token"
+                    MockValidator.return_value = mock_validator
+
+                    server = DashboardServer()
+                    port = server.start()
+
+                    try:
+                        response = requests.get(f"http://localhost:{port}/api/license", timeout=5)
+                        assert response.status_code == 200
+
+                        data = response.json()
+                        assert data["remote_verified"] is True
+                        assert data["remote_allowed"] is True
+                        assert data["remote_reason"] == "remote_verified"
+                        assert data.get("remote_tier") == "enterprise"
+                    finally:
+                        try:
+                            requests.get(f"http://localhost:{port}/shutdown", timeout=2)
+                        except Exception:
+                            pass
+                        server.stop()
+
+    def test_license_endpoint_with_offline_grace_period(self):
+        """Test license endpoint showing offline grace period."""
+        with patch('code_scalpel.licensing.remote_verifier.remote_verifier_configured', return_value=True):
+            with patch('code_scalpel.licensing.remote_verifier.authorize_token') as mock_authorize:
+                # Mock offline grace period
+                mock_decision = MagicMock()
+                mock_decision.allowed = True
+                mock_decision.reason = "offline_grace"
+                mock_decision.entitlements = MagicMock()
+                mock_decision.entitlements.tier = "pro"
+                mock_authorize.return_value = mock_decision
+
+                with patch('code_scalpel.licensing.jwt_validator.JWTLicenseValidator') as MockValidator:
+                    mock_validator = MagicMock()
+                    mock_data = MagicMock()
+                    mock_data.is_valid = True
+                    mock_data.is_expired = False
+
+                    mock_validator.validate.return_value = mock_data
+                    mock_validator.find_license_file.return_value = Path("/home/user/.code-scalpel/license/license.jwt")
+                    mock_validator.load_license_token.return_value = "mock.jwt.token"
+                    MockValidator.return_value = mock_validator
+
+                    server = DashboardServer()
+                    port = server.start()
+
+                    try:
+                        response = requests.get(f"http://localhost:{port}/api/license", timeout=5)
+                        assert response.status_code == 200
+
+                        data = response.json()
+                        assert data["remote_verified"] is True
+                        assert data["remote_reason"] == "offline_grace"
+                        # During grace period, may still have pro tier
+                        assert data.get("remote_tier") in ["pro", "community"]
+                    finally:
+                        try:
+                            requests.get(f"http://localhost:{port}/shutdown", timeout=2)
+                        except Exception:
+                            pass
+                        server.stop()
+
+    def test_license_endpoint_with_license_expired(self):
+        """Test license endpoint when license is expired."""
+        with patch('code_scalpel.licensing.remote_verifier.remote_verifier_configured', return_value=True):
+            with patch('code_scalpel.licensing.remote_verifier.authorize_token') as mock_authorize:
+                # Mock expired license
+                mock_decision = MagicMock()
+                mock_decision.allowed = False
+                mock_decision.reason = "license_expired"
+                mock_authorize.return_value = mock_decision
+
+                with patch('code_scalpel.licensing.jwt_validator.JWTLicenseValidator') as MockValidator:
+                    mock_validator = MagicMock()
+                    mock_data = MagicMock()
+                    mock_data.is_valid = False
+                    mock_data.is_expired = True
+                    mock_data.error_message = "License expired"
+
+                    mock_validator.validate.return_value = mock_data
+                    mock_validator.find_license_file.return_value = Path("/home/user/.code-scalpel/license/license.jwt")
+                    mock_validator.load_license_token.return_value = "mock.jwt.token"
+                    MockValidator.return_value = mock_validator
+
+                    server = DashboardServer()
+                    port = server.start()
+
+                    try:
+                        response = requests.get(f"http://localhost:{port}/api/license", timeout=5)
+                        assert response.status_code == 200
+
+                        data = response.json()
+                        assert data["is_expired"] is True
+                        assert data["remote_reason"] == "license_expired"
+                        assert data["current_tier"] == "community"
+                    finally:
+                        try:
+                            requests.get(f"http://localhost:{port}/shutdown", timeout=2)
+                        except Exception:
+                            pass
+                        server.stop()

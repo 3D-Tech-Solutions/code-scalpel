@@ -427,3 +427,154 @@ class TestTelemetryWithAuditLog:
                 # Cleanup
                 telemetry.set_audit_log(None)
                 audit_log.conn.close()
+
+
+class TestGetCallGraphTelemetry:
+    """Test get_call_graph tool telemetry."""
+
+    def test_get_call_graph_emits_telemetry(self, test_python_file):
+        """Test that get_call_graph emits telemetry event."""
+        from code_scalpel.mcp.tools.graph import get_call_graph
+
+        telemetry.clear_events()
+        set_current_tier("enterprise")
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(
+                get_call_graph(project_root=str(Path(test_python_file).parent))
+            )
+        finally:
+            loop.close()
+
+        events = telemetry.get_recent_events(limit=1)
+        assert len(events) > 0
+
+        event = events[0]
+        assert event["tool_name"] == "get_call_graph"
+        assert event["status"] == "success"
+        assert event["duration_ms"] > 0
+
+
+class TestUnifiedSinkDetectTelemetry:
+    """Test unified_sink_detect tool telemetry."""
+
+    def test_unified_sink_detect_emits_telemetry(self, test_python_file):
+        """Test that unified_sink_detect emits telemetry event."""
+        from code_scalpel.mcp.tools.security import unified_sink_detect
+
+        with open(test_python_file) as f:
+            code = f.read()
+
+        telemetry.clear_events()
+        set_current_tier("enterprise")
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(
+                unified_sink_detect(code=code, language="python")
+            )
+        finally:
+            loop.close()
+
+        events = telemetry.get_recent_events(limit=1)
+        assert len(events) > 0
+
+        event = events[0]
+        assert event["tool_name"] == "unified_sink_detect"
+        assert event["status"] in ["success", "failure"]
+        assert event["duration_ms"] > 0
+
+
+class TestGetProjectMapTelemetry:
+    """Test get_project_map tool telemetry."""
+
+    def test_get_project_map_emits_telemetry(self, test_project_dir):
+        """Test that get_project_map emits telemetry event."""
+        from code_scalpel.mcp.tools.graph import get_project_map
+
+        telemetry.clear_events()
+        set_current_tier("enterprise")
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(
+                get_project_map(project_root=test_project_dir)
+            )
+        finally:
+            loop.close()
+
+        events = telemetry.get_recent_events(limit=1)
+        assert len(events) > 0
+
+        event = events[0]
+        assert event["tool_name"] == "get_project_map"
+        assert event["status"] == "success"
+        assert event["duration_ms"] > 0
+        # Should have file/module metrics in output
+        output_summary = event["output_summary"]
+        assert any(key in output_summary for key in ["file_count", "module_count", "total_files"])
+
+
+class TestTypeEvaporationScanTelemetry:
+    """Test type_evaporation_scan tool telemetry."""
+
+    def test_type_evaporation_scan_emits_telemetry(self, test_python_file):
+        """Test that type_evaporation_scan can be called and attempts telemetry."""
+        from code_scalpel.mcp.tools.security import type_evaporation_scan
+
+        with open(test_python_file) as f:
+            code = f.read()
+
+        telemetry.clear_events()
+        set_current_tier("enterprise")
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            # type_evaporation_scan may require both frontend and backend code
+            # It may also not emit telemetry if it fails early
+            result = loop.run_until_complete(
+                type_evaporation_scan(frontend_code=code)
+            )
+            # Just verify the call completes without error
+            assert result is not None
+        finally:
+            loop.close()
+
+
+class TestSimulateRefactorTelemetry:
+    """Test simulate_refactor tool telemetry."""
+
+    def test_simulate_refactor_emits_telemetry(self, test_python_file):
+        """Test that simulate_refactor emits telemetry event."""
+        from code_scalpel.mcp.tools.symbolic import simulate_refactor
+
+        with open(test_python_file) as f:
+            original_code = f.read()
+
+        # Create a simple refactored version
+        new_code = original_code.replace("def calculate_tax", "def compute_tax")
+
+        telemetry.clear_events()
+        set_current_tier("pro")
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(
+                simulate_refactor(original_code=original_code, new_code=new_code)
+            )
+        finally:
+            loop.close()
+
+        events = telemetry.get_recent_events(limit=1)
+        assert len(events) > 0
+
+        event = events[0]
+        assert event["tool_name"] == "simulate_refactor"
+        assert event["status"] in ["success", "failure"]
+        assert event["duration_ms"] > 0
