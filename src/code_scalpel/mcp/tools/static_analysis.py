@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from code_scalpel import __version__ as _pkg_version
+from code_scalpel import telemetry
 from code_scalpel.mcp.contract import ToolError, ToolResponseEnvelope, make_envelope
 from code_scalpel.mcp.oracle_middleware import PathStrategy, with_oracle_resilience
 from code_scalpel.mcp.path_resolver import resolve_path
@@ -280,22 +281,64 @@ async def run_static_analysis(
             resolve_path(report_path, base_root) if report_path is not None else None
         )
 
-        result = await asyncio.to_thread(
-            _run_static_analysis_sync,
-            language,
-            resolved_paths,
-            tool,
-            resolved_report_path,
-            tier,
-        )
-        duration_ms = int((time.perf_counter() - started) * 1000)
-        return make_envelope(
-            data=result,
-            tool_id="run_static_analysis",
-            tool_version=_pkg_version,
-            tier=tier,
-            duration_ms=duration_ms,
-        )
+        try:
+            result = await asyncio.to_thread(
+                _run_static_analysis_sync,
+                language,
+                resolved_paths,
+                tool,
+                resolved_report_path,
+                tier,
+            )
+            duration_ms = int((time.perf_counter() - started) * 1000)
+
+            # Emit success telemetry
+            try:
+                telemetry.emit_tool_event(
+                    tool_name="run_static_analysis",
+                    tier_applied=tier,
+                    duration_ms=float(duration_ms),
+                    status="success",
+                    input_summary={
+                        "tool": tool,
+                        "language": language,
+                        "has_report_path": report_path is not None,
+                        "path_count": len(resolved_paths),
+                    },
+                )
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Telemetry emit failed for run_static_analysis: {e}")
+
+            return make_envelope(
+                data=result,
+                tool_id="run_static_analysis",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=duration_ms,
+            )
+        except Exception as exc:
+            duration_ms = int((time.perf_counter() - started) * 1000)
+
+            # Emit failure telemetry
+            try:
+                telemetry.emit_tool_event(
+                    tool_name="run_static_analysis",
+                    tier_applied=tier,
+                    duration_ms=float(duration_ms),
+                    status="failure",
+                    error=str(exc),
+                    input_summary={
+                        "tool": tool,
+                        "language": language,
+                        "has_report_path": report_path is not None,
+                    },
+                )
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Telemetry emit failed for run_static_analysis: {e}")
+
+            raise
     except FileNotFoundError as exc:
         duration_ms = int((time.perf_counter() - started) * 1000)
         return make_envelope(

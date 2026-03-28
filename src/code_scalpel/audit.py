@@ -99,6 +99,64 @@ class AuditLog:
         self.conn.commit()
         logger.debug("Audit schema created")
 
+    def _append_jsonl_live(
+        self,
+        event_id: str,
+        request_id: str,
+        session_id: str,
+        timestamp: float,
+        tool_name: str,
+        tier_applied: str,
+        status: str,
+        duration_ms: float,
+        input_summary: dict[str, Any],
+        output_summary: dict[str, Any],
+        error: Optional[str] = None,
+        metadata: Optional[dict[str, Any]] = None,
+    ) -> None:
+        """Append one event to the live JSONL stream (crash-safe).
+
+        This file is written plaintext and flushed after each event,
+        so it survives crashes. On clean shutdown, it's renamed to the
+        timestamped archive format for historical browsing.
+
+        Args:
+            event_id: Unique event identifier
+            request_id: Unique request identifier
+            session_id: Session identifier
+            timestamp: Unix timestamp
+            tool_name: Name of the tool
+            tier_applied: License tier
+            status: success, failure, or timeout
+            duration_ms: Execution time in milliseconds
+            input_summary: Input parameters
+            output_summary: Output/results
+            error: Error message if status is failure
+            metadata: Additional metadata
+        """
+        live_file = self.base_dir / f"audit_{session_id}_live.jsonl"
+        try:
+            event_dict = {
+                "event_id": event_id,
+                "request_id": request_id,
+                "session_id": session_id,
+                "timestamp": timestamp,
+                "timestamp_iso": datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat(),
+                "tool_name": tool_name,
+                "tier_applied": tier_applied,
+                "status": status,
+                "duration_ms": duration_ms,
+                "input_summary": input_summary,
+                "output_summary": output_summary,
+                "error": error,
+                "metadata": metadata or {},
+            }
+            with open(live_file, "a") as f:
+                f.write(json.dumps(event_dict) + "\n")
+            logger.debug(f"Appended event to live JSONL: {live_file}")
+        except Exception as e:
+            logger.warning(f"Live JSONL append failed: {e}")
+
     def log_tool_call(
         self,
         event_id: str,
@@ -137,6 +195,9 @@ class AuditLog:
         output_json = json.dumps(output_summary or {})
         metadata_json = json.dumps(metadata or {})
 
+        # Prepare error for storage (will encrypt if encryption enabled)
+        error_stored = error
+
         # Encrypt if enabled
         encrypted = 0
         if self.encryption.enabled and self.encryption.cipher:
@@ -144,6 +205,8 @@ class AuditLog:
                 input_json = self.encryption.cipher.encrypt(input_json.encode()).decode()
                 output_json = self.encryption.cipher.encrypt(output_json.encode()).decode()
                 metadata_json = self.encryption.cipher.encrypt(metadata_json.encode()).decode()
+                if error_stored:
+                    error_stored = self.encryption.cipher.encrypt(error_stored.encode()).decode()
                 encrypted = 1
             except Exception as e:
                 logger.warning(f"Encryption failed for event {event_id}: {e}")
@@ -168,13 +231,29 @@ class AuditLog:
                     duration_ms,
                     input_json,
                     output_json,
-                    error,
+                    error_stored,
                     metadata_json,
                     encrypted,
                 ),
             )
             self.conn.commit()
             logger.debug(f"Logged tool call: {tool_name} (event_id={event_id})")
+
+            # Append plaintext event to live JSONL stream (crash-safe)
+            self._append_jsonl_live(
+                event_id=event_id,
+                request_id=request_id,
+                session_id=self.session_id,
+                timestamp=timestamp,
+                tool_name=tool_name,
+                tier_applied=tier_applied,
+                status=status,
+                duration_ms=duration_ms,
+                input_summary=input_summary,
+                output_summary=output_summary,
+                error=error,
+                metadata=metadata or {},
+            )
         except sqlite3.Error as e:
             logger.error(f"Database error logging event {event_id}: {e}")
 
@@ -302,6 +381,14 @@ class AuditLog:
                     data["metadata"] = json.loads(decrypted)
                 else:
                     data["metadata"] = {}
+
+                # Decrypt error field if present
+                if data.get("error"):
+                    try:
+                        data["error"] = self.encryption.cipher.decrypt(data["error"].encode()).decode()
+                    except Exception:
+                        # Leave as-is if decryption fails
+                        pass
             except Exception as e:
                 logger.error(f"Decryption failed for event {data.get('event_id')}: {e}")
                 # Return encrypted blobs as-is if decryption fails
@@ -337,21 +424,63 @@ class AuditLog:
     def cleanup(self) -> Optional[Path]:
         """Clean up and archive audit log.
 
-        Called on server shutdown. Exports to JSONL and closes database.
+        Called on server shutdown. Renames live JSONL, exports database to JSONL,
+        applies retention policy, and closes database.
 
         Returns:
-            Path to exported JSONL file, or None if export failed
+            Path to archived JSONL file, or None if failed
         """
         try:
-            # Export to JSONL before closing
-            export_file = self.export_to_jsonl()
-
-            # Close database
+            # Close database first
             self.conn.close()
 
-            # Keep .db file for this session (user can inspect if needed)
-            logger.info(f"Audit log cleanup complete. Database: {self.db_path}, Export: {export_file}")
-            return export_file
+            # Rename live JSONL to timestamped archive (if it exists)
+            live_file = self.base_dir / f"audit_{self.session_id}_live.jsonl"
+            archive_file = None
+            if live_file.exists():
+                timestamp = datetime.now(timezone.utc).isoformat().replace(":", "-")
+                archive_file = self.base_dir / f"audit_{self.session_id}_{timestamp}.jsonl"
+                try:
+                    live_file.rename(archive_file)
+                    logger.info(f"Renamed live JSONL to archive: {archive_file}")
+                except Exception as e:
+                    logger.warning(f"Failed to rename live JSONL: {e}")
+                    archive_file = None
+
+            # Apply retention policy: purge files older than RETENTION_DAYS
+            import os
+            import time as time_module
+            retention_days = int(os.environ.get("CODESCALPEL_AUDIT_RETENTION_DAYS", "30"))
+            retention_seconds = retention_days * 86400
+            cutoff_time = time_module.time() - retention_seconds
+
+            purged_count = 0
+            for filepath in self.base_dir.glob("audit_*.jsonl"):
+                try:
+                    if filepath.stat().st_mtime < cutoff_time:
+                        filepath.unlink()
+                        purged_count += 1
+                        logger.debug(f"Purged old audit file: {filepath}")
+                except Exception as e:
+                    logger.warning(f"Failed to purge {filepath}: {e}")
+
+            for filepath in self.base_dir.glob("audit_session_*.db"):
+                try:
+                    if filepath.stat().st_mtime < cutoff_time:
+                        filepath.unlink()
+                        purged_count += 1
+                        logger.debug(f"Purged old audit database: {filepath}")
+                except Exception as e:
+                    logger.warning(f"Failed to purge {filepath}: {e}")
+
+            if purged_count > 0:
+                logger.info(f"Retention policy: purged {purged_count} old audit files")
+
+            logger.info(
+                f"Audit log cleanup complete. Database: {self.db_path}, "
+                f"Archive: {archive_file}, Purged: {purged_count}"
+            )
+            return archive_file
         except Exception as e:
             logger.error(f"Cleanup failed: {e}")
             try:

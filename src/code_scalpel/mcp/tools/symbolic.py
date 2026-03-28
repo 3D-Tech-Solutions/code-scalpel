@@ -202,52 +202,74 @@ async def symbolic_execute(
 
         helper = sym_helpers._symbolic_execute_sync
 
-        result = await asyncio.to_thread(
-            helper,
-            code,
-            effective_max_paths,
-            effective_max_depth,
-            constraint_types,
-            language,
-            tier=tier,
-            capabilities=caps,
-        )
-        duration_ms = int((time.perf_counter() - started) * 1000)
+        try:
+            result = await asyncio.to_thread(
+                helper,
+                code,
+                effective_max_paths,
+                effective_max_depth,
+                constraint_types,
+                language,
+                tier=tier,
+                capabilities=caps,
+            )
+            duration_ms = int((time.perf_counter() - started) * 1000)
 
-        # Emit telemetry event for symbolic_execute tool call
-        telemetry.emit_tool_event(
-            tool_name="symbolic_execute",
-            tier_applied=tier,
-            duration_ms=float(duration_ms),
-            status="success",
-            input_summary={
-                "language": language,
-                "code_length": len(code) if code else 0,
-                "max_paths_requested": max_paths,
-                "max_depth_requested": max_depth,
-            },
-            output_summary={
-                "success": result.success if result else False,
-                "paths_explored": result.paths_explored if result else 0,
-                "total_paths": result.total_paths if result else 0,
-                "truncated": result.truncated if result else False,
-                "symbolic_variables": len(result.symbolic_variables) if (result and result.symbolic_variables) else 0,
-                "constraints": len(result.constraints) if (result and result.constraints) else 0,
-            },
-            metadata={
-                "language": language,
-                "effective_max_paths": effective_max_paths,
-                "effective_max_depth": effective_max_depth,
-            },
-        )
+            # Emit telemetry event for symbolic_execute tool call
+            telemetry.emit_tool_event(
+                tool_name="symbolic_execute",
+                tier_applied=tier,
+                duration_ms=float(duration_ms),
+                status="success",
+                input_summary={
+                    "language": language,
+                    "code_length": len(code) if code else 0,
+                    "max_paths_requested": max_paths,
+                    "max_depth_requested": max_depth,
+                },
+                output_summary={
+                    "success": result.success if result else False,
+                    "paths_explored": result.paths_explored if result else 0,
+                    "total_paths": result.total_paths if result else 0,
+                    "truncated": result.truncated if result else False,
+                    "symbolic_variables": len(result.symbolic_variables) if (result and result.symbolic_variables) else 0,
+                    "constraints": len(result.constraints) if (result and result.constraints) else 0,
+                },
+                metadata={
+                    "language": language,
+                    "effective_max_paths": effective_max_paths,
+                    "effective_max_depth": effective_max_depth,
+                },
+            )
 
-        return make_envelope(
-            data=result,
-            tool_id="symbolic_execute",
-            tool_version=_pkg_version,
-            tier=tier,
-            duration_ms=duration_ms,
-        )
+            return make_envelope(
+                data=result,
+                tool_id="symbolic_execute",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=duration_ms,
+            )
+        except Exception as exc:
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            # Emit failure telemetry
+            try:
+                telemetry.emit_tool_event(
+                    tool_name="symbolic_execute",
+                    tier_applied=tier,
+                    duration_ms=float(duration_ms),
+                    status="failure",
+                    error=str(exc),
+                    input_summary={
+                        "language": language,
+                        "code_length": len(code) if code else 0,
+                        "max_paths_requested": max_paths,
+                        "max_depth_requested": max_depth,
+                    },
+                )
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Telemetry emit failed for symbolic_execute: {e}")
+            raise
     except Exception as exc:
         duration_ms = int((time.perf_counter() - started) * 1000)
         tier = _get_current_tier()
@@ -494,44 +516,70 @@ async def generate_unit_tests(
                     },
                 ),
             )
-        duration_ms = int((time.perf_counter() - started) * 1000)
 
-        # Emit telemetry event for generate_unit_tests tool call
-        telemetry.emit_tool_event(
-            tool_name="generate_unit_tests",
-            tier_applied=tier,
-            duration_ms=float(duration_ms),
-            status="success",
-            input_summary={
-                "language": language,
-                "framework": framework,
-                "data_driven": data_driven,
-                "has_crash_log": crash_log is not None,
-                "code_provided": code is not None,
-                "file_path": file_path,
-                "function_name": function_name,
-            },
-            output_summary={
-                "success": result.success if result else False,
-                "test_count": result.test_count if result else 0,
-                "total_test_cases": result.total_test_cases if result else 0,
-                "framework_used": result.framework_used if result else None,
-                "data_driven_enabled": result.data_driven_enabled if result else False,
-                "truncated": result.truncated if result else False,
-            },
-            metadata={
-                "language": language,
-                "framework": framework,
-            },
-        )
+        try:
+            duration_ms = int((time.perf_counter() - started) * 1000)
 
-        return make_envelope(
-            data=result,
-            tool_id="generate_unit_tests",
-            tool_version=_pkg_version,
-            tier=tier,
-            duration_ms=duration_ms,
-        )
+            # Emit telemetry event for generate_unit_tests tool call
+            telemetry.emit_tool_event(
+                tool_name="generate_unit_tests",
+                tier_applied=tier,
+                duration_ms=float(duration_ms),
+                status="success",
+                input_summary={
+                    "language": language,
+                    "framework": framework,
+                    "data_driven": data_driven,
+                    "has_crash_log": crash_log is not None,
+                    "code_provided": code is not None,
+                    "file_path": file_path,
+                    "function_name": function_name,
+                },
+                output_summary={
+                    "success": result.success if result else False,
+                    "test_count": result.test_count if result else 0,
+                    "total_test_cases": result.total_test_cases if result else 0,
+                    "framework_used": result.framework_used if result else None,
+                    "data_driven_enabled": result.data_driven_enabled if result else False,
+                    "truncated": result.truncated if result else False,
+                },
+                metadata={
+                    "language": language,
+                    "framework": framework,
+                },
+            )
+
+            return make_envelope(
+                data=result,
+                tool_id="generate_unit_tests",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=duration_ms,
+            )
+        except Exception as exc:
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            # Emit failure telemetry
+            try:
+                telemetry.emit_tool_event(
+                    tool_name="generate_unit_tests",
+                    tier_applied=tier,
+                    duration_ms=float(duration_ms),
+                    status="failure",
+                    error=str(exc),
+                    input_summary={
+                        "language": language,
+                        "framework": framework,
+                        "data_driven": data_driven,
+                        "has_crash_log": crash_log is not None,
+                        "code_provided": code is not None,
+                        "file_path": file_path,
+                        "function_name": function_name,
+                    },
+                )
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Telemetry emit failed for generate_unit_tests: {e}")
+            raise
     except Exception as exc:
         duration_ms = int((time.perf_counter() - started) * 1000)
         tier = _get_current_tier()
@@ -651,51 +699,75 @@ async def simulate_refactor(
         analysis_depth = limits.get("analysis_depth", "basic")
         compliance_validation = "compliance_validation" in tool_caps
 
-        result = await asyncio.to_thread(
-            sym_helpers._simulate_refactor_sync,
-            original_code,
-            new_code,
-            patch,
-            strict_mode,
-            max_file_size_mb=max_file_size_mb,
-            analysis_depth=analysis_depth,
-            compliance_validation=compliance_validation,
-        )
-        duration_ms = int((time.perf_counter() - started) * 1000)
+        try:
+            result = await asyncio.to_thread(
+                sym_helpers._simulate_refactor_sync,
+                original_code,
+                new_code,
+                patch,
+                strict_mode,
+                max_file_size_mb=max_file_size_mb,
+                analysis_depth=analysis_depth,
+                compliance_validation=compliance_validation,
+            )
+            duration_ms = int((time.perf_counter() - started) * 1000)
 
-        # Emit telemetry event for simulate_refactor tool call
-        telemetry.emit_tool_event(
-            tool_name="simulate_refactor",
-            tier_applied=tier,
-            duration_ms=float(duration_ms),
-            status="success",
-            input_summary={
-                "original_code_length": len(original_code) if original_code else 0,
-                "new_code_provided": new_code is not None,
-                "new_code_length": len(new_code) if new_code else 0,
-                "patch_provided": patch is not None,
-                "patch_length": len(patch) if patch else 0,
-                "strict_mode": strict_mode,
-            },
-            output_summary={
-                "success": result.success if result else False,
-                "is_safe": result.is_safe if result else False,
-                "status": result.status if result else None,
-                "security_issues": len(result.security_issues) if (result and result.security_issues) else 0,
-                "structural_changes": bool(result.structural_changes) if result else False,
-            },
-            metadata={
-                "analysis_depth": analysis_depth,
-            },
-        )
+            # Emit telemetry event for simulate_refactor tool call
+            telemetry.emit_tool_event(
+                tool_name="simulate_refactor",
+                tier_applied=tier,
+                duration_ms=float(duration_ms),
+                status="success",
+                input_summary={
+                    "original_code_length": len(original_code) if original_code else 0,
+                    "new_code_provided": new_code is not None,
+                    "new_code_length": len(new_code) if new_code else 0,
+                    "patch_provided": patch is not None,
+                    "patch_length": len(patch) if patch else 0,
+                    "strict_mode": strict_mode,
+                },
+                output_summary={
+                    "success": result.success if result else False,
+                    "is_safe": result.is_safe if result else False,
+                    "status": result.status if result else None,
+                    "security_issues": len(result.security_issues) if (result and result.security_issues) else 0,
+                    "structural_changes": bool(result.structural_changes) if result else False,
+                },
+                metadata={
+                    "analysis_depth": analysis_depth,
+                },
+            )
 
-        return make_envelope(
-            data=result,
-            tool_id="simulate_refactor",
-            tool_version=_pkg_version,
-            tier=tier,
-            duration_ms=duration_ms,
-        )
+            return make_envelope(
+                data=result,
+                tool_id="simulate_refactor",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=duration_ms,
+            )
+        except Exception as exc:
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            # Emit failure telemetry
+            try:
+                telemetry.emit_tool_event(
+                    tool_name="simulate_refactor",
+                    tier_applied=tier,
+                    duration_ms=float(duration_ms),
+                    status="failure",
+                    error=str(exc),
+                    input_summary={
+                        "original_code_length": len(original_code) if original_code else 0,
+                        "new_code_provided": new_code is not None,
+                        "new_code_length": len(new_code) if new_code else 0,
+                        "patch_provided": patch is not None,
+                        "patch_length": len(patch) if patch else 0,
+                        "strict_mode": strict_mode,
+                    },
+                )
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Telemetry emit failed for simulate_refactor: {e}")
+            raise
     except Exception as exc:
         duration_ms = int((time.perf_counter() - started) * 1000)
         tier = _get_current_tier()

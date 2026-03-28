@@ -90,37 +90,59 @@ async def validate_paths(
             project_root = resolve_path(project_root)
         tier = _get_current_tier()
         capabilities = get_tool_capabilities("validate_paths", tier) or {}
-        result = await asyncio.to_thread(
-            _validate_paths_sync, paths, project_root, tier, capabilities
-        )
-        duration_ms = int((time.perf_counter() - started) * 1000)
 
-        # Emit telemetry
         try:
-            telemetry.emit_tool_event(
-                tool_name="validate_paths",
-                tier_applied=tier,
-                duration_ms=float(duration_ms),
-                status="success",
-                input_summary={
-                    "path_count": len(paths),
-                    "project_root_provided": project_root is not None,
-                },
-                output_summary={
-                    "accessible_count": len(result.accessible) if hasattr(result, 'accessible') and result.accessible else 0,
-                    "inaccessible_count": len(result.inaccessible) if hasattr(result, 'inaccessible') and result.inaccessible else 0,
-                },
+            result = await asyncio.to_thread(
+                _validate_paths_sync, paths, project_root, tier, capabilities
             )
-        except Exception:
-            pass  # Don't fail tool execution if telemetry fails
+            duration_ms = int((time.perf_counter() - started) * 1000)
 
-        return make_envelope(
-            data=result,
-            tool_id="validate_paths",
-            tool_version=_pkg_version,
-            tier=tier,
-            duration_ms=duration_ms,
-        )
+            # Emit success telemetry
+            try:
+                telemetry.emit_tool_event(
+                    tool_name="validate_paths",
+                    tier_applied=tier,
+                    duration_ms=float(duration_ms),
+                    status="success",
+                    input_summary={
+                        "path_count": len(paths),
+                        "project_root_provided": project_root is not None,
+                    },
+                    output_summary={
+                        "accessible_count": len(result.accessible) if hasattr(result, 'accessible') and result.accessible else 0,
+                        "inaccessible_count": len(result.inaccessible) if hasattr(result, 'inaccessible') and result.inaccessible else 0,
+                    },
+                )
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Telemetry emit failed: {e}")
+
+            return make_envelope(
+                data=result,
+                tool_id="validate_paths",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=duration_ms,
+            )
+        except Exception as exc:
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            # Emit failure telemetry
+            try:
+                telemetry.emit_tool_event(
+                    tool_name="validate_paths",
+                    tier_applied=tier,
+                    duration_ms=float(duration_ms),
+                    status="failure",
+                    error=str(exc),
+                    input_summary={
+                        "path_count": len(paths),
+                        "project_root_provided": project_root is not None,
+                    },
+                )
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Telemetry emit failed: {e}")
+            raise
     except FileNotFoundError as exc:
         duration_ms = int((time.perf_counter() - started) * 1000)
         tier = _get_current_tier()
@@ -217,41 +239,63 @@ async def verify_policy_integrity(
             policy_dir = resolve_path(policy_dir)
         tier = _get_current_tier()
         capabilities = get_tool_capabilities("verify_policy_integrity", tier) or {}
-        result = await asyncio.to_thread(
-            _verify_policy_integrity_sync,
-            policy_dir,
-            manifest_source,
-            tier,
-            capabilities,
-        )
-        duration_ms = int((time.perf_counter() - started) * 1000)
 
-        # Emit telemetry
         try:
-            telemetry.emit_tool_event(
-                tool_name="verify_policy_integrity",
-                tier_applied=tier,
-                duration_ms=float(duration_ms),
-                status="success" if getattr(result, 'success', False) else "failure",
-                input_summary={
-                    "policy_dir_provided": policy_dir is not None,
-                    "manifest_source": manifest_source,
-                },
-                output_summary={
-                    "verified": getattr(result, 'success', False),
-                    "files_verified": getattr(result, 'files_verified', 0),
-                },
+            result = await asyncio.to_thread(
+                _verify_policy_integrity_sync,
+                policy_dir,
+                manifest_source,
+                tier,
+                capabilities,
             )
-        except Exception:
-            pass  # Don't fail tool execution if telemetry fails
+            duration_ms = int((time.perf_counter() - started) * 1000)
 
-        return make_envelope(
-            data=result,
-            tool_id="verify_policy_integrity",
-            tool_version=_pkg_version,
-            tier=tier,
-            duration_ms=duration_ms,
-        )
+            # Emit success telemetry
+            try:
+                telemetry.emit_tool_event(
+                    tool_name="verify_policy_integrity",
+                    tier_applied=tier,
+                    duration_ms=float(duration_ms),
+                    status="success" if getattr(result, 'success', False) else "failure",
+                    input_summary={
+                        "policy_dir_provided": policy_dir is not None,
+                        "manifest_source": manifest_source,
+                    },
+                    output_summary={
+                        "verified": getattr(result, 'success', False),
+                        "files_verified": getattr(result, 'files_verified', 0),
+                    },
+                )
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Telemetry emit failed: {e}")
+
+            return make_envelope(
+                data=result,
+                tool_id="verify_policy_integrity",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=duration_ms,
+            )
+        except Exception as exc:
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            # Emit failure telemetry
+            try:
+                telemetry.emit_tool_event(
+                    tool_name="verify_policy_integrity",
+                    tier_applied=tier,
+                    duration_ms=float(duration_ms),
+                    status="failure",
+                    error=str(exc),
+                    input_summary={
+                        "policy_dir_provided": policy_dir is not None,
+                        "manifest_source": manifest_source,
+                    },
+                )
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Telemetry emit failed: {e}")
+            raise
     except FileNotFoundError as exc:
         duration_ms = int((time.perf_counter() - started) * 1000)
         tier = _get_current_tier()
@@ -442,45 +486,67 @@ async def code_policy_check(
                 error=error_obj,
             )
 
-        result = await asyncio.to_thread(
-            _code_policy_check_sync,
-            paths,
-            rules,
-            compliance_standards,
-            generate_report,
-            tier,
-            capabilities,
-            report_config,
-        )
-        duration_ms = int((time.perf_counter() - started) * 1000)
-
-        # Emit telemetry
         try:
-            telemetry.emit_tool_event(
-                tool_name="code_policy_check",
-                tier_applied=tier,
-                duration_ms=float(duration_ms),
-                status="success" if getattr(result, 'success', False) else "failure",
-                input_summary={
-                    "path_count": len(paths),
-                    "rule_count": len(rules) if rules else 0,
-                    "compliance_standards": compliance_standards or [],
-                },
-                output_summary={
-                    "files_checked": getattr(result, 'files_checked', 0),
-                    "violations_found": len(getattr(result, 'violations', [])),
-                },
+            result = await asyncio.to_thread(
+                _code_policy_check_sync,
+                paths,
+                rules,
+                compliance_standards,
+                generate_report,
+                tier,
+                capabilities,
+                report_config,
             )
-        except Exception:
-            pass  # Don't fail tool execution if telemetry fails
+            duration_ms = int((time.perf_counter() - started) * 1000)
 
-        return make_envelope(
-            data=result,
-            tool_id="code_policy_check",
-            tool_version=_pkg_version,
-            tier=tier,
-            duration_ms=duration_ms,
-        )
+            # Emit success telemetry
+            try:
+                telemetry.emit_tool_event(
+                    tool_name="code_policy_check",
+                    tier_applied=tier,
+                    duration_ms=float(duration_ms),
+                    status="success" if getattr(result, 'success', False) else "failure",
+                    input_summary={
+                        "path_count": len(paths),
+                        "rule_count": len(rules) if rules else 0,
+                        "compliance_standards": compliance_standards or [],
+                    },
+                    output_summary={
+                        "files_checked": getattr(result, 'files_checked', 0),
+                        "violations_found": len(getattr(result, 'violations', [])),
+                    },
+                )
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Telemetry emit failed: {e}")
+
+            return make_envelope(
+                data=result,
+                tool_id="code_policy_check",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=duration_ms,
+            )
+        except Exception as exc:
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            # Emit failure telemetry
+            try:
+                telemetry.emit_tool_event(
+                    tool_name="code_policy_check",
+                    tier_applied=tier,
+                    duration_ms=float(duration_ms),
+                    status="failure",
+                    error=str(exc),
+                    input_summary={
+                        "path_count": len(paths),
+                        "rule_count": len(rules) if rules else 0,
+                        "compliance_standards": compliance_standards or [],
+                    },
+                )
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Telemetry emit failed: {e}")
+            raise
     except Exception as exc:
         duration_ms = int((time.perf_counter() - started) * 1000)
         tier = _get_current_tier()

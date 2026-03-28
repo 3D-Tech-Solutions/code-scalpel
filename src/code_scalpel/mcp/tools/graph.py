@@ -139,84 +139,106 @@ async def _get_call_graph_tool(
         await ctx.report_progress(0, 100, "Building call graph...")
 
     tier = _get_current_tier()
-    caps = get_tool_capabilities("get_call_graph", tier) or {}
-    limits = caps.get("limits", {}) or {}
-    cap_set = set(caps.get("capabilities", []) or [])
-
-    max_depth = limits.get("max_depth")
-    max_nodes = limits.get("max_nodes")
-
-    if max_depth is not None:
-        max_depth = int(max_depth)
-    if max_nodes is not None:
-        max_nodes = int(max_nodes)
-
-    actual_depth = depth
-    if max_depth is not None and depth > max_depth:
-        actual_depth = max_depth
-
-    advanced_resolution = "advanced_call_graph" in cap_set
-    include_enterprise_metrics = bool(
-        {"hot_path_identification", "dead_code_detection", "custom_graph_analysis"}
-        & cap_set
-    )
-
     start_time = time.time()
-    result = await asyncio.to_thread(
-        _get_call_graph_sync,
-        project_root,
-        entry_point,
-        actual_depth,
-        include_circular_import_check,
-        max_nodes,
-        advanced_resolution,
-        include_enterprise_metrics,
-        paths_from,
-        paths_to,
-        focus_functions,
-        tier,
-        caps,
-    )
-    duration_ms = (time.time() - start_time) * 1000
 
-    if ctx:
-        node_count = len(result.nodes) if result.nodes else 0
-        edge_count = len(result.edges) if result.edges else 0
-        await ctx.report_progress(
-            100,
-            100,
-            f"Call graph complete: {node_count} functions, {edge_count} calls",
-        )
-
-    # Emit telemetry
     try:
-        node_count = len(result.nodes) if result.nodes else 0
-        edge_count = len(result.edges) if result.edges else 0
-        path_count = len(result.paths) if hasattr(result, 'paths') and result.paths else 0
+        caps = get_tool_capabilities("get_call_graph", tier) or {}
+        limits = caps.get("limits", {}) or {}
+        cap_set = set(caps.get("capabilities", []) or [])
 
-        telemetry.emit_tool_event(
-            tool_name="get_call_graph",
-            tier_applied=tier,
-            duration_ms=float(duration_ms),
-            status="success",
-            input_summary={
-                "entry_point": entry_point,
-                "depth": actual_depth,
-                "include_circular_import_check": include_circular_import_check,
-                "has_paths_query": paths_from is not None and paths_to is not None,
-                "max_nodes": max_nodes,
-            },
-            output_summary={
-                "node_count": node_count,
-                "edge_count": edge_count,
-                "path_count": path_count,
-                "truncated": getattr(result, 'truncated', False),
-            },
+        max_depth = limits.get("max_depth")
+        max_nodes = limits.get("max_nodes")
+
+        if max_depth is not None:
+            max_depth = int(max_depth)
+        if max_nodes is not None:
+            max_nodes = int(max_nodes)
+
+        actual_depth = depth
+        if max_depth is not None and depth > max_depth:
+            actual_depth = max_depth
+
+        advanced_resolution = "advanced_call_graph" in cap_set
+        include_enterprise_metrics = bool(
+            {"hot_path_identification", "dead_code_detection", "custom_graph_analysis"}
+            & cap_set
         )
-    except Exception:
-        pass  # Don't fail tool execution if telemetry fails
 
-    return result
+        result = await asyncio.to_thread(
+            _get_call_graph_sync,
+            project_root,
+            entry_point,
+            actual_depth,
+            include_circular_import_check,
+            max_nodes,
+            advanced_resolution,
+            include_enterprise_metrics,
+            paths_from,
+            paths_to,
+            focus_functions,
+            tier,
+            caps,
+        )
+        duration_ms = (time.time() - start_time) * 1000
+
+        if ctx:
+            node_count = len(result.nodes) if result.nodes else 0
+            edge_count = len(result.edges) if result.edges else 0
+            await ctx.report_progress(
+                100,
+                100,
+                f"Call graph complete: {node_count} functions, {edge_count} calls",
+            )
+
+        # Emit success telemetry
+        try:
+            node_count = len(result.nodes) if result.nodes else 0
+            edge_count = len(result.edges) if result.edges else 0
+            path_count = len(result.paths) if hasattr(result, 'paths') and result.paths else 0
+
+            telemetry.emit_tool_event(
+                tool_name="get_call_graph",
+                tier_applied=tier,
+                duration_ms=float(duration_ms),
+                status="success",
+                input_summary={
+                    "entry_point": entry_point,
+                    "depth": actual_depth,
+                    "include_circular_import_check": include_circular_import_check,
+                    "has_paths_query": paths_from is not None and paths_to is not None,
+                    "max_nodes": max_nodes,
+                },
+                output_summary={
+                    "node_count": node_count,
+                    "edge_count": edge_count,
+                    "path_count": path_count,
+                    "truncated": getattr(result, 'truncated', False),
+                },
+            )
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Telemetry emit failed for get_call_graph: {e}")
+
+        return result
+    except Exception as exc:
+        duration_ms = (time.time() - start_time) * 1000
+        # Emit failure telemetry
+        try:
+            telemetry.emit_tool_event(
+                tool_name="get_call_graph",
+                tier_applied=tier,
+                duration_ms=float(duration_ms),
+                status="failure",
+                error=str(exc),
+                input_summary={
+                    "entry_point": entry_point,
+                    "depth": depth,
+                },
+            )
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Telemetry emit failed for get_call_graph: {e}")
+        raise
 
 
 get_call_graph = mcp.tool(
@@ -445,45 +467,67 @@ async def _get_graph_neighborhood_tool(
                 ),
             )
 
+    tier = _get_current_tier()
     start_time = time.time()
-    result = await asyncio.to_thread(
-        _get_graph_neighborhood_sync,
-        center_node_id,
-        k,
-        max_nodes,
-        direction,
-        min_confidence,
-        project_root,
-        query,
-    )
-    duration_ms = (time.time() - start_time) * 1000
-
-    # Emit telemetry
     try:
-        node_count = len(result.nodes) if result.nodes else 0
-        edge_count = len(result.edges) if result.edges else 0
-
-        telemetry.emit_tool_event(
-            tool_name="get_graph_neighborhood",
-            tier_applied=_get_current_tier(),
-            duration_ms=float(duration_ms),
-            status="success",
-            input_summary={
-                "center_node_id": center_node_id,
-                "k": k,
-                "max_nodes": max_nodes,
-                "direction": direction,
-            },
-            output_summary={
-                "node_count": node_count,
-                "edge_count": edge_count,
-                "depth_reached": getattr(result, 'depth_reached', 0),
-            },
+        result = await asyncio.to_thread(
+            _get_graph_neighborhood_sync,
+            center_node_id,
+            k,
+            max_nodes,
+            direction,
+            min_confidence,
+            project_root,
+            query,
         )
-    except Exception:
-        pass  # Don't fail tool execution if telemetry fails
+        duration_ms = (time.time() - start_time) * 1000
 
-    return result
+        # Emit success telemetry
+        try:
+            node_count = len(result.nodes) if result.nodes else 0
+            edge_count = len(result.edges) if result.edges else 0
+
+            telemetry.emit_tool_event(
+                tool_name="get_graph_neighborhood",
+                tier_applied=tier,
+                duration_ms=float(duration_ms),
+                status="success",
+                input_summary={
+                    "center_node_id": center_node_id,
+                    "k": k,
+                    "max_nodes": max_nodes,
+                    "direction": direction,
+                },
+                output_summary={
+                    "node_count": node_count,
+                    "edge_count": edge_count,
+                    "depth_reached": getattr(result, 'depth_reached', 0),
+                },
+            )
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Telemetry emit failed for get_graph_neighborhood: {e}")
+
+        return result
+    except Exception as exc:
+        duration_ms = (time.time() - start_time) * 1000
+        # Emit failure telemetry
+        try:
+            telemetry.emit_tool_event(
+                tool_name="get_graph_neighborhood",
+                tier_applied=tier,
+                duration_ms=float(duration_ms),
+                status="failure",
+                error=str(exc),
+                input_summary={
+                    "center_node_id": center_node_id,
+                    "k": k,
+                },
+            )
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Telemetry emit failed for get_graph_neighborhood: {e}")
+        raise
 
 
 get_graph_neighborhood = mcp.tool(
@@ -599,108 +643,130 @@ async def _get_project_map_tool(
     caps = get_tool_capabilities("get_project_map", tier) or {}
     limits = caps.get("limits", {}) or {}
 
-    result = await asyncio.to_thread(
-        _get_project_map_sync,
-        project_root,
-        include_complexity,
-        complexity_threshold,
-        include_circular_check,
-        tier=tier,
-        capabilities=caps,
-        max_files_limit=limits.get("max_files"),
-        max_modules_limit=limits.get("max_modules"),
-    )
+    try:
+        result = await asyncio.to_thread(
+            _get_project_map_sync,
+            project_root,
+            include_complexity,
+            complexity_threshold,
+            include_circular_check,
+            tier=tier,
+            capabilities=caps,
+            max_files_limit=limits.get("max_files"),
+            max_modules_limit=limits.get("max_modules"),
+        )
 
-    # Enterprise feature: suggest service boundaries (not a standalone MCP tool).
-    if detect_service_boundaries:
-        if not has_capability("extract_code", "service_boundaries", tier):
-            try:
-                result = result.model_copy(
-                    update={
-                        "service_boundaries_success": False,
-                        "service_boundaries_error": "Service boundary detection requires ENTERPRISE tier",
-                    }
-                )
-            except Exception:
-                pass
-        else:
-            try:
-                from code_scalpel.surgery.surgical_extractor import (
-                    detect_service_boundaries as _detect_boundaries,
-                )
-
-                boundaries = await asyncio.to_thread(
-                    _detect_boundaries,
-                    project_root=project_root,
-                    min_isolation_score=min_isolation_score,
-                )
-
-                if getattr(boundaries, "success", False):
-                    payload: dict[str, Any] = {
-                        "service_boundaries_success": True,
-                        "suggested_services": [
-                            {
-                                "service_name": s.service_name,
-                                "included_files": s.included_files,
-                                "external_dependencies": s.external_dependencies,
-                                "internal_dependencies": s.internal_dependencies,
-                                "isolation_level": s.isolation_level,
-                                "rationale": s.rationale,
-                            }
-                            for s in boundaries.suggested_services
-                        ],
-                        "service_dependency_graph": boundaries.dependency_graph,
-                        "service_total_files_analyzed": boundaries.total_files_analyzed,
-                        "service_boundaries_explanation": boundaries.explanation,
-                    }
-                else:
-                    payload = {
-                        "service_boundaries_success": False,
-                        "service_boundaries_error": getattr(boundaries, "error", None)
-                        or "Service boundary detection failed",
-                    }
-
-                result = result.model_copy(update=payload)
-            except Exception as e:
+        # Enterprise feature: suggest service boundaries (not a standalone MCP tool).
+        if detect_service_boundaries:
+            if not has_capability("extract_code", "service_boundaries", tier):
                 try:
                     result = result.model_copy(
                         update={
                             "service_boundaries_success": False,
-                            "service_boundaries_error": f"Service boundary detection failed: {e}",
+                            "service_boundaries_error": "Service boundary detection requires ENTERPRISE tier",
                         }
                     )
                 except Exception:
                     pass
+            else:
+                try:
+                    from code_scalpel.surgery.surgical_extractor import (
+                        detect_service_boundaries as _detect_boundaries,
+                    )
 
-    if ctx:
-        msg = f"Analyzed {result.total_files} files, {result.total_lines} lines"
-        await ctx.report_progress(100, 100, msg)
+                    boundaries = await asyncio.to_thread(
+                        _detect_boundaries,
+                        project_root=project_root,
+                        min_isolation_score=min_isolation_score,
+                    )
 
-    # Emit telemetry
-    try:
+                    if getattr(boundaries, "success", False):
+                        payload: dict[str, Any] = {
+                            "service_boundaries_success": True,
+                            "suggested_services": [
+                                {
+                                    "service_name": s.service_name,
+                                    "included_files": s.included_files,
+                                    "external_dependencies": s.external_dependencies,
+                                    "internal_dependencies": s.internal_dependencies,
+                                    "isolation_level": s.isolation_level,
+                                    "rationale": s.rationale,
+                                }
+                                for s in boundaries.suggested_services
+                            ],
+                            "service_dependency_graph": boundaries.dependency_graph,
+                            "service_total_files_analyzed": boundaries.total_files_analyzed,
+                            "service_boundaries_explanation": boundaries.explanation,
+                        }
+                    else:
+                        payload = {
+                            "service_boundaries_success": False,
+                            "service_boundaries_error": getattr(boundaries, "error", None)
+                            or "Service boundary detection failed",
+                        }
+
+                    result = result.model_copy(update=payload)
+                except Exception as e:
+                    try:
+                        result = result.model_copy(
+                            update={
+                                "service_boundaries_success": False,
+                                "service_boundaries_error": f"Service boundary detection failed: {e}",
+                            }
+                        )
+                    except Exception:
+                        pass
+
+        if ctx:
+            msg = f"Analyzed {result.total_files} files, {result.total_lines} lines"
+            await ctx.report_progress(100, 100, msg)
+
+        # Emit success telemetry
+        try:
+            duration_ms = (time.time() - start_time) * 1000
+            module_count = len(result.modules) if hasattr(result, 'modules') and result.modules else 0
+
+            telemetry.emit_tool_event(
+                tool_name="get_project_map",
+                tier_applied=tier,
+                duration_ms=float(duration_ms),
+                status="success",
+                input_summary={
+                    "complexity_threshold": complexity_threshold,
+                    "detect_service_boundaries": detect_service_boundaries,
+                    "include_circular_check": include_circular_check,
+                },
+                output_summary={
+                    "file_count": result.total_files,
+                    "total_lines": result.total_lines,
+                    "module_count": module_count,
+                },
+            )
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Telemetry emit failed for get_project_map: {e}")
+
+        return result
+    except Exception as exc:
         duration_ms = (time.time() - start_time) * 1000
-        module_count = len(result.modules) if hasattr(result, 'modules') and result.modules else 0
-
-        telemetry.emit_tool_event(
-            tool_name="get_project_map",
-            tier_applied=tier,
-            duration_ms=float(duration_ms),
-            status="success",
-            input_summary={
-                "complexity_threshold": complexity_threshold,
-                "detect_service_boundaries": detect_service_boundaries,
-                "include_circular_check": include_circular_check,
-            },
-            output_summary={
-                "file_count": result.total_files,
-                "total_lines": result.total_lines,
-                "module_count": module_count,
-            },
-        )
-    except Exception:
-        pass  # Don't fail tool execution if telemetry fails
-
-    return result
+        # Emit failure telemetry
+        try:
+            telemetry.emit_tool_event(
+                tool_name="get_project_map",
+                tier_applied=tier,
+                duration_ms=float(duration_ms),
+                status="failure",
+                error=str(exc),
+                input_summary={
+                    "complexity_threshold": complexity_threshold,
+                    "detect_service_boundaries": detect_service_boundaries,
+                    "include_circular_check": include_circular_check,
+                },
+            )
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Telemetry emit failed for get_project_map: {e}")
+        raise
 
 
 get_project_map = mcp.tool(
@@ -867,55 +933,77 @@ async def _get_cross_file_dependencies_tool(
     if max_files is not None:
         max_files_limit = max_files
 
-    result = await asyncio.to_thread(
-        _get_cross_file_dependencies_sync,
-        target_file,
-        target_symbol,
-        project_root,
-        effective_max_depth,
-        include_code,
-        include_diagram,
-        confidence_decay_factor,
-        tier,
-        caps,
-        max_files_limit,
-        timeout_seconds,
-    )
-
-    if isinstance(result, ToolResponseEnvelope):
-        data = result.data
-        if isinstance(data, dict) and "success" not in data:
-            data["success"] = result.error is None
-            result.data = data
-    elif isinstance(result, dict) and "success" not in result:
-        result["success"] = True
-
-    # Emit telemetry
     try:
-        duration_ms = (time.time() - start_time) * 1000
-        result_data = result.data if isinstance(result, ToolResponseEnvelope) else result
-        dependency_count = len(result_data.get("extracted_symbols", [])) if isinstance(result_data, dict) else 0
-
-        telemetry.emit_tool_event(
-            tool_name="get_cross_file_dependencies",
-            tier_applied=_get_current_tier(),
-            duration_ms=float(duration_ms),
-            status="success",
-            input_summary={
-                "target_file": target_file,
-                "target_symbol": target_symbol,
-                "max_depth": max_depth,
-                "include_code": include_code,
-            },
-            output_summary={
-                "dependency_count": dependency_count,
-                "max_depth_reached": getattr(result_data, 'max_depth_reached', max_depth) if not isinstance(result_data, dict) else result_data.get('max_depth_reached', max_depth),
-            },
+        result = await asyncio.to_thread(
+            _get_cross_file_dependencies_sync,
+            target_file,
+            target_symbol,
+            project_root,
+            effective_max_depth,
+            include_code,
+            include_diagram,
+            confidence_decay_factor,
+            tier,
+            caps,
+            max_files_limit,
+            timeout_seconds,
         )
-    except Exception:
-        pass  # Don't fail tool execution if telemetry fails
 
-    return result
+        if isinstance(result, ToolResponseEnvelope):
+            data = result.data
+            if isinstance(data, dict) and "success" not in data:
+                data["success"] = result.error is None
+                result.data = data
+        elif isinstance(result, dict) and "success" not in result:
+            result["success"] = True
+
+        # Emit success telemetry
+        try:
+            duration_ms = (time.time() - start_time) * 1000
+            result_data = result.data if isinstance(result, ToolResponseEnvelope) else result
+            dependency_count = len(result_data.get("extracted_symbols", [])) if isinstance(result_data, dict) else 0
+
+            telemetry.emit_tool_event(
+                tool_name="get_cross_file_dependencies",
+                tier_applied=tier,
+                duration_ms=float(duration_ms),
+                status="success",
+                input_summary={
+                    "target_file": target_file,
+                    "target_symbol": target_symbol,
+                    "max_depth": effective_max_depth,
+                    "include_code": include_code,
+                },
+                output_summary={
+                    "dependency_count": dependency_count,
+                    "max_depth_reached": getattr(result_data, 'max_depth_reached', effective_max_depth) if not isinstance(result_data, dict) else result_data.get('max_depth_reached', effective_max_depth),
+                },
+            )
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Telemetry emit failed for get_cross_file_dependencies: {e}")
+
+        return result
+    except Exception as exc:
+        duration_ms = (time.time() - start_time) * 1000
+        # Emit failure telemetry
+        try:
+            telemetry.emit_tool_event(
+                tool_name="get_cross_file_dependencies",
+                tier_applied=tier,
+                duration_ms=float(duration_ms),
+                status="failure",
+                error=str(exc),
+                input_summary={
+                    "target_file": target_file,
+                    "target_symbol": target_symbol,
+                    "max_depth": max_depth,
+                },
+            )
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Telemetry emit failed for get_cross_file_dependencies: {e}")
+        raise
 
 
 get_cross_file_dependencies = mcp.tool(
@@ -1074,53 +1162,75 @@ async def _cross_file_security_scan_tool(
     tier = _get_current_tier()
     caps = get_tool_capabilities("cross_file_security_scan", tier)
 
-    result = await asyncio.to_thread(
-        _cross_file_security_scan_sync,
-        project_root,
-        entry_points,
-        max_depth,
-        include_diagram,
-        timeout_seconds,
-        max_modules,
-        tier,
-        caps,
-        confidence_threshold,
-    )
-
-    if ctx:
-        vuln_count = result.vulnerability_count
-        await ctx.report_progress(
-            progress=100,
-            total=100,
-            message=f"Scan complete: {vuln_count} cross-file vulnerabilities found",
-        )
-
-    # Emit telemetry
     try:
-        duration_ms = (time.time() - start_time) * 1000
-        vulnerability_count = getattr(result, 'vulnerability_count', 0)
-        high_confidence_count = len([v for v in (getattr(result, 'vulnerabilities', []) or []) if getattr(v, 'confidence', 0) >= 0.8])
-
-        telemetry.emit_tool_event(
-            tool_name="cross_file_security_scan",
-            tier_applied=tier,
-            duration_ms=float(duration_ms),
-            status="success",
-            input_summary={
-                "max_depth": max_depth,
-                "confidence_threshold": confidence_threshold,
-                "max_modules": max_modules,
-            },
-            output_summary={
-                "vulnerability_count": vulnerability_count,
-                "high_confidence_count": high_confidence_count,
-                "files_analyzed": getattr(result, 'files_analyzed', 0),
-            },
+        result = await asyncio.to_thread(
+            _cross_file_security_scan_sync,
+            project_root,
+            entry_points,
+            max_depth,
+            include_diagram,
+            timeout_seconds,
+            max_modules,
+            tier,
+            caps,
+            confidence_threshold,
         )
-    except Exception:
-        pass  # Don't fail tool execution if telemetry fails
 
-    return result
+        if ctx:
+            vuln_count = result.vulnerability_count
+            await ctx.report_progress(
+                progress=100,
+                total=100,
+                message=f"Scan complete: {vuln_count} cross-file vulnerabilities found",
+            )
+
+        # Emit success telemetry
+        try:
+            duration_ms = (time.time() - start_time) * 1000
+            vulnerability_count = getattr(result, 'vulnerability_count', 0)
+            high_confidence_count = len([v for v in (getattr(result, 'vulnerabilities', []) or []) if getattr(v, 'confidence', 0) >= 0.8])
+
+            telemetry.emit_tool_event(
+                tool_name="cross_file_security_scan",
+                tier_applied=tier,
+                duration_ms=float(duration_ms),
+                status="success",
+                input_summary={
+                    "max_depth": max_depth,
+                    "confidence_threshold": confidence_threshold,
+                    "max_modules": max_modules,
+                },
+                output_summary={
+                    "vulnerability_count": vulnerability_count,
+                    "high_confidence_count": high_confidence_count,
+                    "files_analyzed": getattr(result, 'files_analyzed', 0),
+                },
+            )
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Telemetry emit failed for cross_file_security_scan: {e}")
+
+        return result
+    except Exception as exc:
+        duration_ms = (time.time() - start_time) * 1000
+        # Emit failure telemetry
+        try:
+            telemetry.emit_tool_event(
+                tool_name="cross_file_security_scan",
+                tier_applied=tier,
+                duration_ms=float(duration_ms),
+                status="failure",
+                error=str(exc),
+                input_summary={
+                    "max_depth": max_depth,
+                    "confidence_threshold": confidence_threshold,
+                    "max_modules": max_modules,
+                },
+            )
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Telemetry emit failed for cross_file_security_scan: {e}")
+        raise
 
 
 cross_file_security_scan = mcp.tool(

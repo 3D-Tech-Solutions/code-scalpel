@@ -175,44 +175,70 @@ async def unified_sink_detect(
             language = lang_map.get(detected, "python")
 
         capabilities = get_tool_capabilities("unified_sink_detect", tier)
-        result = await asyncio.to_thread(
-            _unified_sink_detect_sync,
-            code,
-            language,
-            confidence_threshold,
-            tier,
-            capabilities,
-        )
-        duration_ms = int((time.perf_counter() - started) * 1000)
 
-        # Emit telemetry event for unified_sink_detect tool call
-        telemetry.emit_tool_event(
-            tool_name="unified_sink_detect",
-            tier_applied=tier,
-            duration_ms=float(duration_ms),
-            status="success",
-            input_summary={
-                "language": language,
-                "code_length": len(code) if code else 0,
-                "confidence_threshold": confidence_threshold,
-            },
-            output_summary={
-                "success": result.success if result else False,
-                "sink_count": result.sink_count if result else 0,
-                "sinks_detected": result.sinks_detected if result else 0,
-                "truncated": result.truncated if result else False,
-                "language": result.language if result else None,
-            },
-            metadata={"confidence_threshold": confidence_threshold},
-        )
+        try:
+            result = await asyncio.to_thread(
+                _unified_sink_detect_sync,
+                code,
+                language,
+                confidence_threshold,
+                tier,
+                capabilities,
+            )
+            duration_ms = int((time.perf_counter() - started) * 1000)
 
-        return make_envelope(
-            data=result,
-            tool_id="unified_sink_detect",
-            tool_version=_pkg_version,
-            tier=tier,
-            duration_ms=duration_ms,
-        )
+            # Emit telemetry event for unified_sink_detect tool call
+            try:
+                telemetry.emit_tool_event(
+                    tool_name="unified_sink_detect",
+                    tier_applied=tier,
+                    duration_ms=float(duration_ms),
+                    status="success",
+                    input_summary={
+                        "language": language,
+                        "code_length": len(code) if code else 0,
+                        "confidence_threshold": confidence_threshold,
+                    },
+                    output_summary={
+                        "success": result.success if result else False,
+                        "sink_count": result.sink_count if result else 0,
+                        "sinks_detected": result.sinks_detected if result else 0,
+                        "truncated": result.truncated if result else False,
+                        "language": result.language if result else None,
+                    },
+                    metadata={"confidence_threshold": confidence_threshold},
+                )
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Telemetry emit failed for unified_sink_detect: {e}")
+
+            return make_envelope(
+                data=result,
+                tool_id="unified_sink_detect",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=duration_ms,
+            )
+        except Exception as exc:
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            # Emit failure telemetry
+            try:
+                telemetry.emit_tool_event(
+                    tool_name="unified_sink_detect",
+                    tier_applied=tier,
+                    duration_ms=float(duration_ms),
+                    status="failure",
+                    error=str(exc),
+                    input_summary={
+                        "language": language,
+                        "code_length": len(code) if code else 0,
+                        "confidence_threshold": confidence_threshold,
+                    },
+                )
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Telemetry emit failed for unified_sink_detect: {e}")
+            raise
     except Exception as exc:
         duration_ms = int((time.perf_counter() - started) * 1000)
         tier = _get_current_tier()
@@ -412,52 +438,79 @@ async def type_evaporation_scan(
             backend_code is not None
         ), "backend_code must be provided or read from file"
 
-        result = await asyncio.to_thread(
-            _type_evaporation_scan_sync,
-            frontend_code,
-            backend_code,
-            frontend_file,
-            backend_file,
-            enable_pro,
-            enable_enterprise,
-            frontend_only,
-            max_files,
-        )
-        duration_ms = int((time.perf_counter() - started) * 1000)
+        try:
+            result = await asyncio.to_thread(
+                _type_evaporation_scan_sync,
+                frontend_code,
+                backend_code,
+                frontend_file,
+                backend_file,
+                enable_pro,
+                enable_enterprise,
+                frontend_only,
+                max_files,
+            )
+            duration_ms = int((time.perf_counter() - started) * 1000)
 
-        # Emit telemetry event for type_evaporation_scan tool call
-        telemetry.emit_tool_event(
-            tool_name="type_evaporation_scan",
-            tier_applied=tier,
-            duration_ms=float(duration_ms),
-            status="success",
-            input_summary={
-                "frontend_code_provided": frontend_code is not None,
-                "backend_code_provided": backend_code is not None,
-                "enable_pro": enable_pro,
-                "enable_enterprise": enable_enterprise,
-                "frontend_only": frontend_only,
-            },
-            output_summary={
-                "success": result.success if result else False,
-                "frontend_vulnerabilities": result.frontend_vulnerabilities if result else 0,
-                "backend_vulnerabilities": result.backend_vulnerabilities if result else 0,
-                "cross_file_issues": result.cross_file_issues if result else 0,
-                "implicit_any_count": result.implicit_any_count if result else 0,
-            },
-            metadata={
-                "frontend_file": frontend_file,
-                "backend_file": backend_file,
-            },
-        )
+            # Emit telemetry event for type_evaporation_scan tool call
+            try:
+                telemetry.emit_tool_event(
+                    tool_name="type_evaporation_scan",
+                    tier_applied=tier,
+                    duration_ms=float(duration_ms),
+                    status="success",
+                    input_summary={
+                        "frontend_code_provided": frontend_code is not None,
+                        "backend_code_provided": backend_code is not None,
+                        "enable_pro": enable_pro,
+                        "enable_enterprise": enable_enterprise,
+                        "frontend_only": frontend_only,
+                    },
+                    output_summary={
+                        "success": result.success if result else False,
+                        "frontend_vulnerabilities": result.frontend_vulnerabilities if result else 0,
+                        "backend_vulnerabilities": result.backend_vulnerabilities if result else 0,
+                        "cross_file_issues": result.cross_file_issues if result else 0,
+                        "implicit_any_count": result.implicit_any_count if result else 0,
+                    },
+                    metadata={
+                        "frontend_file": frontend_file,
+                        "backend_file": backend_file,
+                    },
+                )
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Telemetry emit failed for type_evaporation_scan: {e}")
 
-        return make_envelope(
-            data=result,
-            tool_id="type_evaporation_scan",
-            tool_version=_pkg_version,
-            tier=tier,
-            duration_ms=duration_ms,
-        )
+            return make_envelope(
+                data=result,
+                tool_id="type_evaporation_scan",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=duration_ms,
+            )
+        except Exception as exc:
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            # Emit failure telemetry
+            try:
+                telemetry.emit_tool_event(
+                    tool_name="type_evaporation_scan",
+                    tier_applied=tier,
+                    duration_ms=float(duration_ms),
+                    status="failure",
+                    error=str(exc),
+                    input_summary={
+                        "frontend_code_provided": frontend_code is not None,
+                        "backend_code_provided": backend_code is not None,
+                        "enable_pro": enable_pro,
+                        "enable_enterprise": enable_enterprise,
+                        "frontend_only": frontend_only,
+                    },
+                )
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Telemetry emit failed for type_evaporation_scan: {e}")
+            raise
     except Exception as exc:
         duration_ms = int((time.perf_counter() - started) * 1000)
         tier = _get_current_tier()
@@ -571,57 +624,84 @@ async def scan_dependencies(
                 0, 100, f"Scanning dependencies in {resolved_path}..."
             )
 
-        result = await asyncio.to_thread(
-            _scan_dependencies_sync,
-            project_root=resolved_path,
-            scan_vulnerabilities=scan_vulnerabilities,
-            include_dev=include_dev,
-            timeout=timeout,
-            tier=tier,
-            capabilities=caps,
-            ctx=ctx,
-        )
-
-        if ctx:
-            vuln_count = result.total_vulnerabilities
-            await ctx.report_progress(
-                100, 100, f"Scan complete: {vuln_count} vulnerabilities found"
+        try:
+            result = await asyncio.to_thread(
+                _scan_dependencies_sync,
+                project_root=resolved_path,
+                scan_vulnerabilities=scan_vulnerabilities,
+                include_dev=include_dev,
+                timeout=timeout,
+                tier=tier,
+                capabilities=caps,
+                ctx=ctx,
             )
 
-        duration_ms = int((time.perf_counter() - started) * 1000)
+            if ctx:
+                vuln_count = result.total_vulnerabilities
+                await ctx.report_progress(
+                    100, 100, f"Scan complete: {vuln_count} vulnerabilities found"
+                )
 
-        # Emit telemetry event for scan_dependencies tool call
-        telemetry.emit_tool_event(
-            tool_name="scan_dependencies",
-            tier_applied=tier,
-            duration_ms=float(duration_ms),
-            status="success",
-            input_summary={
-                "path": path,
-                "project_root": project_root,
-                "scan_vulnerabilities": scan_vulnerabilities,
-                "include_dev": include_dev,
-                "timeout": timeout,
-            },
-            output_summary={
-                "success": result.success if result else False,
-                "total_dependencies": result.total_dependencies if result else 0,
-                "vulnerable_count": result.vulnerable_count if result else 0,
-                "total_vulnerabilities": result.total_vulnerabilities if result else 0,
-                "scanned_files": len(result.scanned_files) if (result and result.scanned_files) else 0,
-            },
-            metadata={
-                "severity_summary": result.severity_summary if result else {},
-            },
-        )
+            duration_ms = int((time.perf_counter() - started) * 1000)
 
-        return make_envelope(
-            data=result,
-            tool_id="scan_dependencies",
-            tool_version=_pkg_version,
-            tier=tier,
-            duration_ms=duration_ms,
-        )
+            # Emit telemetry event for scan_dependencies tool call
+            try:
+                telemetry.emit_tool_event(
+                    tool_name="scan_dependencies",
+                    tier_applied=tier,
+                    duration_ms=float(duration_ms),
+                    status="success",
+                    input_summary={
+                        "path": path,
+                        "project_root": project_root,
+                        "scan_vulnerabilities": scan_vulnerabilities,
+                        "include_dev": include_dev,
+                        "timeout": timeout,
+                    },
+                    output_summary={
+                        "success": result.success if result else False,
+                        "total_dependencies": result.total_dependencies if result else 0,
+                        "vulnerable_count": result.vulnerable_count if result else 0,
+                        "total_vulnerabilities": result.total_vulnerabilities if result else 0,
+                        "scanned_files": len(result.scanned_files) if (result and result.scanned_files) else 0,
+                    },
+                    metadata={
+                        "severity_summary": result.severity_summary if result else {},
+                    },
+                )
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Telemetry emit failed for scan_dependencies: {e}")
+
+            return make_envelope(
+                data=result,
+                tool_id="scan_dependencies",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=duration_ms,
+            )
+        except Exception as exc:
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            # Emit failure telemetry
+            try:
+                telemetry.emit_tool_event(
+                    tool_name="scan_dependencies",
+                    tier_applied=tier,
+                    duration_ms=float(duration_ms),
+                    status="failure",
+                    error=str(exc),
+                    input_summary={
+                        "path": path,
+                        "project_root": project_root,
+                        "scan_vulnerabilities": scan_vulnerabilities,
+                        "include_dev": include_dev,
+                        "timeout": timeout,
+                    },
+                )
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Telemetry emit failed for scan_dependencies: {e}")
+            raise
     except Exception as exc:
         duration_ms = int((time.perf_counter() - started) * 1000)
         tier = _get_current_tier()
@@ -726,11 +806,31 @@ async def security_scan(
                 ),
             )
 
+        detected_language = "auto-detected"
         if file_path is not None:
             from code_scalpel.mcp.helpers.session import _get_project_root
 
             try:
                 file_path = resolve_path(file_path, str(_get_project_root()))
+                # Extract language from file extension
+                import os
+                _, ext = os.path.splitext(file_path)
+                ext_map = {
+                    ".py": "python",
+                    ".js": "javascript",
+                    ".ts": "typescript",
+                    ".java": "java",
+                    ".cpp": "cpp",
+                    ".c": "c",
+                    ".cs": "csharp",
+                    ".go": "go",
+                    ".kt": "kotlin",
+                    ".php": "php",
+                    ".rb": "ruby",
+                    ".swift": "swift",
+                    ".rs": "rust",
+                }
+                detected_language = ext_map.get(ext.lower(), "auto-detected")
             except FileNotFoundError as exc:
                 duration_ms = int((time.perf_counter() - started) * 1000)
                 return make_envelope(
@@ -745,40 +845,66 @@ async def security_scan(
                         error_details={"hint": str(exc)},
                     ),
                 )
-        result = await asyncio.to_thread(
-            _security_scan_sync, code, file_path, tier, caps, confidence_threshold
-        )
-        duration_ms = int((time.perf_counter() - started) * 1000)
 
-        # [20260328_FEATURE] Emit telemetry event
-        telemetry.emit_tool_event(
-            tool_name="security_scan",
-            tier_applied=tier,
-            duration_ms=float(duration_ms),
-            status="success",
-            input_summary={
-                "code_provided": code is not None,
-                "file_path": file_path,
-                "confidence_threshold": confidence_threshold,
-            },
-            output_summary={
-                "success": result.success if result else False,
-                "vulnerability_count": len(result.vulnerabilities) if result and result.vulnerabilities else 0,
-                "risk_level": result.risk_level if result else "unknown",
-                "has_vulnerabilities": result.has_vulnerabilities if result else False,
-            },
-            metadata={
-                "language": "auto-detected",
-            },
-        )
+        try:
+            result = await asyncio.to_thread(
+                _security_scan_sync, code, file_path, tier, caps, confidence_threshold
+            )
+            duration_ms = int((time.perf_counter() - started) * 1000)
 
-        return make_envelope(
-            data=result,
-            tool_id="security_scan",
-            tool_version=_pkg_version,
-            tier=tier,
-            duration_ms=duration_ms,
-        )
+            # [20260328_FEATURE] Emit telemetry event
+            try:
+                telemetry.emit_tool_event(
+                    tool_name="security_scan",
+                    tier_applied=tier,
+                    duration_ms=float(duration_ms),
+                    status="success",
+                    input_summary={
+                        "code_provided": code is not None,
+                        "file_path": file_path,
+                        "confidence_threshold": confidence_threshold,
+                    },
+                    output_summary={
+                        "success": result.success if result else False,
+                        "vulnerability_count": len(result.vulnerabilities) if result and result.vulnerabilities else 0,
+                        "risk_level": result.risk_level if result else "unknown",
+                        "has_vulnerabilities": result.has_vulnerabilities if result else False,
+                    },
+                    metadata={
+                        "language": detected_language,
+                    },
+                )
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Telemetry emit failed for security_scan: {e}")
+
+            return make_envelope(
+                data=result,
+                tool_id="security_scan",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=duration_ms,
+            )
+        except Exception as exc:
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            # Emit failure telemetry
+            try:
+                telemetry.emit_tool_event(
+                    tool_name="security_scan",
+                    tier_applied=tier,
+                    duration_ms=float(duration_ms),
+                    status="failure",
+                    error=str(exc),
+                    input_summary={
+                        "code_provided": code is not None,
+                        "file_path": file_path,
+                        "confidence_threshold": confidence_threshold,
+                    },
+                )
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Telemetry emit failed for security_scan: {e}")
+            raise
     except Exception as exc:
         duration_ms = int((time.perf_counter() - started) * 1000)
         tier = _get_current_tier()
