@@ -36,7 +36,7 @@ For AI agent integrations:
 # [20260302_RELEASE] v2.1.0 - Go language support (GoNormalizer, GoVisitor, GoParserAdapter, tree-sitter-go)
 # [20260309_RELEASE] v2.1.1 - Metadata-only patch release to sync PyPI/Marketplace copy and 22-core-tool wording
 # [20260312_RELEASE] v2.1.2 - CLI/Oracle patch release for guided error handling and CLI bridge hardening
-__version__ = "2.1.2"
+__version__ = "2.2.0"
 __author__ = "Timmothy Escolopio"
 __email__ = "time@3dtechsolutions.us"
 

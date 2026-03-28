@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] - 2026-03-28
+
+### Added
+- **Crash-safe incremental JSONL writes** — Events are now written to live JSONL files with per-event flushing, surviving process crashes and providing recovery even when the encrypted audit database is inaccessible.
+- **Failure-path telemetry for all 21 tools** — Added `status="failure"` + `error=str(exc)` telemetry emission to all tools across graph.py, security.py, symbolic.py, extraction.py, context.py, policy.py, and static_analysis.py. Previously only `analyze_code` had failure-path coverage.
+- **Error column encryption** — Error messages in the audit log are now encrypted with Fernet when encryption is enabled, matching the protection level of input_summary, output_summary, and metadata fields.
+- **Automatic retention policy** — Audit log files (both `.db` and `.jsonl`) older than `CODESCALPEL_AUDIT_RETENTION_DAYS` (default 30 days) are automatically purged during cleanup to prevent unbounded growth.
+
+### Changed
+- **Dashboard telemetry completeness** — All tool calls now emit both success and failure telemetry with proper context, enabling complete observability in the dashboard for long-term analysis and review.
+- **security_scan language detection** — Fixed hardcoded `"auto-detected"` value in telemetry; now captures the actual detected language based on file extension analysis.
+
+### Fixed
+- **Silent telemetry swallows** — Replaced bare `try/except: pass` blocks around telemetry emission with proper `logger.warning()` to aid debugging when telemetry itself fails.
+- **Error recovery** — Live JSONL stream survives server crashes and remains browsable via the dashboard's historical sessions browser, eliminating permanent data loss.
+
+---
+
 ## [Unreleased] — Language Completion (C++, C#, Go, Java, JavaScript tool parsers)
 
 ### Definition of "language complete" (new standard as of 2026-03-03)
