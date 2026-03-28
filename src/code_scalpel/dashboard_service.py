@@ -13,7 +13,7 @@ import socket
 import threading
 from typing import Any, Optional
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File
 from fastapi.responses import HTMLResponse
 from uvicorn import Server, Config
 
@@ -134,7 +134,7 @@ def create_app() -> tuple[FastAPI, int]:
             }
 
     @app.post("/api/license/upload")
-    async def upload_license(file: Any = None) -> dict[str, Any]:
+    async def upload_license(file: UploadFile = File(None)) -> dict[str, Any]:
         """Upload and save a license file.
 
         License files are saved to ~/.code-scalpel/license/license.jwt
@@ -620,6 +620,10 @@ def get_dashboard_html() -> str:
             <div class="license-status" id="license-status">
                 Loading license info...
             </div>
+            <div class="license-status" id="remote-status" style="display: none; margin-top: 10px; padding: 10px; border-left: 3px solid #007bff;">
+                <div id="remote-verification-badge" style="display: inline-block; font-weight: bold; margin-right: 10px;"></div>
+                <div id="remote-details" style="font-size: 12px; color: #555; margin-top: 5px;"></div>
+            </div>
             <div id="upgrade-prompt" style="display: none;">
                 <div class="upgrade-section">
                     <h3>🚀 Upgrade Your Tier</h3>
@@ -814,6 +818,9 @@ def get_dashboard_html() -> str:
                 const panel = document.getElementById('license-panel');
                 const tierBadge = document.getElementById('tier-badge');
                 const statusDiv = document.getElementById('license-status');
+                const remoteStatusDiv = document.getElementById('remote-status');
+                const remoteBadge = document.getElementById('remote-verification-badge');
+                const remoteDetails = document.getElementById('remote-details');
                 const upgradePrompt = document.getElementById('upgrade-prompt');
 
                 panel.style.display = 'block';
@@ -844,6 +851,37 @@ def get_dashboard_html() -> str:
 
                 statusDiv.innerHTML = statusText;
                 statusDiv.className = data.is_valid ? 'license-status valid' : 'license-status invalid';
+
+                // Update remote verification status (if available)
+                if (data.remote_verified !== undefined) {
+                    remoteStatusDiv.style.display = 'block';
+
+                    // Map remote_reason to badge color and text
+                    const reasonColors = {
+                        'remote_verified': { color: '#155724', icon: '✓', text: 'Verified with central system' },
+                        'cache_fresh': { color: '#004085', icon: '💾', text: 'Cached (still valid)' },
+                        'offline_grace': { color: '#856404', icon: '⏱️', text: 'Offline grace period active' },
+                        'offline_denied': { color: '#721c24', icon: '✗', text: 'Offline grace expired' },
+                        'license_expired': { color: '#721c24', icon: '✗', text: 'License expired' }
+                    };
+
+                    const reasonInfo = reasonColors[data.remote_reason] || { color: '#666', icon: '?', text: data.remote_reason || 'Unknown' };
+                    remoteBadge.style.color = reasonInfo.color;
+                    remoteBadge.textContent = `${reasonInfo.icon} ${reasonInfo.text}`;
+
+                    let detailsText = '';
+                    if (data.remote_tier && data.remote_tier !== data.current_tier) {
+                        detailsText += `Remote tier: ${data.remote_tier.toUpperCase()} | `;
+                    }
+                    if (data.remote_allowed === false) {
+                        detailsText += 'Status: Not Allowed';
+                    } else if (data.remote_allowed === true) {
+                        detailsText += 'Status: Allowed';
+                    }
+                    remoteDetails.textContent = detailsText;
+                } else {
+                    remoteStatusDiv.style.display = 'none';
+                }
 
                 // Show upgrade prompt if community tier
                 if (data.current_tier === 'community') {

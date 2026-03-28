@@ -96,6 +96,7 @@ def emit_tool_event(
 
     try:
         _EVENT_QUEUE.append(event)
+        notify_subscribers(event)
         logger.debug(f"Telemetry: emitted {tool_name} event (id={event.event_id})")
     except Exception as e:
         logger.warning(f"Telemetry: failed to emit event: {e}")

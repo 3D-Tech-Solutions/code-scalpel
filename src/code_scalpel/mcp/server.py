@@ -4466,7 +4466,11 @@ def _initialize_telemetry_and_dashboard() -> str:
             event = original_emit(*args, **kwargs)
             # Broadcast in background to avoid blocking tool execution
             try:
-                asyncio.create_task(broadcast_event(event.to_dict()))
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    asyncio.create_task(broadcast_event(event.to_dict()))
+                else:
+                    loop.run_until_complete(broadcast_event(event.to_dict()))
             except Exception:
                 pass  # Never block on telemetry
             return event
