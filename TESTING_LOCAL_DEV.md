@@ -52,6 +52,48 @@ print('✓ Local development version loaded')
 
 **For editable install with `-e`, this should work automatically.**
 
+### 1.4 Configure License File Location (Optional)
+
+Code Scalpel automatically discovers license files in this order:
+1. `CODE_SCALPEL_LICENSE_PATH` environment variable (if set)
+2. `.code-scalpel/license/license.jwt` (project root)
+3. `~/.code-scalpel/license/license.jwt` (user home)
+4. Falls back to **Community tier** if no license found
+
+**To use a custom license location:**
+
+```bash
+# Option A: Set environment variable
+export CODE_SCALPEL_LICENSE_PATH=/path/to/your/license.jwt
+python -m code_scalpel.mcp.server
+
+# Option B: Copy license to default location
+mkdir -p ~/.code-scalpel/license
+cp /path/to/your/license.jwt ~/.code-scalpel/license/license.jwt
+
+# Option C: Configure in Claude Desktop
+# Edit ~/.claude/profiles/default/claude_desktop_config.json:
+{
+  "mcpServers": {
+    "code-scalpel": {
+      "command": "python",
+      "args": ["-m", "code_scalpel.mcp.server"],
+      "cwd": "/path/to/code-scalpel",
+      "env": {
+        "PYTHONPATH": "/path/to/code-scalpel/src",
+        "CODE_SCALPEL_LICENSE_PATH": "/path/to/your/license.jwt"
+      }
+    }
+  }
+}
+```
+
+**Check license status on dashboard:**
+- Open `http://localhost:7654`
+- Look at the "📜 License & Tier" panel
+- Shows current tier (Community/Pro/Enterprise)
+- Shows remote verification status (if verifier configured)
+
 ## Part 2: Run MCP Server Locally
 
 ### 2.1 Start the Server (Development Mode)

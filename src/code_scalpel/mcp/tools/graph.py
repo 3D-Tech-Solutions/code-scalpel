@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Any
 
+from code_scalpel import telemetry
 from code_scalpel.mcp.models.graph import GraphNeighborhoodResult
 from code_scalpel.mcp.contract import (
     ToolError,
@@ -159,6 +161,7 @@ async def _get_call_graph_tool(
         & cap_set
     )
 
+    start_time = time.time()
     result = await asyncio.to_thread(
         _get_call_graph_sync,
         project_root,
@@ -174,6 +177,7 @@ async def _get_call_graph_tool(
         tier,
         caps,
     )
+    duration_ms = (time.time() - start_time) * 1000
 
     if ctx:
         node_count = len(result.nodes) if result.nodes else 0
@@ -183,6 +187,34 @@ async def _get_call_graph_tool(
             100,
             f"Call graph complete: {node_count} functions, {edge_count} calls",
         )
+
+    # Emit telemetry
+    try:
+        node_count = len(result.nodes) if result.nodes else 0
+        edge_count = len(result.edges) if result.edges else 0
+        path_count = len(result.paths) if hasattr(result, 'paths') and result.paths else 0
+
+        telemetry.emit_tool_event(
+            tool_name="get_call_graph",
+            tier_applied=tier,
+            duration_ms=float(duration_ms),
+            status="success",
+            input_summary={
+                "entry_point": entry_point,
+                "depth": actual_depth,
+                "include_circular_import_check": include_circular_import_check,
+                "has_paths_query": paths_from is not None and paths_to is not None,
+                "max_nodes": max_nodes,
+            },
+            output_summary={
+                "node_count": node_count,
+                "edge_count": edge_count,
+                "path_count": path_count,
+                "truncated": getattr(result, 'truncated', False),
+            },
+        )
+    except Exception:
+        pass  # Don't fail tool execution if telemetry fails
 
     return result
 

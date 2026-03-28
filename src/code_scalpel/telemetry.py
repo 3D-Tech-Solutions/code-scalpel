@@ -23,6 +23,20 @@ _EVENT_QUEUE: deque = deque(maxlen=50)
 # Track open WebSocket subscribers for live streaming
 _SUBSCRIBERS: set = set()
 
+# Audit log instance (initialized by MCP server on startup)
+_AUDIT_LOG: Optional[Any] = None
+
+
+def set_audit_log(audit_log: Any) -> None:
+    """Register audit log instance for telemetry events.
+
+    Args:
+        audit_log: AuditLog instance from src/code_scalpel/audit.py
+    """
+    global _AUDIT_LOG
+    _AUDIT_LOG = audit_log
+    logger.debug("Audit log registered for telemetry")
+
 
 @dataclass
 class TelemetryEvent:
@@ -97,6 +111,26 @@ def emit_tool_event(
     try:
         _EVENT_QUEUE.append(event)
         notify_subscribers(event)
+
+        # Log to audit log if available
+        if _AUDIT_LOG is not None:
+            try:
+                _AUDIT_LOG.log_tool_call(
+                    event_id=event.event_id,
+                    request_id=request_id or event.event_id,
+                    tool_name=tool_name,
+                    tier_applied=tier_applied,
+                    status=status,
+                    duration_ms=duration_ms,
+                    input_summary=event.input_summary,
+                    output_summary=event.output_summary,
+                    error=error,
+                    metadata=event.metadata,
+                    timestamp=event.timestamp,
+                )
+            except Exception as e:
+                logger.warning(f"Audit log: failed to log event {event.event_id}: {e}")
+
         logger.debug(f"Telemetry: emitted {tool_name} event (id={event.event_id})")
     except Exception as e:
         logger.warning(f"Telemetry: failed to emit event: {e}")

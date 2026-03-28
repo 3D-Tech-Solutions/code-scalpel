@@ -21,6 +21,7 @@ from code_scalpel.mcp.contract import ToolResponseEnvelope, ToolError, make_enve
 from code_scalpel.mcp.oracle_middleware import with_oracle_resilience, PathStrategy
 from code_scalpel.mcp.path_resolver import resolve_path
 from code_scalpel import __version__ as _pkg_version
+from code_scalpel import telemetry
 
 
 @mcp.tool(
@@ -183,6 +184,28 @@ async def unified_sink_detect(
             capabilities,
         )
         duration_ms = int((time.perf_counter() - started) * 1000)
+
+        # Emit telemetry event for unified_sink_detect tool call
+        telemetry.emit_tool_event(
+            tool_name="unified_sink_detect",
+            tier_applied=tier,
+            duration_ms=float(duration_ms),
+            status="success",
+            input_summary={
+                "language": language,
+                "code_length": len(code) if code else 0,
+                "confidence_threshold": confidence_threshold,
+            },
+            output_summary={
+                "success": result.success if result else False,
+                "sink_count": result.sink_count if result else 0,
+                "sinks_detected": result.sinks_detected if result else 0,
+                "truncated": result.truncated if result else False,
+                "language": result.language if result else None,
+            },
+            metadata={"confidence_threshold": confidence_threshold},
+        )
+
         return make_envelope(
             data=result,
             tool_id="unified_sink_detect",
@@ -401,6 +424,33 @@ async def type_evaporation_scan(
             max_files,
         )
         duration_ms = int((time.perf_counter() - started) * 1000)
+
+        # Emit telemetry event for type_evaporation_scan tool call
+        telemetry.emit_tool_event(
+            tool_name="type_evaporation_scan",
+            tier_applied=tier,
+            duration_ms=float(duration_ms),
+            status="success",
+            input_summary={
+                "frontend_code_provided": frontend_code is not None,
+                "backend_code_provided": backend_code is not None,
+                "enable_pro": enable_pro,
+                "enable_enterprise": enable_enterprise,
+                "frontend_only": frontend_only,
+            },
+            output_summary={
+                "success": result.success if result else False,
+                "frontend_vulnerabilities": result.frontend_vulnerabilities if result else 0,
+                "backend_vulnerabilities": result.backend_vulnerabilities if result else 0,
+                "cross_file_issues": result.cross_file_issues if result else 0,
+                "implicit_any_count": result.implicit_any_count if result else 0,
+            },
+            metadata={
+                "frontend_file": frontend_file,
+                "backend_file": backend_file,
+            },
+        )
+
         return make_envelope(
             data=result,
             tool_id="type_evaporation_scan",
@@ -539,6 +589,32 @@ async def scan_dependencies(
             )
 
         duration_ms = int((time.perf_counter() - started) * 1000)
+
+        # Emit telemetry event for scan_dependencies tool call
+        telemetry.emit_tool_event(
+            tool_name="scan_dependencies",
+            tier_applied=tier,
+            duration_ms=float(duration_ms),
+            status="success",
+            input_summary={
+                "path": path,
+                "project_root": project_root,
+                "scan_vulnerabilities": scan_vulnerabilities,
+                "include_dev": include_dev,
+                "timeout": timeout,
+            },
+            output_summary={
+                "success": result.success if result else False,
+                "total_dependencies": result.total_dependencies if result else 0,
+                "vulnerable_count": result.vulnerable_count if result else 0,
+                "total_vulnerabilities": result.total_vulnerabilities if result else 0,
+                "scanned_files": len(result.scanned_files) if (result and result.scanned_files) else 0,
+            },
+            metadata={
+                "severity_summary": result.severity_summary if result else {},
+            },
+        )
+
         return make_envelope(
             data=result,
             tool_id="scan_dependencies",
@@ -673,6 +749,29 @@ async def security_scan(
             _security_scan_sync, code, file_path, tier, caps, confidence_threshold
         )
         duration_ms = int((time.perf_counter() - started) * 1000)
+
+        # [20260328_FEATURE] Emit telemetry event
+        telemetry.emit_tool_event(
+            tool_name="security_scan",
+            tier_applied=tier,
+            duration_ms=float(duration_ms),
+            status="success",
+            input_summary={
+                "code_provided": code is not None,
+                "file_path": file_path,
+                "confidence_threshold": confidence_threshold,
+            },
+            output_summary={
+                "success": result.success if result else False,
+                "vulnerability_count": len(result.vulnerabilities) if result and result.vulnerabilities else 0,
+                "risk_level": result.risk_level if result else "unknown",
+                "has_vulnerabilities": result.has_vulnerabilities if result else False,
+            },
+            metadata={
+                "language": "auto-detected",
+            },
+        )
+
         return make_envelope(
             data=result,
             tool_id="security_scan",

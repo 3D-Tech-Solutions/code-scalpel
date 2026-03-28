@@ -25,6 +25,7 @@ from code_scalpel.mcp.path_resolver import resolve_path
 from code_scalpel import __version__ as _pkg_version
 from code_scalpel.mcp.protocol import _get_current_tier
 from code_scalpel.mcp.validators.core import ValidationError
+from code_scalpel import telemetry
 
 _ORIG_SYM_GENERATE_TESTS = sym_helpers._generate_tests_sync
 _ORIG_SYM_SYMBOLIC = sym_helpers._symbolic_execute_sync
@@ -212,6 +213,34 @@ async def symbolic_execute(
             capabilities=caps,
         )
         duration_ms = int((time.perf_counter() - started) * 1000)
+
+        # Emit telemetry event for symbolic_execute tool call
+        telemetry.emit_tool_event(
+            tool_name="symbolic_execute",
+            tier_applied=tier,
+            duration_ms=float(duration_ms),
+            status="success",
+            input_summary={
+                "language": language,
+                "code_length": len(code) if code else 0,
+                "max_paths_requested": max_paths,
+                "max_depth_requested": max_depth,
+            },
+            output_summary={
+                "success": result.success if result else False,
+                "paths_explored": result.paths_explored if result else 0,
+                "total_paths": result.total_paths if result else 0,
+                "truncated": result.truncated if result else False,
+                "symbolic_variables": len(result.symbolic_variables) if (result and result.symbolic_variables) else 0,
+                "constraints": len(result.constraints) if (result and result.constraints) else 0,
+            },
+            metadata={
+                "language": language,
+                "effective_max_paths": effective_max_paths,
+                "effective_max_depth": effective_max_depth,
+            },
+        )
+
         return make_envelope(
             data=result,
             tool_id="symbolic_execute",
@@ -466,6 +495,36 @@ async def generate_unit_tests(
                 ),
             )
         duration_ms = int((time.perf_counter() - started) * 1000)
+
+        # Emit telemetry event for generate_unit_tests tool call
+        telemetry.emit_tool_event(
+            tool_name="generate_unit_tests",
+            tier_applied=tier,
+            duration_ms=float(duration_ms),
+            status="success",
+            input_summary={
+                "language": language,
+                "framework": framework,
+                "data_driven": data_driven,
+                "has_crash_log": crash_log is not None,
+                "code_provided": code is not None,
+                "file_path": file_path,
+                "function_name": function_name,
+            },
+            output_summary={
+                "success": result.success if result else False,
+                "test_count": result.test_count if result else 0,
+                "total_test_cases": result.total_test_cases if result else 0,
+                "framework_used": result.framework_used if result else None,
+                "data_driven_enabled": result.data_driven_enabled if result else False,
+                "truncated": result.truncated if result else False,
+            },
+            metadata={
+                "language": language,
+                "framework": framework,
+            },
+        )
+
         return make_envelope(
             data=result,
             tool_id="generate_unit_tests",
@@ -603,6 +662,33 @@ async def simulate_refactor(
             compliance_validation=compliance_validation,
         )
         duration_ms = int((time.perf_counter() - started) * 1000)
+
+        # Emit telemetry event for simulate_refactor tool call
+        telemetry.emit_tool_event(
+            tool_name="simulate_refactor",
+            tier_applied=tier,
+            duration_ms=float(duration_ms),
+            status="success",
+            input_summary={
+                "original_code_length": len(original_code) if original_code else 0,
+                "new_code_provided": new_code is not None,
+                "new_code_length": len(new_code) if new_code else 0,
+                "patch_provided": patch is not None,
+                "patch_length": len(patch) if patch else 0,
+                "strict_mode": strict_mode,
+            },
+            output_summary={
+                "success": result.success if result else False,
+                "is_safe": result.is_safe if result else False,
+                "status": result.status if result else None,
+                "security_issues": len(result.security_issues) if (result and result.security_issues) else 0,
+                "structural_changes": bool(result.structural_changes) if result else False,
+            },
+            metadata={
+                "analysis_depth": analysis_depth,
+            },
+        )
+
         return make_envelope(
             data=result,
             tool_id="simulate_refactor",

@@ -4637,6 +4637,22 @@ def run_server(
         logger.warning(f"Dashboard initialization failed: {e}")
         dashboard_url = None
 
+    # [20260328_FEATURE] Initialize encrypted audit log for this server session
+    try:
+        from code_scalpel.audit import AuditLog
+        from code_scalpel import telemetry
+
+        session_id = str(__import__("uuid").uuid4())
+        audit_log = AuditLog(
+            session_id=session_id,
+            encryption_enabled=True,  # Always encrypt audit logs
+        )
+        telemetry.set_audit_log(audit_log)
+        logger.info(f"Audit log initialized: session_id={session_id}")
+    except Exception as e:
+        logger.warning(f"Audit log initialization failed: {e}")
+        audit_log = None
+
     if transport != "stdio":
         # [20251215_BUGFIX] Keep stdio startup silent; HTTP/SSE can print banner.
         output = sys.stdout
@@ -4738,6 +4754,15 @@ def run_server(
             )
             traceback.print_exc(file=sys.stderr)
             raise
+        finally:
+            # [20260328_FEATURE] Clean up audit log on server shutdown
+            if 'audit_log' in locals() and audit_log is not None:
+                try:
+                    export_path = audit_log.cleanup()
+                    if export_path:
+                        print(f"Audit log exported to: {export_path}", file=sys.stderr)
+                except Exception as e:
+                    logger.error(f"Audit log cleanup failed: {e}")
     else:
         try:
             _debug_print("DEBUG: starting mcp.run (stdio)")
@@ -4786,6 +4811,15 @@ def run_server(
             )
             traceback.print_exc(file=sys.stderr)
             raise
+        finally:
+            # [20260328_FEATURE] Clean up audit log on server shutdown
+            if 'audit_log' in locals() and audit_log is not None:
+                try:
+                    export_path = audit_log.cleanup()
+                    if export_path:
+                        print(f"Audit log exported to: {export_path}", file=sys.stderr)
+                except Exception as e:
+                    logger.error(f"Audit log cleanup failed: {e}")
 
 
 def _apply_tier_tool_filter(tier: str) -> None:

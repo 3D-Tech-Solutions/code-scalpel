@@ -20,6 +20,7 @@ from code_scalpel.mcp.oracle_middleware import (
 )
 from code_scalpel.mcp.path_resolver import resolve_path
 from code_scalpel import __version__ as _pkg_version
+from code_scalpel import telemetry
 
 _extract_code = getattr(_helpers, "extract_code", None) or getattr(
     _helpers, "_extract_code_impl", None
@@ -208,6 +209,38 @@ async def extract_code(
             )
         duration_ms = int((time.perf_counter() - started) * 1000)
         tier = _get_current_tier()
+
+        # Emit telemetry event for extract_code tool call
+        telemetry.emit_tool_event(
+            tool_name="extract_code",
+            tier_applied=tier,
+            duration_ms=float(duration_ms),
+            status="success",
+            input_summary={
+                "target_type": target_type,
+                "target_name": target_name,
+                "file_path": file_path,
+                "code_provided": code is not None,
+                "language": language,
+                "include_context": include_context,
+                "include_cross_file_deps": include_cross_file_deps,
+            },
+            output_summary={
+                "success": result.success if result else False,
+                "symbol_name": result.target_name if result else None,
+                "lines": (result.line_end - result.line_start + 1) if (result and result.line_start and result.line_end) else 0,
+                "language": result.language_detected if result else None,
+                "token_estimate": result.token_estimate if result else 0,
+                "has_context": result.context_code and len(result.context_code) > 0 if result else False,
+                "has_cross_file_deps": result.cross_file_deps_enabled if result else False,
+            },
+            metadata={
+                "jsx_normalized": result.jsx_normalized if result else False,
+                "is_server_component": result.is_server_component if result else False,
+                "is_server_action": result.is_server_action if result else False,
+            },
+        )
+
         return make_envelope(
             data=result,
             tool_id="extract_code",
@@ -346,6 +379,29 @@ async def rename_symbol(
             )
         duration_ms = int((time.perf_counter() - started) * 1000)
         tier = _get_current_tier()
+
+        # Emit telemetry event for rename_symbol tool call
+        telemetry.emit_tool_event(
+            tool_name="rename_symbol",
+            tier_applied=tier,
+            duration_ms=float(duration_ms),
+            status="success",
+            input_summary={
+                "target_type": target_type,
+                "target_name": target_name,
+                "new_name": new_name,
+                "file_path": file_path,
+                "create_backup": create_backup,
+            },
+            output_summary={
+                "success": result.success if result else False,
+                "symbol_name": result.target_name if result else None,
+                "renamed": result.success if result else False,
+                "has_backup": result.backup_path is not None if result else False,
+            },
+            metadata={},
+        )
+
         return make_envelope(
             data=result,
             tool_id="rename_symbol",
@@ -530,6 +586,30 @@ async def update_symbol(
         debug_print(
             f"DEBUG:update_symbol: helper returned, preparing envelope (duration_ms={duration_ms})"
         )
+
+        # Emit telemetry event for update_symbol tool call
+        telemetry.emit_tool_event(
+            tool_name="update_symbol",
+            tier_applied=tier,
+            duration_ms=float(duration_ms),
+            status="success",
+            input_summary={
+                "target_type": target_type,
+                "target_name": target_name,
+                "operation": operation,
+                "file_path": file_path,
+                "new_code_provided": new_code is not None,
+                "new_name": new_name,
+            },
+            output_summary={
+                "success": result.success if result else False,
+                "symbol_name": result.target_name if result else None,
+                "operation": operation,
+                "has_backup": result.backup_path is not None if result else False,
+            },
+            metadata={},
+        )
+
         try:
             env = make_envelope(
                 data=result,
