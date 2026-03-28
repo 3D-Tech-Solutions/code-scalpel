@@ -10,7 +10,6 @@ import pytest
 
 from code_scalpel.mcp.validators.core import ValidationError
 
-
 pytestmark = pytest.mark.asyncio
 
 
@@ -176,7 +175,9 @@ class TestAnalyzeCodeOracleCoverage:
     async def test_static_tools_without_file_path_returns_invalid_argument(self):
         from code_scalpel.mcp.tools.analyze import analyze_code
 
-        result = await analyze_code(code="int main() { return 0; }", static_tools=["cppcheck"])
+        result = await analyze_code(
+            code="int main() { return 0; }", static_tools=["cppcheck"]
+        )
 
         assert _get_error_code(result) == "invalid_argument"
 
@@ -232,7 +233,9 @@ class TestTypeEvaporationScanOracleCoverage:
     async def test_missing_frontend_input_returns_invalid_argument(self):
         from code_scalpel.mcp.tools.security import type_evaporation_scan
 
-        result = await type_evaporation_scan(backend_code="def handler():\n    return 1\n")
+        result = await type_evaporation_scan(
+            backend_code="def handler():\n    return 1\n"
+        )
 
         assert _get_error_code(result) == "invalid_argument"
 
@@ -243,7 +246,9 @@ class TestTypeEvaporationScanOracleCoverage:
 
         assert _get_error_code(result) == "invalid_argument"
 
-    async def test_invalid_frontend_file_path_returns_correction_needed(self, monkeypatch):
+    async def test_invalid_frontend_file_path_returns_correction_needed(
+        self, monkeypatch
+    ):
         from code_scalpel.mcp.tools import security as security_module
         from code_scalpel.mcp.tools.security import type_evaporation_scan
 
@@ -298,7 +303,9 @@ class TestGenerateUnitTestsOracleCoverage:
     async def test_unsupported_language_returns_invalid_argument(self):
         from code_scalpel.mcp.tools.symbolic import generate_unit_tests
 
-        result = await generate_unit_tests(code="def demo():\n    return 1\n", language="ruby")
+        result = await generate_unit_tests(
+            code="def demo():\n    return 1\n", language="ruby"
+        )
 
         assert _get_error_code(result) == "invalid_argument"
 
@@ -517,7 +524,9 @@ class TestRenameSymbolOracleCoverage:
 
         assert _get_error_code(result) == "correction_needed"
 
-    async def test_missing_symbol_returns_correction_needed(self, monkeypatch, tmp_path):
+    async def test_missing_symbol_returns_correction_needed(
+        self, monkeypatch, tmp_path
+    ):
         from code_scalpel.mcp.tools import extraction as extraction_module
         from code_scalpel.mcp.tools.extraction import rename_symbol
 
@@ -591,7 +600,9 @@ class TestUpdateSymbolOracleCoverage:
 
         assert _get_error_code(result) == "correction_needed"
 
-    async def test_missing_symbol_returns_correction_needed(self, monkeypatch, tmp_path):
+    async def test_missing_symbol_returns_correction_needed(
+        self, monkeypatch, tmp_path
+    ):
         from code_scalpel.mcp.tools import extraction as extraction_module
         from code_scalpel.mcp.tools.extraction import update_symbol
 
@@ -675,7 +686,9 @@ class TestGetFileContextOracleCoverage:
         assert isinstance(result.error, str)
         assert "Unsupported language 'unknown'" in result.error
 
-    async def test_missing_file_path_prefers_oracle_correction_over_tool_failure(self, tmp_path):
+    async def test_missing_file_path_prefers_oracle_correction_over_tool_failure(
+        self, tmp_path
+    ):
         from code_scalpel.mcp.tools.context import get_file_context
 
         existing = tmp_path / "worker.py"
@@ -685,13 +698,17 @@ class TestGetFileContextOracleCoverage:
 
         assert _get_error_code(result) == "correction_needed"
 
-    async def test_internal_helper_failure_returns_internal_error(self, monkeypatch, tmp_path):
+    async def test_internal_helper_failure_returns_internal_error(
+        self, monkeypatch, tmp_path
+    ):
         from code_scalpel.mcp.tools import context as context_module
         from code_scalpel.mcp.tools.context import get_file_context
 
         source_file = tmp_path / "sample.py"
         source_file.write_text("def demo():\n    return 1\n", encoding="utf-8")
-        monkeypatch.setattr(context_module, "resolve_path", lambda path: str(source_file))
+        monkeypatch.setattr(
+            context_module, "resolve_path", lambda path: str(source_file)
+        )
 
         async def fake_get_file_context(file_path: str):
             raise RuntimeError("boom")
@@ -722,7 +739,9 @@ class TestGetSymbolReferencesOracleCoverage:
             lambda path, project_root=None: (_ for _ in ()).throw(resolver_error),
         )
 
-        result = await get_symbol_references(symbol_name="helper", project_root="/K:/repo")
+        result = await get_symbol_references(
+            symbol_name="helper", project_root="/K:/repo"
+        )
 
         assert _get_error_code(result) == "correction_needed"
 
@@ -810,13 +829,17 @@ class TestGetProjectMapOracleCoverage:
 
         existing = tmp_path / "project"
         existing.mkdir()
-        (existing / "main.py").write_text("def main():\n    return 1\n", encoding="utf-8")
+        (existing / "main.py").write_text(
+            "def main():\n    return 1\n", encoding="utf-8"
+        )
 
         result = await get_project_map(project_root=str(tmp_path / "projec"))
 
         assert _get_error_code(result) == "correction_needed"
 
-    async def test_valid_unsupported_language_project_remains_conservative_noop(self, tmp_path):
+    async def test_valid_unsupported_language_project_remains_conservative_noop(
+        self, tmp_path
+    ):
         from code_scalpel.mcp.tools.graph import get_project_map
 
         (tmp_path / "Worker.kt").write_text(
@@ -852,7 +875,9 @@ class TestGetCrossFileDependenciesOracleCoverage:
 
         assert _get_error_code(result) == "invalid_argument"
 
-    async def test_invalid_confidence_decay_factor_returns_invalid_argument(self, tmp_path):
+    async def test_invalid_confidence_decay_factor_returns_invalid_argument(
+        self, tmp_path
+    ):
         from code_scalpel.mcp.tools.graph import get_cross_file_dependencies
 
         source_file = tmp_path / "sample.py"
@@ -996,7 +1021,9 @@ class TestCodePolicyCheckOracleCoverage:
 
         source_file = tmp_path / "app.py"
         source_file.write_text("print('hi')\n", encoding="utf-8")
-        monkeypatch.setattr(policy_module, "resolve_path", lambda path: str(source_file))
+        monkeypatch.setattr(
+            policy_module, "resolve_path", lambda path: str(source_file)
+        )
         monkeypatch.setattr(policy_module, "_get_current_tier", lambda: "community")
 
         result = await code_policy_check(

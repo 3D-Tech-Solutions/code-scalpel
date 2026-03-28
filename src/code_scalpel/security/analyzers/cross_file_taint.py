@@ -288,7 +288,9 @@ class JSImportResolver:
                         # [20260316_FEATURE] Preserve single-specifier local aliases for JS/TS named imports.
                         alias = (
                             node.alias
-                            if node.alias and len(node.names) == 1 and not node.is_default
+                            if node.alias
+                            and len(node.names) == 1
+                            and not node.is_default
                             else None
                         )
                         self.imports[module_name].append(
@@ -349,7 +351,9 @@ class JSImportResolver:
     def _iter_source_files(self):
         for root, dirs, files in os.walk(self.project_root):
             dirs[:] = [
-                d for d in dirs if d not in ImportResolver.SKIP_DIRS and not d.startswith(".")
+                d
+                for d in dirs
+                if d not in ImportResolver.SKIP_DIRS and not d.startswith(".")
             ]
             for file_name in files:
                 if not file_name.endswith(self.EXTENSIONS):
@@ -378,7 +382,9 @@ class JSImportResolver:
             self._ir_cache[cache_key] = None
             return None
 
-    def _resolve_import_target(self, source_file: Path, import_path: str) -> Optional[str]:
+    def _resolve_import_target(
+        self, source_file: Path, import_path: str
+    ) -> Optional[str]:
         if not import_path:
             return None
 
@@ -393,7 +399,9 @@ class JSImportResolver:
 
         return self.file_to_module.get(str(candidate_file.resolve()))
 
-    def _resolve_relative_import(self, source_file: Path, import_path: str) -> Optional[Path]:
+    def _resolve_relative_import(
+        self, source_file: Path, import_path: str
+    ) -> Optional[Path]:
         base_path = (source_file.parent / import_path).resolve()
         for candidate in self._expand_candidate_paths(base_path):
             if candidate.exists() and candidate.is_file():
@@ -651,7 +659,9 @@ class CrossFileTaintTracker:
             return "javascript"
         return "python"
 
-    def _create_resolver(self) -> Union[ImportResolver, JavaImportResolver, JSImportResolver]:
+    def _create_resolver(
+        self,
+    ) -> Union[ImportResolver, JavaImportResolver, JSImportResolver]:
         """[20260309_FEATURE] Create the resolver for the selected language."""
         if self._resolver_language == "java":
             return JavaImportResolver(self.project_root)
@@ -1016,7 +1026,9 @@ class CrossFileTaintTracker:
         for statement in statements:
             if isinstance(statement, IRAssign):
                 self._analyze_js_ts_assignment(statement, info, module, imports)
-            elif isinstance(statement, IRExprStmt) and isinstance(statement.value, IRCall):
+            elif isinstance(statement, IRExprStmt) and isinstance(
+                statement.value, IRCall
+            ):
                 self._record_js_ts_call_effects(statement.value, info, module, imports)
             elif isinstance(statement, IRReturn):
                 self._analyze_js_ts_return(statement, info, module, imports)
@@ -1029,7 +1041,9 @@ class CrossFileTaintTracker:
             elif isinstance(statement, IRTry):
                 self._analyze_js_ts_statements(statement.body, info, module, imports)
                 self._analyze_js_ts_statements(statement.orelse, info, module, imports)
-                self._analyze_js_ts_statements(statement.finalbody, info, module, imports)
+                self._analyze_js_ts_statements(
+                    statement.finalbody, info, module, imports
+                )
                 for handler in statement.handlers:
                     self._analyze_js_ts_statements(handler.body, info, module, imports)
 
@@ -1115,7 +1129,9 @@ class CrossFileTaintTracker:
             return
 
         target_module, target_function = imported
-        target_info = self.function_taint_info.get(target_module, {}).get(target_function)
+        target_info = self.function_taint_info.get(target_module, {}).get(
+            target_function
+        )
         if target_info is None:
             return
 
@@ -1212,7 +1228,9 @@ class CrossFileTaintTracker:
         if resolved is None:
             return False
         target_module, target_function = resolved
-        target_info = self.function_taint_info.get(target_module, {}).get(target_function)
+        target_info = self.function_taint_info.get(target_module, {}).get(
+            target_function
+        )
         return bool(target_info and target_info.returns_tainted)
 
     def _is_js_ts_method_on_tainted_var(
@@ -1221,7 +1239,9 @@ class CrossFileTaintTracker:
         if not isinstance(expr, IRCall) or not isinstance(expr.func, IRAttribute):
             return False
         receiver_name = self._flatten_js_ts_expr(expr.func.value)
-        return receiver_name in info.tainted_variables or receiver_name in info.parameters
+        return (
+            receiver_name in info.tainted_variables or receiver_name in info.parameters
+        )
 
     def _is_js_ts_taint_source(self, expr: Optional[IRNode]) -> bool:
         flattened = self._flatten_js_ts_expr(expr)
@@ -1335,7 +1355,9 @@ class CrossFileTaintTracker:
                 return current_module, callee_name
             for imp in imports:
                 if imp.effective_name == callee_name:
-                    target_function = imp.name if imp.name not in {"*", "default"} else callee_name
+                    target_function = (
+                        imp.name if imp.name not in {"*", "default"} else callee_name
+                    )
                     return imp.module, target_function
             return None
 
@@ -1381,7 +1403,11 @@ class CrossFileTaintTracker:
                     self.call_graph[module].add(
                         CallInfo(
                             caller_module=module,
-                            caller_line=node.loc.line if node.loc else function_node.loc.line if function_node.loc else 0,
+                            caller_line=(
+                                node.loc.line
+                                if node.loc
+                                else function_node.loc.line if function_node.loc else 0
+                            ),
                             target_module=target_module,
                             target_function=target_function,
                             arguments=tuple(self._extract_js_ts_argument_names(node)),
@@ -3602,7 +3628,9 @@ class FunctionTaintInfo:
     class_field_names: Set[str] = field(default_factory=set)
     local_declared_names: Set[str] = field(default_factory=set)
     field_taint_writes: Dict[str, Set[str]] = field(default_factory=dict)
-    imported_taint_origins: Dict[str, Tuple[str, str, int]] = field(default_factory=dict)
+    imported_taint_origins: Dict[str, Tuple[str, str, int]] = field(
+        default_factory=dict
+    )
 
 
 @dataclass
@@ -3718,7 +3746,9 @@ class FunctionTaintVisitor(ast.NodeVisitor):
                 imported = self._resolve_imported_function(callee)
                 if imported is not None:
                     target_module, target_func = imported
-                    target_info = self.tracker.function_taint_info.get(target_module, {}).get(target_func)
+                    target_info = self.tracker.function_taint_info.get(
+                        target_module, {}
+                    ).get(target_func)
                     imported_origin = (
                         target_module,
                         target_func,
@@ -3740,7 +3770,9 @@ class FunctionTaintVisitor(ast.NodeVisitor):
                         if call_sources:
                             self.func_info.taint_var_sources[target.id] = call_sources
                         if imported_origin is not None:
-                            self.func_info.imported_taint_origins[target.id] = imported_origin
+                            self.func_info.imported_taint_origins[target.id] = (
+                                imported_origin
+                            )
 
         self.generic_visit(node)
 

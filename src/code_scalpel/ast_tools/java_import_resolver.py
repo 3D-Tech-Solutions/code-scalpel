@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 from pathlib import Path
-from typing import DefaultDict, Dict, List, Optional, Set, Tuple, Union
+from typing import DefaultDict, Dict, List, Set, Tuple, Union
 
 from code_scalpel.ast_tools.import_resolver import (
     ImportGraphResult,

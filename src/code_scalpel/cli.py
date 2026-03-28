@@ -8,7 +8,6 @@ from pathlib import Path
 
 from code_scalpel.mcp.protocol import format_tier_for_display
 
-
 # [20260311_FEATURE] Keep CLI analyze choices aligned with the local analyzer
 # and MCP language surface instead of a stale Python/JS/Java-only subset.
 ANALYZE_LANGUAGE_CHOICES = [
@@ -1835,7 +1834,6 @@ def _dispatch_with_guard(
 
 def main() -> int:
     """Main CLI entry point."""
-    from . import __version__
 
     parser = argparse.ArgumentParser(
         prog="codescalpel",

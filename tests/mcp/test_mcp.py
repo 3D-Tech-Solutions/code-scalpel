@@ -211,7 +211,9 @@ async def async_func():
         real_file = tmp_path / "legacy_processor.py"
         real_file.write_text("def normalize_me():\n    return 1\n")
 
-        requested_path = "/K:/backup/Develop/code-scalpel-ninja-warrior/legacy_processor.py"
+        requested_path = (
+            "/K:/backup/Develop/code-scalpel-ninja-warrior/legacy_processor.py"
+        )
 
         monkeypatch.setattr(
             "code_scalpel.mcp.tools.analyze.resolve_path",
@@ -230,7 +232,9 @@ async def async_func():
         """Unresolvable '/K:/...' paths should not degrade to internal_error."""
         from code_scalpel.mcp.server import analyze_code
 
-        requested_path = "/K:/backup/Develop/code-scalpel-ninja-warrior/legacy_processor.py.bak"
+        requested_path = (
+            "/K:/backup/Develop/code-scalpel-ninja-warrior/legacy_processor.py.bak"
+        )
         resolver_error = FileNotFoundError(
             "Cannot access file: /K:/backup/Develop/code-scalpel-ninja-warrior/legacy_processor.py.bak (not found)\n\n"
             "Suggestion:\n"
@@ -248,7 +252,10 @@ async def async_func():
 
         assert result.error is not None
         assert result.error.error_code == "correction_needed"
-        assert "/mnt/k/backup/Develop/code-scalpel-ninja-warrior/legacy_processor.py.bak" in result.error.error
+        assert (
+            "/mnt/k/backup/Develop/code-scalpel-ninja-warrior/legacy_processor.py.bak"
+            in result.error.error
+        )
         assert result.error.error_details is not None
         assert result.error.error_details["hint"] == str(resolver_error)
 
@@ -308,7 +315,10 @@ class TestSecurityScanTool:
 
         assert result.error is not None
         assert result.error.error_code == "correction_needed"
-        assert "/mnt/k/backup/Develop/code-scalpel-ninja-warrior/vuln.py" in result.error.error
+        assert (
+            "/mnt/k/backup/Develop/code-scalpel-ninja-warrior/vuln.py"
+            in result.error.error
+        )
 
     async def test_scan_clean_code(self):
         """Test scanning clean code with no vulnerabilities."""
@@ -563,9 +573,7 @@ class Demo {
             for constraint in result.constraints
         )
         assert any(
-            "x" in condition
-            for path in result.paths
-            for condition in path.conditions
+            "x" in condition for path in result.paths for condition in path.conditions
         )
 
 
@@ -632,7 +640,9 @@ class TestPathResolutionParityAcrossTools:
             lambda path, project_root=None: expected_root,
         )
 
-        def fake_sync(center_node_id, k, max_nodes, direction, min_confidence, project_root, query):
+        def fake_sync(
+            center_node_id, k, max_nodes, direction, min_confidence, project_root, query
+        ):
             assert project_root == expected_root
             return _FakeGraphNeighborhoodResult(
                 center_node={"id": center_node_id},
@@ -890,6 +900,7 @@ class TestPathResolutionParityAcrossTools:
 
         assert result.error is not None
         assert result.error.error_code == "correction_needed"
+
 
 class TestMCPIntegration:
     """Integration tests for MCP server."""

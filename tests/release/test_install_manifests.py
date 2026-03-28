@@ -9,7 +9,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PYPROJECT = PROJECT_ROOT / "pyproject.toml"
 REQUIREMENTS = PROJECT_ROOT / "requirements.txt"
@@ -76,7 +75,9 @@ class TestInstallManifests:
         dependencies = pyproject["project"]["dependencies"]
         assert "tree-sitter-go" in _normalize_requirement_names(dependencies)
 
-    def test_pyproject_core_install_includes_all_shipped_analyze_code_parsers(self) -> None:
+    def test_pyproject_core_install_includes_all_shipped_analyze_code_parsers(
+        self,
+    ) -> None:
         """[20260314_TEST] Core installs should include every tree-sitter runtime claimed by analyze_code."""
         pyproject = _load_pyproject()
         dependencies = pyproject["project"]["dependencies"]
@@ -90,7 +91,9 @@ class TestInstallManifests:
         dependencies = pyproject["project"]["optional-dependencies"]["polyglot"]
         assert "tree-sitter-go" in _normalize_requirement_names(dependencies)
 
-    def test_pyproject_polyglot_extra_includes_all_shipped_analyze_code_parsers(self) -> None:
+    def test_pyproject_polyglot_extra_includes_all_shipped_analyze_code_parsers(
+        self,
+    ) -> None:
         """[20260314_TEST] Polyglot extra should include every tree-sitter runtime claimed by analyze_code."""
         pyproject = _load_pyproject()
         dependencies = pyproject["project"]["optional-dependencies"]["polyglot"]

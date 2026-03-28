@@ -30,8 +30,10 @@ class TestAuditEventsEndpoint:
         """Start dashboard server with pre-populated audit log."""
         with tempfile.TemporaryDirectory() as tmpdir:
             # Create audit log with test data
-            with patch('pathlib.Path.home', return_value=Path(tmpdir)):
-                audit_log = AuditLog(session_id="test-session-123", encryption_enabled=False)
+            with patch("pathlib.Path.home", return_value=Path(tmpdir)):
+                audit_log = AuditLog(
+                    session_id="test-session-123", encryption_enabled=False
+                )
 
                 # Log different tools with varied statuses
                 for i in range(10):
@@ -104,7 +106,9 @@ class TestAuditEventsEndpoint:
         """Test filtering events by tool name."""
         base_url, _ = dashboard_with_events
 
-        response = requests.get(f"{base_url}/api/audit/events?limit=100&tool_name=security_scan")
+        response = requests.get(
+            f"{base_url}/api/audit/events?limit=100&tool_name=security_scan"
+        )
         assert response.status_code == 200
 
         data = response.json()
@@ -139,7 +143,9 @@ class TestAuditEventsEndpoint:
         """Test filtering events by request ID."""
         base_url, _ = dashboard_with_events
 
-        response = requests.get(f"{base_url}/api/audit/events?limit=100&request_id=req-0")
+        response = requests.get(
+            f"{base_url}/api/audit/events?limit=100&request_id=req-0"
+        )
         assert response.status_code == 200
 
         data = response.json()
@@ -169,9 +175,11 @@ class TestAuditEventsEndpoint:
     def test_get_events_decrypts_sensitive_fields(self):
         """Test that sensitive fields are properly decrypted."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch('pathlib.Path.home', return_value=Path(tmpdir)):
+            with patch("pathlib.Path.home", return_value=Path(tmpdir)):
                 # Create audit log with encryption enabled
-                audit_log = AuditLog(session_id="test-session-enc", encryption_enabled=True)
+                audit_log = AuditLog(
+                    session_id="test-session-enc", encryption_enabled=True
+                )
 
                 audit_log.log_tool_call(
                     event_id="evt-enc",
@@ -193,7 +201,9 @@ class TestAuditEventsEndpoint:
                 port = server.start()
 
                 try:
-                    response = requests.get(f"http://localhost:{port}/api/audit/events?limit=10")
+                    response = requests.get(
+                        f"http://localhost:{port}/api/audit/events?limit=10"
+                    )
                     assert response.status_code == 200
 
                     data = response.json()
@@ -221,8 +231,10 @@ class TestAuditCallChainEndpoint:
     def dashboard_with_call_chain(self):
         """Start dashboard with events from multiple requests."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch('pathlib.Path.home', return_value=Path(tmpdir)):
-                audit_log = AuditLog(session_id="test-call-chain", encryption_enabled=False)
+            with patch("pathlib.Path.home", return_value=Path(tmpdir)):
+                audit_log = AuditLog(
+                    session_id="test-call-chain", encryption_enabled=False
+                )
 
                 # Create a call chain: one request triggering multiple tools
                 request_id = "req-chain-abc123"
@@ -271,7 +283,9 @@ class TestAuditCallChainEndpoint:
         """Test retrieving all calls from a single request."""
         base_url, request_id, _ = dashboard_with_call_chain
 
-        response = requests.get(f"{base_url}/api/audit/call-chain?request_id={request_id}")
+        response = requests.get(
+            f"{base_url}/api/audit/call-chain?request_id={request_id}"
+        )
         assert response.status_code == 200
 
         data = response.json()
@@ -283,7 +297,9 @@ class TestAuditCallChainEndpoint:
         """Test that call chain contains all expected tools."""
         base_url, request_id, _ = dashboard_with_call_chain
 
-        response = requests.get(f"{base_url}/api/audit/call-chain?request_id={request_id}")
+        response = requests.get(
+            f"{base_url}/api/audit/call-chain?request_id={request_id}"
+        )
         assert response.status_code == 200
 
         data = response.json()
@@ -295,11 +311,15 @@ class TestAuditCallChainEndpoint:
         assert "security_scan" in tool_names
         assert "generate_unit_tests" in tool_names
 
-    def test_get_call_chain_returns_404_for_missing_request(self, dashboard_with_call_chain):
+    def test_get_call_chain_returns_404_for_missing_request(
+        self, dashboard_with_call_chain
+    ):
         """Test that missing request ID returns appropriate response."""
         base_url, _, _ = dashboard_with_call_chain
 
-        response = requests.get(f"{base_url}/api/audit/call-chain?request_id=nonexistent-req-xyz")
+        response = requests.get(
+            f"{base_url}/api/audit/call-chain?request_id=nonexistent-req-xyz"
+        )
         # Should either return 404 or empty call list
         assert response.status_code in [200, 404]
 
@@ -311,8 +331,10 @@ class TestAuditStatusEndpoint:
     def dashboard_with_encryption(self):
         """Start dashboard with encrypted audit log."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch('pathlib.Path.home', return_value=Path(tmpdir)):
-                audit_log = AuditLog(session_id="test-status-enc", encryption_enabled=True)
+            with patch("pathlib.Path.home", return_value=Path(tmpdir)):
+                audit_log = AuditLog(
+                    session_id="test-status-enc", encryption_enabled=True
+                )
 
                 # Log a few events
                 for i in range(3):
@@ -385,8 +407,10 @@ class TestAuditStatusEndpoint:
     def test_get_status_without_encryption(self):
         """Test status endpoint with encryption disabled."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch('pathlib.Path.home', return_value=Path(tmpdir)):
-                audit_log = AuditLog(session_id="test-status-noenc", encryption_enabled=False)
+            with patch("pathlib.Path.home", return_value=Path(tmpdir)):
+                audit_log = AuditLog(
+                    session_id="test-status-noenc", encryption_enabled=False
+                )
 
                 audit_log.log_tool_call(
                     event_id="evt-1",
@@ -428,7 +452,7 @@ class TestAuditAPIEdgeCases:
     def test_api_handles_missing_limit_gracefully(self):
         """Test that API uses sensible default for missing limit."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch('pathlib.Path.home', return_value=Path(tmpdir)):
+            with patch("pathlib.Path.home", return_value=Path(tmpdir)):
                 audit_log = AuditLog(session_id="test-edge", encryption_enabled=False)
 
                 # Log multiple events
@@ -470,8 +494,10 @@ class TestAuditAPIEdgeCases:
     def test_api_handles_invalid_offset(self):
         """Test that API handles invalid offset gracefully."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch('pathlib.Path.home', return_value=Path(tmpdir)):
-                audit_log = AuditLog(session_id="test-edge-offset", encryption_enabled=False)
+            with patch("pathlib.Path.home", return_value=Path(tmpdir)):
+                audit_log = AuditLog(
+                    session_id="test-edge-offset", encryption_enabled=False
+                )
 
                 audit_log.log_tool_call(
                     event_id="evt-1",
@@ -492,7 +518,9 @@ class TestAuditAPIEdgeCases:
 
                 try:
                     # Request with offset beyond total events
-                    response = requests.get(f"http://localhost:{port}/api/audit/events?limit=10&offset=1000")
+                    response = requests.get(
+                        f"http://localhost:{port}/api/audit/events?limit=10&offset=1000"
+                    )
                     assert response.status_code == 200
 
                     data = response.json()
@@ -510,7 +538,7 @@ class TestAuditAPIEdgeCases:
     def test_api_returns_json_response(self):
         """Test that all API responses are valid JSON."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch('pathlib.Path.home', return_value=Path(tmpdir)):
+            with patch("pathlib.Path.home", return_value=Path(tmpdir)):
                 audit_log = AuditLog(session_id="test-json", encryption_enabled=False)
 
                 # Register audit log with telemetry

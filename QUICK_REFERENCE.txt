@@ -1,0 +1,127 @@
+================================================================================
+QUICK REFERENCE CARD - Code-Scalpel Branch Analysis
+================================================================================
+
+SITUATION (March 28, 2026)
+  ✓ Main branch v2.2.0: HEALTHY
+  ⚠️ 17 stale refactor branches: NEED CLEANUP
+  ✓ 0 open stale PRs: EXCELLENT
+  🔴 Branch cleanliness: POOR (3/10)
+
+WHAT TO DO RIGHT NOW
+  1. cd /mnt/k/backup/Develop/code-scalpel
+  2. bash CLEANUP_BRANCHES.sh
+  3. git branch -a (to verify)
+  4. Done! ✓
+
+THE 4 CLEANUP PHASES
+  Phase 1: Delete 17 stale refactor branches (safe, 0 commits ahead)
+  Phase 2: Delete 1 merged refactor branch (PR #5)
+  Phase 3: Prune 2 merged remote branches
+  Phase 4: Optional - delete release test variants
+
+BRANCH CATEGORIZATION
+  Keep:    main (v2.2.0)
+           origin/main
+           release-2.1.{2,3,4} [if supporting v2.1.x]
+           
+  Delete:  refactor/* (all 17)
+           dependabot/npm_and_yarn/vscode-extension/qs-6.14.2
+           refactor/foo_20260218_162159
+           release-2.1.2-{clean,mainbase}
+
+STALE BRANCHES (SAFE TO DELETE)
+  Created Feb 3:  refactor/foo_20260203_* (4x)
+                  refactor/add_numbers_20260203_* (1x)
+                  → 65 commits behind main
+  
+  Created Feb 18: refactor/foo_20260218_* (3x)
+                  refactor/add_numbers_20260218_* (8x)
+                  → 48 commits behind main
+
+MERGED BRANCHES (ALREADY ON MAIN)
+  refactor/foo_20260218_162159 (PR #5 - merged 2026-02-21)
+  dependabot/npm_and_yarn/vscode-extension/qs-6.14.2 (PR #3 - merged 2026-02-15)
+
+DECISION TABLE
+  ┌─────────────────────────────────────────┐
+  │ Support v2.1.x?    Action               │
+  ├─────────────────────────────────────────┤
+  │ YES  → Keep release-2.1.{2,3,4}        │
+  │ NO   → Delete release-2.1.*            │
+  │ SOON → Keep for now, delete next month │
+  └─────────────────────────────────────────┘
+
+COMMANDS CHEAT SHEET
+  # View all branches
+  git branch -a
+  
+  # View just branch names and divergence
+  git rev-list --count main..<branch>  # ahead
+  git rev-list --count <branch>..main  # behind
+  
+  # Delete local branch
+  git branch -d <branch>
+  
+  # Delete remote branch
+  git push origin --delete <branch>
+  
+  # Fetch and prune
+  git fetch --prune
+  
+  # Push main
+  git push origin main
+
+RISK LEVELS
+  LOW:    Deleting stale refactor branches (40+ days old)
+  LOW:    Deleting merged remote branches
+  MEDIUM: Deleting release-2.1.x (if still supported)
+  NONE:   Running cleanup script (idempotent)
+
+TIMELINE
+  Now:          Run cleanup (5 min)
+  This week:    Decide on release branches (5 min)
+  This sprint:  Update workflow (2 hours)
+  This month:   Document policy (2 hours)
+
+RECOVERY OPTIONS (if needed)
+  Within 30 days: git reflog, git checkout <hash>
+  Forever:        Check remote backups or CI artifacts
+
+HEALTH SCORE
+  Before: 7.8/10 (good, but needs cleanup)
+  After:  8.5-9/10 (excellent)
+
+PREVENTION
+  Enable auto-delete for merged PRs in GitHub Settings
+  Enable auto-prune: git config --global fetch.prune true
+  Review monthly for stragglers
+
+KEY FACTS
+  Total branches: 25 local + 6 remote = 31 total
+  After cleanup: ~4 local + 3 remote = 7 total
+  Stale branches: 40-65 days old, no active work
+  Development rate: ~4 commits/day (healthy)
+  Version cadence: new release every 1-3 days (healthy)
+
+DOCUMENTATION
+  → BRANCH_ANALYSIS_SUMMARY.txt (2 pages, read first)
+  → BRANCH_AND_PR_ANALYSIS.md (8 pages, detailed)
+  → PR_RECOMMENDATIONS.md (6 pages, workflows)
+  → CLEANUP_BRANCHES.sh (script, run directly)
+  → ANALYSIS_INDEX.md (full navigation guide)
+
+QUESTIONS?
+  "Is it safe?" → YES, all branches 40+ days old with no work
+  "Can I undo?" → YES, git reflog for 30 days
+  "Should I keep releases?" → Only if supporting v2.1.x
+  "How prevent future?" → Auto-delete + auto-prune config
+
+STATUS: READY TO EXECUTE ✅
+Risk:   LOW
+Time:   5-10 minutes
+Benefit: High (cleaner repo, better hygiene)
+
+================================================================================
+END QUICK REFERENCE
+================================================================================

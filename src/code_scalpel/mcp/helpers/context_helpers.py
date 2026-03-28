@@ -619,9 +619,7 @@ def _scan_go_symbol_references(
 
     def _column_for_line(line_no: int) -> int:
         return (
-            lines[line_no - 1].find(target_symbol)
-            if 0 < line_no <= len(lines)
-            else 0
+            lines[line_no - 1].find(target_symbol) if 0 < line_no <= len(lines) else 0
         )
 
     def _normalize_go_receiver(raw_receiver: Any) -> str | None:
@@ -644,7 +642,11 @@ def _scan_go_symbol_references(
         IRImport = None  # type: ignore[assignment]
         GoNormalizer = None  # type: ignore[assignment]
 
-    if GoNormalizer is not None and IRFunctionDef is not None and IRClassDef is not None:
+    if (
+        GoNormalizer is not None
+        and IRFunctionDef is not None
+        and IRClassDef is not None
+    ):
         try:
             module = GoNormalizer().normalize(code)
             for node in module.body:
@@ -907,7 +909,9 @@ def _scan_java_symbol_references(
             )
             if object_creation_match:
                 return _normalize_java_type_name(object_creation_match.group("type"))
-            if re.fullmatch(r"[+-]?(?:0[xX][0-9a-fA-F_]+|0[bB][01_]+|\d[\d_]*)[lL]", token):
+            if re.fullmatch(
+                r"[+-]?(?:0[xX][0-9a-fA-F_]+|0[bB][01_]+|\d[\d_]*)[lL]", token
+            ):
                 return "long"
             if re.fullmatch(r"[+-]?(?:0[xX][0-9a-fA-F_]+|0[bB][01_]+|\d[\d_]*)", token):
                 return "int"
@@ -996,10 +1000,15 @@ def _scan_java_symbol_references(
         if java_import_resolver is None:
             return False
         cache_key = f"{module_name}:{lookup_symbol}"
-        if java_static_symbol_cache is not None and cache_key in java_static_symbol_cache:
+        if (
+            java_static_symbol_cache is not None
+            and cache_key in java_static_symbol_cache
+        ):
             return java_static_symbol_cache[cache_key]
 
-        owner_file = getattr(java_import_resolver, "module_to_file", {}).get(module_name)
+        owner_file = getattr(java_import_resolver, "module_to_file", {}).get(
+            module_name
+        )
         if not owner_file:
             if java_static_symbol_cache is not None:
                 java_static_symbol_cache[cache_key] = False

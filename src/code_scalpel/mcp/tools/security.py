@@ -103,7 +103,9 @@ async def unified_sink_detect(
             error_obj = ToolError(
                 error="'code' must be a non-empty source string.",
                 error_code="invalid_argument",
-                error_details={"hint": "Provide source code to scan for dangerous sinks."},
+                error_details={
+                    "hint": "Provide source code to scan for dangerous sinks."
+                },
             )
             duration_ms = int((time.perf_counter() - started) * 1000)
             return make_envelope(
@@ -210,7 +212,10 @@ async def unified_sink_detect(
                 )
             except Exception as e:
                 import logging
-                logging.getLogger(__name__).warning(f"Telemetry emit failed for unified_sink_detect: {e}")
+
+                logging.getLogger(__name__).warning(
+                    f"Telemetry emit failed for unified_sink_detect: {e}"
+                )
 
             return make_envelope(
                 data=result,
@@ -237,7 +242,10 @@ async def unified_sink_detect(
                 )
             except Exception as e:
                 import logging
-                logging.getLogger(__name__).warning(f"Telemetry emit failed for unified_sink_detect: {e}")
+
+                logging.getLogger(__name__).warning(
+                    f"Telemetry emit failed for unified_sink_detect: {e}"
+                )
             raise
     except Exception as exc:
         duration_ms = int((time.perf_counter() - started) * 1000)
@@ -319,6 +327,7 @@ async def type_evaporation_scan(
     started = time.perf_counter()
     try:
         from code_scalpel.mcp.helpers.session import _get_project_root
+
         tier = _get_current_tier()
 
         # Validate input: at least one way to provide each code
@@ -332,7 +341,9 @@ async def type_evaporation_scan(
                 error=ToolError(
                     error="Either 'frontend_code' or 'frontend_file_path' must be provided.",
                     error_code="invalid_argument",
-                    error_details={"hint": "Provide frontend code directly or via frontend_file_path."},
+                    error_details={
+                        "hint": "Provide frontend code directly or via frontend_file_path."
+                    },
                 ),
             )
         if backend_code is None and backend_file_path is None:
@@ -345,7 +356,9 @@ async def type_evaporation_scan(
                 error=ToolError(
                     error="Either 'backend_code' or 'backend_file_path' must be provided.",
                     error_code="invalid_argument",
-                    error_details={"hint": "Provide backend code directly or via backend_file_path."},
+                    error_details={
+                        "hint": "Provide backend code directly or via backend_file_path."
+                    },
                 ),
             )
 
@@ -468,10 +481,16 @@ async def type_evaporation_scan(
                     },
                     output_summary={
                         "success": result.success if result else False,
-                        "frontend_vulnerabilities": result.frontend_vulnerabilities if result else 0,
-                        "backend_vulnerabilities": result.backend_vulnerabilities if result else 0,
+                        "frontend_vulnerabilities": (
+                            result.frontend_vulnerabilities if result else 0
+                        ),
+                        "backend_vulnerabilities": (
+                            result.backend_vulnerabilities if result else 0
+                        ),
                         "cross_file_issues": result.cross_file_issues if result else 0,
-                        "implicit_any_count": result.implicit_any_count if result else 0,
+                        "implicit_any_count": (
+                            result.implicit_any_count if result else 0
+                        ),
                     },
                     metadata={
                         "frontend_file": frontend_file,
@@ -480,7 +499,10 @@ async def type_evaporation_scan(
                 )
             except Exception as e:
                 import logging
-                logging.getLogger(__name__).warning(f"Telemetry emit failed for type_evaporation_scan: {e}")
+
+                logging.getLogger(__name__).warning(
+                    f"Telemetry emit failed for type_evaporation_scan: {e}"
+                )
 
             return make_envelope(
                 data=result,
@@ -509,7 +531,10 @@ async def type_evaporation_scan(
                 )
             except Exception as e:
                 import logging
-                logging.getLogger(__name__).warning(f"Telemetry emit failed for type_evaporation_scan: {e}")
+
+                logging.getLogger(__name__).warning(
+                    f"Telemetry emit failed for type_evaporation_scan: {e}"
+                )
             raise
     except Exception as exc:
         duration_ms = int((time.perf_counter() - started) * 1000)
@@ -660,10 +685,18 @@ async def scan_dependencies(
                     },
                     output_summary={
                         "success": result.success if result else False,
-                        "total_dependencies": result.total_dependencies if result else 0,
+                        "total_dependencies": (
+                            result.total_dependencies if result else 0
+                        ),
                         "vulnerable_count": result.vulnerable_count if result else 0,
-                        "total_vulnerabilities": result.total_vulnerabilities if result else 0,
-                        "scanned_files": len(result.scanned_files) if (result and result.scanned_files) else 0,
+                        "total_vulnerabilities": (
+                            result.total_vulnerabilities if result else 0
+                        ),
+                        "scanned_files": (
+                            len(result.scanned_files)
+                            if (result and result.scanned_files)
+                            else 0
+                        ),
                     },
                     metadata={
                         "severity_summary": result.severity_summary if result else {},
@@ -671,7 +704,10 @@ async def scan_dependencies(
                 )
             except Exception as e:
                 import logging
-                logging.getLogger(__name__).warning(f"Telemetry emit failed for scan_dependencies: {e}")
+
+                logging.getLogger(__name__).warning(
+                    f"Telemetry emit failed for scan_dependencies: {e}"
+                )
 
             return make_envelope(
                 data=result,
@@ -700,7 +736,10 @@ async def scan_dependencies(
                 )
             except Exception as e:
                 import logging
-                logging.getLogger(__name__).warning(f"Telemetry emit failed for scan_dependencies: {e}")
+
+                logging.getLogger(__name__).warning(
+                    f"Telemetry emit failed for scan_dependencies: {e}"
+                )
             raise
     except Exception as exc:
         duration_ms = int((time.perf_counter() - started) * 1000)
@@ -788,7 +827,9 @@ async def security_scan(
                 error=ToolError(
                     error="Either 'code' or 'file_path' must be provided.",
                     error_code="invalid_argument",
-                    error_details={"hint": "Provide source code directly or pass a file_path to scan."},
+                    error_details={
+                        "hint": "Provide source code directly or pass a file_path to scan."
+                    },
                 ),
             )
 
@@ -814,6 +855,7 @@ async def security_scan(
                 file_path = resolve_path(file_path, str(_get_project_root()))
                 # Extract language from file extension
                 import os
+
                 _, ext = os.path.splitext(file_path)
                 ext_map = {
                     ".py": "python",
@@ -866,9 +908,15 @@ async def security_scan(
                     },
                     output_summary={
                         "success": result.success if result else False,
-                        "vulnerability_count": len(result.vulnerabilities) if result and result.vulnerabilities else 0,
+                        "vulnerability_count": (
+                            len(result.vulnerabilities)
+                            if result and result.vulnerabilities
+                            else 0
+                        ),
                         "risk_level": result.risk_level if result else "unknown",
-                        "has_vulnerabilities": result.has_vulnerabilities if result else False,
+                        "has_vulnerabilities": (
+                            result.has_vulnerabilities if result else False
+                        ),
                     },
                     metadata={
                         "language": detected_language,
@@ -876,7 +924,10 @@ async def security_scan(
                 )
             except Exception as e:
                 import logging
-                logging.getLogger(__name__).warning(f"Telemetry emit failed for security_scan: {e}")
+
+                logging.getLogger(__name__).warning(
+                    f"Telemetry emit failed for security_scan: {e}"
+                )
 
             return make_envelope(
                 data=result,
@@ -903,7 +954,10 @@ async def security_scan(
                 )
             except Exception as e:
                 import logging
-                logging.getLogger(__name__).warning(f"Telemetry emit failed for security_scan: {e}")
+
+                logging.getLogger(__name__).warning(
+                    f"Telemetry emit failed for security_scan: {e}"
+                )
             raise
     except Exception as exc:
         duration_ms = int((time.perf_counter() - started) * 1000)

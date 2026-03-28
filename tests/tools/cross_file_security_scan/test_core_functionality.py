@@ -327,14 +327,14 @@ def process():
 
 @pytest.fixture
 def javascript_eval_project(temp_project):
-        """Create a JavaScript project with an imported tainted return reaching eval."""
-        (temp_project / "source.js").write_text("""
+    """Create a JavaScript project with an imported tainted return reaching eval."""
+    (temp_project / "source.js").write_text("""
 export function getUserInput() {
     return process.env.USER_INPUT;
 }
 """)
 
-        (temp_project / "executor.js").write_text("""
+    (temp_project / "executor.js").write_text("""
 import { getUserInput } from './source.js';
 
 export function run() {
@@ -343,16 +343,16 @@ export function run() {
 }
 """)
 
-        return temp_project
+    return temp_project
 
 
 @pytest.fixture
 def typescript_alias_eval_project(temp_project):
-        """Create a TypeScript project that uses a tsconfig path alias."""
-        src_dir = temp_project / "src"
-        src_dir.mkdir()
+    """Create a TypeScript project that uses a tsconfig path alias."""
+    src_dir = temp_project / "src"
+    src_dir.mkdir()
 
-        (temp_project / "tsconfig.json").write_text("""
+    (temp_project / "tsconfig.json").write_text("""
 {
     "compilerOptions": {
         "baseUrl": ".",
@@ -363,13 +363,13 @@ def typescript_alias_eval_project(temp_project):
 }
 """)
 
-        (src_dir / "input.ts").write_text("""
+    (src_dir / "input.ts").write_text("""
 export function getUserInput(): string | undefined {
     return process.env.USER_INPUT;
 }
 """)
 
-        (src_dir / "executor.ts").write_text("""
+    (src_dir / "executor.ts").write_text("""
 import { getUserInput } from '@lib/input';
 
 export function run(): unknown {
@@ -378,7 +378,7 @@ export function run(): unknown {
 }
 """)
 
-        return temp_project
+    return temp_project
 
 
 # =============================================================================

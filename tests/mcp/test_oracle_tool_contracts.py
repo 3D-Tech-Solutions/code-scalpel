@@ -13,7 +13,6 @@ import pytest
 
 from code_scalpel.mcp.validators.core import ValidationError
 
-
 pytestmark = pytest.mark.asyncio
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -144,9 +143,7 @@ async def _run_unified_sink_detect(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
     return await unified_sink_detect("print('hi')", language="elixir")
 
 
-async def _run_type_evaporation_scan(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
+async def _run_type_evaporation_scan(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     from code_scalpel.mcp.tools.security import type_evaporation_scan
     from code_scalpel.mcp.tools import security as security_module
 
@@ -232,9 +229,7 @@ async def _run_get_file_context(monkeypatch: pytest.MonkeyPatch, tmp_path: Path)
     return await get_file_context(file_path=str(tmp_path / "missing.py"))
 
 
-async def _run_get_symbol_references(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
+async def _run_get_symbol_references(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     from code_scalpel.mcp.tools.context import get_symbol_references
     from code_scalpel.mcp.tools import context as context_module
 
@@ -258,9 +253,7 @@ async def _run_get_call_graph(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     return await get_call_graph(project_root="/K:/repo")
 
 
-async def _run_get_graph_neighborhood(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
+async def _run_get_graph_neighborhood(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     from code_scalpel.mcp.tools.graph import get_graph_neighborhood
     from code_scalpel.mcp.tools import graph as graph_module
 
@@ -330,9 +323,7 @@ async def _run_validate_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     return await validate_paths(paths=["/K:/repo/missing.py"])
 
 
-async def _run_verify_policy_integrity(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
+async def _run_verify_policy_integrity(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     from code_scalpel.mcp.tools.policy import verify_policy_integrity
     from code_scalpel.mcp.tools import policy as policy_module
 

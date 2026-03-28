@@ -10,7 +10,6 @@ from pathlib import Path
 
 import pytest
 
-
 pytestmark = pytest.mark.asyncio
 
 
@@ -34,7 +33,9 @@ async def test_security_scan_typescript_dom_xss_is_bounded_useful(
 
     assert result.success is True
     assert result.vulnerability_count >= 1
-    assert any(vulnerability.cwe == "CWE-79" for vulnerability in result.vulnerabilities)
+    assert any(
+        vulnerability.cwe == "CWE-79" for vulnerability in result.vulnerabilities
+    )
 
 
 async def test_security_scan_typescript_sql_injection_is_bounded_useful(
@@ -55,7 +56,9 @@ async def test_security_scan_typescript_sql_injection_is_bounded_useful(
 
     assert result.success is True
     assert result.vulnerability_count >= 1
-    assert any(vulnerability.cwe == "CWE-89" for vulnerability in result.vulnerabilities)
+    assert any(
+        vulnerability.cwe == "CWE-89" for vulnerability in result.vulnerabilities
+    )
 
 
 async def test_security_scan_typescript_command_injection_is_bounded_useful(
@@ -76,4 +79,6 @@ async def test_security_scan_typescript_command_injection_is_bounded_useful(
 
     assert result.success is True
     assert result.vulnerability_count >= 1
-    assert any(vulnerability.cwe == "CWE-78" for vulnerability in result.vulnerabilities)
+    assert any(
+        vulnerability.cwe == "CWE-78" for vulnerability in result.vulnerabilities
+    )

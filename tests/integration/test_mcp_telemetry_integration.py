@@ -8,8 +8,6 @@ Tests that:
 """
 
 import asyncio
-import json
-import subprocess
 import sys
 import tempfile
 import time
@@ -24,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 @pytest.fixture
 def test_python_file():
     """Create a temporary Python file for testing."""
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
         f.write("""
 def hello(name):
     '''Greet someone.'''
@@ -55,6 +53,7 @@ def test_dashboard_service_starts():
 
     # Verify it's accessible
     import httpx
+
     try:
         response = httpx.get(f"http://127.0.0.1:{port}", timeout=2)
         assert response.status_code == 200
@@ -76,9 +75,7 @@ def test_telemetry_emitted_for_analyze_code(test_python_file):
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
-        result = loop.run_until_complete(
-            analyze_code(file_path=test_python_file)
-        )
+        result = loop.run_until_complete(analyze_code(file_path=test_python_file))
     finally:
         loop.close()
 
@@ -128,13 +125,13 @@ async def test_dashboard_api_returns_events():
             assert data["events"][0]["tool_name"] == "test_tool"
     finally:
         from code_scalpel.dashboard_service import stop_dashboard
+
         stop_dashboard()
 
 
 async def test_dashboard_shows_tier_and_license_status():
     """Test that dashboard license API returns tier info."""
     from code_scalpel.dashboard_service import start_dashboard
-    from code_scalpel.mcp.server import CURRENT_TIER
     import httpx
 
     # Start dashboard
@@ -152,6 +149,7 @@ async def test_dashboard_shows_tier_and_license_status():
             assert data["current_tier"] in ["community", "pro", "enterprise"]
     finally:
         from code_scalpel.dashboard_service import stop_dashboard
+
         stop_dashboard()
 
 
@@ -226,6 +224,7 @@ async def test_analyze_code_with_dashboard_integration(test_python_file):
 
     finally:
         from code_scalpel.dashboard_service import stop_dashboard
+
         stop_dashboard()
 
 

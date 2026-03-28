@@ -109,12 +109,21 @@ async def validate_paths(
                         "project_root_provided": project_root is not None,
                     },
                     output_summary={
-                        "accessible_count": len(result.accessible) if hasattr(result, 'accessible') and result.accessible else 0,
-                        "inaccessible_count": len(result.inaccessible) if hasattr(result, 'inaccessible') and result.inaccessible else 0,
+                        "accessible_count": (
+                            len(result.accessible)
+                            if hasattr(result, "accessible") and result.accessible
+                            else 0
+                        ),
+                        "inaccessible_count": (
+                            len(result.inaccessible)
+                            if hasattr(result, "inaccessible") and result.inaccessible
+                            else 0
+                        ),
                     },
                 )
             except Exception as e:
                 import logging
+
                 logging.getLogger(__name__).warning(f"Telemetry emit failed: {e}")
 
             return make_envelope(
@@ -141,6 +150,7 @@ async def validate_paths(
                 )
             except Exception as e:
                 import logging
+
                 logging.getLogger(__name__).warning(f"Telemetry emit failed: {e}")
             raise
     except FileNotFoundError as exc:
@@ -256,18 +266,21 @@ async def verify_policy_integrity(
                     tool_name="verify_policy_integrity",
                     tier_applied=tier,
                     duration_ms=float(duration_ms),
-                    status="success" if getattr(result, 'success', False) else "failure",
+                    status=(
+                        "success" if getattr(result, "success", False) else "failure"
+                    ),
                     input_summary={
                         "policy_dir_provided": policy_dir is not None,
                         "manifest_source": manifest_source,
                     },
                     output_summary={
-                        "verified": getattr(result, 'success', False),
-                        "files_verified": getattr(result, 'files_verified', 0),
+                        "verified": getattr(result, "success", False),
+                        "files_verified": getattr(result, "files_verified", 0),
                     },
                 )
             except Exception as e:
                 import logging
+
                 logging.getLogger(__name__).warning(f"Telemetry emit failed: {e}")
 
             return make_envelope(
@@ -294,6 +307,7 @@ async def verify_policy_integrity(
                 )
             except Exception as e:
                 import logging
+
                 logging.getLogger(__name__).warning(f"Telemetry emit failed: {e}")
             raise
     except FileNotFoundError as exc:
@@ -505,19 +519,22 @@ async def code_policy_check(
                     tool_name="code_policy_check",
                     tier_applied=tier,
                     duration_ms=float(duration_ms),
-                    status="success" if getattr(result, 'success', False) else "failure",
+                    status=(
+                        "success" if getattr(result, "success", False) else "failure"
+                    ),
                     input_summary={
                         "path_count": len(paths),
                         "rule_count": len(rules) if rules else 0,
                         "compliance_standards": compliance_standards or [],
                     },
                     output_summary={
-                        "files_checked": getattr(result, 'files_checked', 0),
-                        "violations_found": len(getattr(result, 'violations', [])),
+                        "files_checked": getattr(result, "files_checked", 0),
+                        "violations_found": len(getattr(result, "violations", [])),
                     },
                 )
             except Exception as e:
                 import logging
+
                 logging.getLogger(__name__).warning(f"Telemetry emit failed: {e}")
 
             return make_envelope(
@@ -545,6 +562,7 @@ async def code_policy_check(
                 )
             except Exception as e:
                 import logging
+
                 logging.getLogger(__name__).warning(f"Telemetry emit failed: {e}")
             raise
     except Exception as exc:

@@ -859,16 +859,11 @@ class TestInputValidation:
         from code_scalpel.mcp.server import get_graph_neighborhood
 
         (tmp_path / "main.go").write_text(
-            "package main\n\n"
-            "func main() {\n"
-            "\thelper()\n"
-            "}\n",
+            "package main\n\n" "func main() {\n" "\thelper()\n" "}\n",
             encoding="utf-8",
         )
         (tmp_path / "helper.go").write_text(
-            "package main\n\n"
-            "func helper() {\n"
-            "}\n",
+            "package main\n\n" "func helper() {\n" "}\n",
             encoding="utf-8",
         )
 

@@ -771,8 +771,8 @@ Contains runnable example code for all integrations:
 
 ## Project Context
 
-# [20260327_DOCS] Updated for v2.1.2 "PHP & Oracle Patch" release
-Code Scalpel v2.1.2 is an MCP server toolkit for AI-driven surgical code operations.
+# [20260328_DOCS] Updated for v2.2.0 "Telemetry Completeness & Crash Safety" release
+Code Scalpel v2.2.0 is an MCP server toolkit for AI-driven surgical code operations.
 
 | Module | Status | Coverage |
 |--------|--------|----------|
@@ -787,12 +787,12 @@ Code Scalpel v2.1.2 is an MCP server toolkit for AI-driven surgical code operati
 | Autonomy Engine | Stable | 90%+ |
 | Unified Cache | Stable | 95%+ |
 
-**Version:** 2.1.2 (March 27, 2026)
+**Version:** 2.2.0 (March 28, 2026)
 **Test Suite:** 7,700+ tests passing (100% pass rate)
 **Coverage Gate:** ≥90% combined (statement + branch)
 **Current Coverage:** 94.86%+ combined (96%+ stmt, 90%+ branch)
 
-**MCP Tools (Current - v2.1.2 - 22 tools):**
+**MCP Tools (Current - v2.2.0 - 22 tools):**
 - `analyze_code` - Parse and extract code structure (13 languages: Python, JS, TS, Java, Go, Kotlin, PHP, Ruby, Swift, Rust, C, C++, C#)
 - `extract_code` - Surgical extraction by symbol name with cross-file deps (polyglot)
 - `update_symbol` - Safely replace functions/classes/methods in files
@@ -816,12 +816,13 @@ Code Scalpel v2.1.2 is an MCP server toolkit for AI-driven surgical code operati
 - `code_policy_check` - Check code against style guides and compliance standards
 - `type_evaporation_scan` - Detect TypeScript type evaporation vulnerabilities
 
-**Latest Release:** v2.1.2
+**Latest Release:** v2.2.0
 - Release Date: March 27, 2026
 - Previous Release: v2.1.0 (March 2, 2026) - Go language support
 - Release Notes: `docs/release_notes/RELEASE_NOTES_v2.0.0.md`
 - Evidence Files: `release_artifacts/v2.0.0/`, `release_artifacts/v2.1.0/`
 - **Recent Changes:**
+  - v2.2.0: Crash-safe JSONL writes, failure-path telemetry for all 21 tools, error encryption
   - v2.1.2: CLI Oracle patch for error recovery
   - v2.1.1: Metadata sync for PyPI packaging
   - v2.1.0: Go language support added (13 total languages)

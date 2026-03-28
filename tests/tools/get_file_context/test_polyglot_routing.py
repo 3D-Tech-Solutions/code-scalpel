@@ -14,7 +14,13 @@ from code_scalpel.mcp.helpers.context_helpers import _get_file_context_sync
 
 
 @pytest.mark.parametrize(
-    ("file_name", "code", "expected_language", "expected_functions", "expected_classes"),
+    (
+        "file_name",
+        "code",
+        "expected_language",
+        "expected_functions",
+        "expected_classes",
+    ),
     [
         (
             "sample.py",
@@ -124,8 +130,12 @@ def test_get_file_context_routes_extensions_to_expected_language(
 
     assert result.success is True
     assert result.language == expected_language
-    assert expected_functions.issubset({getattr(item, "name", item) for item in result.functions})
-    assert expected_classes.issubset({getattr(item, "name", item) for item in result.classes})
+    assert expected_functions.issubset(
+        {getattr(item, "name", item) for item in result.functions}
+    )
+    assert expected_classes.issubset(
+        {getattr(item, "name", item) for item in result.classes}
+    )
 
 
 def test_get_file_context_unknown_extension_returns_unsupported_language(

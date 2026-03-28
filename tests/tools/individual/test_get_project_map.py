@@ -946,7 +946,8 @@ class TestLanguageBreakdown:
         assert "fetchUser" in modules["src/api/index.ts"].functions
         assert "./api" in modules["src/main.ts"].imports
         assert any(
-            entry_point.endswith("src/main.ts:run") for entry_point in result.entry_points
+            entry_point.endswith("src/main.ts:run")
+            for entry_point in result.entry_points
         )
 
     @pytest.mark.asyncio

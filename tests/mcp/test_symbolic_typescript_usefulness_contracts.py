@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import pytest
 
-
 pytestmark = pytest.mark.asyncio
 
 
@@ -36,9 +35,7 @@ export function classify(x: number): number {
         for constraint in result.constraints
     )
     assert any(
-        "x" in condition
-        for path in result.paths
-        for condition in path.conditions
+        "x" in condition for path in result.paths for condition in path.conditions
     )
 
 

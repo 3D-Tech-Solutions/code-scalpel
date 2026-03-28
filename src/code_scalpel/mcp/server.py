@@ -4756,7 +4756,7 @@ def run_server(
             raise
         finally:
             # [20260328_FEATURE] Clean up audit log on server shutdown
-            if 'audit_log' in locals() and audit_log is not None:
+            if "audit_log" in locals() and audit_log is not None:
                 try:
                     export_path = audit_log.cleanup()
                     if export_path:
@@ -4813,7 +4813,7 @@ def run_server(
             raise
         finally:
             # [20260328_FEATURE] Clean up audit log on server shutdown
-            if 'audit_log' in locals() and audit_log is not None:
+            if "audit_log" in locals() and audit_log is not None:
                 try:
                     export_path = audit_log.cleanup()
                     if export_path:

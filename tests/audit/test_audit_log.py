@@ -32,7 +32,7 @@ class TestAuditLogInitialization:
         with tempfile.TemporaryDirectory() as tmpdir:
             session_id = "test-session-123"
 
-            with patch('pathlib.Path.home', return_value=Path(tmpdir)):
+            with patch("pathlib.Path.home", return_value=Path(tmpdir)):
                 audit_log = AuditLog(session_id=session_id, encryption_enabled=True)
 
                 # Check that database file was created
@@ -44,7 +44,7 @@ class TestAuditLogInitialization:
     def test_encryption_initialized_when_enabled(self):
         """Test that encryption is initialized when enabled."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch('pathlib.Path.home', return_value=Path(tmpdir)):
+            with patch("pathlib.Path.home", return_value=Path(tmpdir)):
                 audit_log = AuditLog(session_id="test-123", encryption_enabled=True)
 
                 assert audit_log.encryption.enabled is True
@@ -57,7 +57,7 @@ class TestAuditLogInitialization:
     def test_encryption_disabled_when_requested(self):
         """Test that encryption can be disabled."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch('pathlib.Path.home', return_value=Path(tmpdir)):
+            with patch("pathlib.Path.home", return_value=Path(tmpdir)):
                 audit_log = AuditLog(session_id="test-123", encryption_enabled=False)
 
                 assert audit_log.encryption.enabled is False
@@ -69,7 +69,7 @@ class TestAuditLogInitialization:
     def test_database_schema_created(self):
         """Test that database schema is properly created."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch('pathlib.Path.home', return_value=Path(tmpdir)):
+            with patch("pathlib.Path.home", return_value=Path(tmpdir)):
                 audit_log = AuditLog(session_id="test-123", encryption_enabled=False)
 
                 # Check that tables exist
@@ -88,7 +88,7 @@ class TestAuditLogLogging:
     def test_log_tool_call_success(self):
         """Test logging a successful tool call."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch('pathlib.Path.home', return_value=Path(tmpdir)):
+            with patch("pathlib.Path.home", return_value=Path(tmpdir)):
                 audit_log = AuditLog(session_id="test-123", encryption_enabled=False)
 
                 audit_log.log_tool_call(
@@ -118,7 +118,7 @@ class TestAuditLogLogging:
     def test_log_tool_call_with_encryption(self):
         """Test logging with encryption enabled."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch('pathlib.Path.home', return_value=Path(tmpdir)):
+            with patch("pathlib.Path.home", return_value=Path(tmpdir)):
                 audit_log = AuditLog(session_id="test-123", encryption_enabled=True)
 
                 audit_log.log_tool_call(
@@ -152,7 +152,7 @@ class TestAuditLogLogging:
     def test_log_tool_call_with_error(self):
         """Test logging a failed tool call."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch('pathlib.Path.home', return_value=Path(tmpdir)):
+            with patch("pathlib.Path.home", return_value=Path(tmpdir)):
                 audit_log = AuditLog(session_id="test-123", encryption_enabled=False)
 
                 audit_log.log_tool_call(
@@ -182,7 +182,7 @@ class TestAuditLogQueries:
     def test_get_events_all(self):
         """Test retrieving all events."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch('pathlib.Path.home', return_value=Path(tmpdir)):
+            with patch("pathlib.Path.home", return_value=Path(tmpdir)):
                 audit_log = AuditLog(session_id="test-123", encryption_enabled=False)
 
                 # Log multiple events
@@ -206,7 +206,7 @@ class TestAuditLogQueries:
     def test_get_events_with_limit_and_offset(self):
         """Test pagination with limit and offset."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch('pathlib.Path.home', return_value=Path(tmpdir)):
+            with patch("pathlib.Path.home", return_value=Path(tmpdir)):
                 audit_log = AuditLog(session_id="test-123", encryption_enabled=False)
 
                 # Log 10 events
@@ -235,7 +235,7 @@ class TestAuditLogQueries:
     def test_get_events_filter_by_tool_name(self):
         """Test filtering by tool name."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch('pathlib.Path.home', return_value=Path(tmpdir)):
+            with patch("pathlib.Path.home", return_value=Path(tmpdir)):
                 audit_log = AuditLog(session_id="test-123", encryption_enabled=False)
 
                 # Log different tools
@@ -271,7 +271,7 @@ class TestAuditLogQueries:
     def test_get_events_filter_by_status(self):
         """Test filtering by status."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch('pathlib.Path.home', return_value=Path(tmpdir)):
+            with patch("pathlib.Path.home", return_value=Path(tmpdir)):
                 audit_log = AuditLog(session_id="test-123", encryption_enabled=False)
 
                 # Log success and failure
@@ -312,7 +312,7 @@ class TestAuditLogQueries:
     def test_get_events_filter_by_request_id(self):
         """Test filtering by request ID (call chain)."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch('pathlib.Path.home', return_value=Path(tmpdir)):
+            with patch("pathlib.Path.home", return_value=Path(tmpdir)):
                 audit_log = AuditLog(session_id="test-123", encryption_enabled=False)
 
                 # Log multiple calls from same request
@@ -356,7 +356,7 @@ class TestAuditLogStatistics:
     def test_get_stats(self):
         """Test getting audit log statistics."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch('pathlib.Path.home', return_value=Path(tmpdir)):
+            with patch("pathlib.Path.home", return_value=Path(tmpdir)):
                 audit_log = AuditLog(session_id="test-123", encryption_enabled=False)
 
                 # Log mixed results
@@ -408,7 +408,7 @@ class TestAuditLogStatistics:
     def test_get_stats_empty(self):
         """Test statistics on empty audit log."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch('pathlib.Path.home', return_value=Path(tmpdir)):
+            with patch("pathlib.Path.home", return_value=Path(tmpdir)):
                 audit_log = AuditLog(session_id="test-123", encryption_enabled=False)
 
                 stats = audit_log.get_stats()
@@ -428,7 +428,7 @@ class TestAuditLogExport:
     def test_export_to_jsonl(self):
         """Test exporting audit log to JSONL file."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch('pathlib.Path.home', return_value=Path(tmpdir)):
+            with patch("pathlib.Path.home", return_value=Path(tmpdir)):
                 audit_log = AuditLog(session_id="test-123", encryption_enabled=False)
 
                 # Log some events
@@ -461,7 +461,7 @@ class TestAuditLogExport:
     def test_export_decrypts_data(self):
         """Test that export decrypts encrypted data."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch('pathlib.Path.home', return_value=Path(tmpdir)):
+            with patch("pathlib.Path.home", return_value=Path(tmpdir)):
                 audit_log = AuditLog(session_id="test-123", encryption_enabled=True)
 
                 # Log with encryption
@@ -495,7 +495,7 @@ class TestAuditLogCleanup:
     def test_cleanup_exports_and_closes(self):
         """Test cleanup exports events and closes database."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch('pathlib.Path.home', return_value=Path(tmpdir)):
+            with patch("pathlib.Path.home", return_value=Path(tmpdir)):
                 audit_log = AuditLog(session_id="test-123", encryption_enabled=False)
 
                 audit_log.log_tool_call(
@@ -526,7 +526,7 @@ class TestEncryptionStatus:
     def test_get_encryption_status_enabled(self):
         """Test encryption status when enabled."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch('pathlib.Path.home', return_value=Path(tmpdir)):
+            with patch("pathlib.Path.home", return_value=Path(tmpdir)):
                 audit_log = AuditLog(session_id="test-123", encryption_enabled=True)
 
                 status = audit_log.get_encryption_status()
@@ -541,7 +541,7 @@ class TestEncryptionStatus:
     def test_get_encryption_status_disabled(self):
         """Test encryption status when disabled."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch('pathlib.Path.home', return_value=Path(tmpdir)):
+            with patch("pathlib.Path.home", return_value=Path(tmpdir)):
                 audit_log = AuditLog(session_id="test-123", encryption_enabled=False)
 
                 status = audit_log.get_encryption_status()

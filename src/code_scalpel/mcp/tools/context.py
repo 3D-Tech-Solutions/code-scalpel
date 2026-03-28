@@ -153,11 +153,29 @@ async def crawl_project(
                 },
                 output_summary={
                     "success": result.success if result else False,
-                    "total_files": result.summary.total_files if (result and result.summary) else 0,
-                    "total_lines_of_code": result.summary.total_lines_of_code if (result and result.summary) else 0,
-                    "total_functions": result.summary.total_functions if (result and result.summary) else 0,
-                    "total_classes": result.summary.total_classes if (result and result.summary) else 0,
-                    "language_breakdown": len(result.language_breakdown) if (result and result.language_breakdown) else 0,
+                    "total_files": (
+                        result.summary.total_files if (result and result.summary) else 0
+                    ),
+                    "total_lines_of_code": (
+                        result.summary.total_lines_of_code
+                        if (result and result.summary)
+                        else 0
+                    ),
+                    "total_functions": (
+                        result.summary.total_functions
+                        if (result and result.summary)
+                        else 0
+                    ),
+                    "total_classes": (
+                        result.summary.total_classes
+                        if (result and result.summary)
+                        else 0
+                    ),
+                    "language_breakdown": (
+                        len(result.language_breakdown)
+                        if (result and result.language_breakdown)
+                        else 0
+                    ),
                 },
                 metadata={
                     "crawl_mode": result.crawl_mode if result else "discovery",
@@ -190,7 +208,10 @@ async def crawl_project(
                 )
             except Exception as e:
                 import logging
-                logging.getLogger(__name__).warning(f"Telemetry emit failed for crawl_project: {e}")
+
+                logging.getLogger(__name__).warning(
+                    f"Telemetry emit failed for crawl_project: {e}"
+                )
             raise
     except FileNotFoundError as exc:
         duration_ms = int((time.perf_counter() - started) * 1000)
@@ -314,9 +335,15 @@ async def get_file_context(file_path: str) -> ToolResponseEnvelope:
                     "success": result.success if result else False,
                     "language": result.language if result else None,
                     "line_count": result.line_count if result else 0,
-                    "functions": len(result.functions) if (result and result.functions) else 0,
-                    "classes": len(result.classes) if (result and result.classes) else 0,
-                    "imports": len(result.imports) if (result and result.imports) else 0,
+                    "functions": (
+                        len(result.functions) if (result and result.functions) else 0
+                    ),
+                    "classes": (
+                        len(result.classes) if (result and result.classes) else 0
+                    ),
+                    "imports": (
+                        len(result.imports) if (result and result.imports) else 0
+                    ),
                     "imports_truncated": result.imports_truncated if result else False,
                     "complexity_score": result.complexity_score if result else 0.0,
                 },
@@ -347,7 +374,10 @@ async def get_file_context(file_path: str) -> ToolResponseEnvelope:
                 )
             except Exception as e:
                 import logging
-                logging.getLogger(__name__).warning(f"Telemetry emit failed for get_file_context: {e}")
+
+                logging.getLogger(__name__).warning(
+                    f"Telemetry emit failed for get_file_context: {e}"
+                )
             raise
     except FileNotFoundError as exc:
         duration_ms = int((time.perf_counter() - started) * 1000)
@@ -514,9 +544,13 @@ async def get_symbol_references(
                     "total_references": result.total_references if result else 0,
                     "files_scanned": result.files_scanned if result else 0,
                     "total_files": result.total_files if result else 0,
-                    "references_truncated": result.references_truncated if result else False,
+                    "references_truncated": (
+                        result.references_truncated if result else False
+                    ),
                     "files_truncated": result.files_truncated if result else False,
-                    "has_definition": result.definition_file is not None if result else False,
+                    "has_definition": (
+                        result.definition_file is not None if result else False
+                    ),
                 },
                 metadata={
                     "change_risk": result.change_risk if result else None,
@@ -550,7 +584,10 @@ async def get_symbol_references(
                 )
             except Exception as e:
                 import logging
-                logging.getLogger(__name__).warning(f"Telemetry emit failed for get_symbol_references: {e}")
+
+                logging.getLogger(__name__).warning(
+                    f"Telemetry emit failed for get_symbol_references: {e}"
+                )
             raise
     except Exception as exc:
         duration_ms = int((time.perf_counter() - started) * 1000)

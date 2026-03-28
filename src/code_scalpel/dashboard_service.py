@@ -203,6 +203,7 @@ def create_app() -> tuple[FastAPI, int]:
             export_path = None
             try:
                 from code_scalpel import telemetry
+
                 if telemetry._AUDIT_LOG:
                     export_path = telemetry._AUDIT_LOG.cleanup()
                     logger.info(f"Audit log exported to: {export_path}")
@@ -211,6 +212,7 @@ def create_app() -> tuple[FastAPI, int]:
 
             # Schedule server shutdown after response is sent
             import asyncio
+
             async def shutdown():
                 await asyncio.sleep(0.5)
                 global _dashboard_instance
@@ -373,7 +375,9 @@ def create_app() -> tuple[FastAPI, int]:
                 raw = telemetry.get_recent_events(limit=min(limit, 50))
                 # Apply optional filters manually (in-memory path)
                 if tool_name:
-                    raw = [e for e in raw if tool_name.lower() in e["tool_name"].lower()]
+                    raw = [
+                        e for e in raw if tool_name.lower() in e["tool_name"].lower()
+                    ]
                 if status:
                     raw = [e for e in raw if e["status"] == status]
                 events = raw
@@ -384,28 +388,40 @@ def create_app() -> tuple[FastAPI, int]:
         # Build CSV in-memory
         output = io.StringIO()
         writer = csv.writer(output)
-        writer.writerow([
-            "timestamp_iso", "tool_name", "status", "duration_ms",
-            "tier_applied", "error", "event_id", "request_id",
-        ])
+        writer.writerow(
+            [
+                "timestamp_iso",
+                "tool_name",
+                "status",
+                "duration_ms",
+                "tier_applied",
+                "error",
+                "event_id",
+                "request_id",
+            ]
+        )
         for ev in events:
             ts = ev.get("timestamp_iso") or str(ev.get("timestamp", ""))
-            writer.writerow([
-                ts,
-                ev.get("tool_name", ""),
-                ev.get("status", ""),
-                ev.get("duration_ms", ""),
-                ev.get("tier_applied", ""),
-                ev.get("error") or "",
-                ev.get("event_id", ""),
-                ev.get("request_id", ""),
-            ])
+            writer.writerow(
+                [
+                    ts,
+                    ev.get("tool_name", ""),
+                    ev.get("status", ""),
+                    ev.get("duration_ms", ""),
+                    ev.get("tier_applied", ""),
+                    ev.get("error") or "",
+                    ev.get("event_id", ""),
+                    ev.get("request_id", ""),
+                ]
+            )
 
         output.seek(0)
         return StreamingResponse(
             iter([output.getvalue()]),
             media_type="text/csv",
-            headers={"Content-Disposition": "attachment; filename=code_scalpel_audit.csv"},
+            headers={
+                "Content-Disposition": "attachment; filename=code_scalpel_audit.csv"
+            },
         )
 
     @app.get("/api/audit/sessions")
@@ -421,14 +437,18 @@ def create_app() -> tuple[FastAPI, int]:
                 # Count lines = event count
                 with open(filepath) as f:
                     count = sum(1 for _ in f)
-                sessions.append({
-                    "filename": p.name,
-                    "path": str(p),
-                    "size_bytes": size,
-                    "event_count": count,
-                    "modified": p.stat().st_mtime,
-                    "modified_iso": datetime.fromtimestamp(p.stat().st_mtime).isoformat(),
-                })
+                sessions.append(
+                    {
+                        "filename": p.name,
+                        "path": str(p),
+                        "size_bytes": size,
+                        "event_count": count,
+                        "modified": p.stat().st_mtime,
+                        "modified_iso": datetime.fromtimestamp(
+                            p.stat().st_mtime
+                        ).isoformat(),
+                    }
+                )
             except Exception:
                 pass
         return {"sessions": sessions, "count": len(sessions)}
@@ -463,7 +483,10 @@ def create_app() -> tuple[FastAPI, int]:
                     except json.JSONDecodeError:
                         continue
                     # Apply filters
-                    if tool_name and tool_name.lower() not in ev.get("tool_name", "").lower():
+                    if (
+                        tool_name
+                        and tool_name.lower() not in ev.get("tool_name", "").lower()
+                    ):
                         continue
                     if status and ev.get("status") != status:
                         continue

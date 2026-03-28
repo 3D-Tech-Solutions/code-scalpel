@@ -323,7 +323,10 @@ class TestScanDependenciesAsync:
 
         assert result.error is not None
         assert result.error.error_code == "correction_needed"
-        assert "/mnt/k/backup/Develop/code-scalpel-ninja-warrior/project" in result.error.error
+        assert (
+            "/mnt/k/backup/Develop/code-scalpel-ninja-warrior/project"
+            in result.error.error
+        )
 
 
 class TestSeveritySummary:

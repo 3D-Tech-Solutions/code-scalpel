@@ -330,20 +330,18 @@ class TestProFeatureModuleRelationships:
         ui.mkdir(parents=True)
 
         (root / "tsconfig.json").write_text(
-            '{\n'
+            "{\n"
             '  "compilerOptions": {\n'
             '    "baseUrl": ".",\n'
             '    "paths": {\n'
             '      "@ui/*": ["src/ui/*"]\n'
-            '    }\n'
-            '  }\n'
-            '}\n',
+            "    }\n"
+            "  }\n"
+            "}\n",
             encoding="utf-8",
         )
         (ui / "button.ts").write_text(
-            "export function renderButton(): string {\n"
-            '    return "button"\n'
-            "}\n",
+            "export function renderButton(): string {\n" '    return "button"\n' "}\n",
             encoding="utf-8",
         )
         (src / "main.ts").write_text(
@@ -578,9 +576,7 @@ class TestProFeatureModuleRelationships:
         package_dir.mkdir(parents=True)
 
         (package_dir / "BaseWorker.java").write_text(
-            "package demo;\n\n"
-            "public class BaseWorker {\n"
-            "}\n",
+            "package demo;\n\n" "public class BaseWorker {\n" "}\n",
             encoding="utf-8",
         )
         (package_dir / "Worker.java").write_text(

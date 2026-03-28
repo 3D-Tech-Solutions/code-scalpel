@@ -136,7 +136,10 @@ async def extract_code(
                 error=ToolError(
                     error="Provide either 'file_path' or non-empty 'code'.",
                     error_code="invalid_argument",
-                    error_details={"file_path": file_path, "code_provided": code is not None},
+                    error_details={
+                        "file_path": file_path,
+                        "code_provided": code is not None,
+                    },
                 ),
             )
         if target_type not in {"function", "class", "method"}:
@@ -238,15 +241,27 @@ async def extract_code(
                 output_summary={
                     "success": result.success if result else False,
                     "symbol_name": result.target_name if result else None,
-                    "lines": (result.line_end - result.line_start + 1) if (result and result.line_start and result.line_end) else 0,
+                    "lines": (
+                        (result.line_end - result.line_start + 1)
+                        if (result and result.line_start and result.line_end)
+                        else 0
+                    ),
                     "language": result.language_detected if result else None,
                     "token_estimate": result.token_estimate if result else 0,
-                    "has_context": result.context_code and len(result.context_code) > 0 if result else False,
-                    "has_cross_file_deps": result.cross_file_deps_enabled if result else False,
+                    "has_context": (
+                        result.context_code and len(result.context_code) > 0
+                        if result
+                        else False
+                    ),
+                    "has_cross_file_deps": (
+                        result.cross_file_deps_enabled if result else False
+                    ),
                 },
                 metadata={
                     "jsx_normalized": result.jsx_normalized if result else False,
-                    "is_server_component": result.is_server_component if result else False,
+                    "is_server_component": (
+                        result.is_server_component if result else False
+                    ),
                     "is_server_action": result.is_server_action if result else False,
                 },
             )
@@ -259,27 +274,30 @@ async def extract_code(
                 duration_ms=duration_ms,
             )
         except Exception as exc:
-                duration_ms = int((time.perf_counter() - started) * 1000)
-                tier = _get_current_tier()
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            tier = _get_current_tier()
 
-                # Emit failure telemetry
-                try:
-                    telemetry.emit_tool_event(
-                        tool_name="extract_code",
-                        tier_applied=tier,
-                        duration_ms=float(duration_ms),
-                        status="failure",
-                        error=str(exc),
-                        input_summary={
-                            "target_type": target_type,
-                            "target_name": target_name,
-                            "file_path": file_path,
-                        },
-                    )
-                except Exception as e:
-                    import logging
-                    logging.getLogger(__name__).warning(f"Telemetry emit failed for extract_code: {e}")
-                raise
+            # Emit failure telemetry
+            try:
+                telemetry.emit_tool_event(
+                    tool_name="extract_code",
+                    tier_applied=tier,
+                    duration_ms=float(duration_ms),
+                    status="failure",
+                    error=str(exc),
+                    input_summary={
+                        "target_type": target_type,
+                        "target_name": target_name,
+                        "file_path": file_path,
+                    },
+                )
+            except Exception as e:
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    f"Telemetry emit failed for extract_code: {e}"
+                )
+            raise
     except Exception as exc:
         duration_ms = int((time.perf_counter() - started) * 1000)
         tier = _get_current_tier()
@@ -439,7 +457,9 @@ async def rename_symbol(
                         "success": result.success if result else False,
                         "symbol_name": result.target_name if result else None,
                         "renamed": result.success if result else False,
-                        "has_backup": result.backup_path is not None if result else False,
+                        "has_backup": (
+                            result.backup_path is not None if result else False
+                        ),
                     },
                     metadata={},
                 )
@@ -472,7 +492,10 @@ async def rename_symbol(
                     )
                 except Exception as e:
                     import logging
-                    logging.getLogger(__name__).warning(f"Telemetry emit failed for rename_symbol: {e}")
+
+                    logging.getLogger(__name__).warning(
+                        f"Telemetry emit failed for rename_symbol: {e}"
+                    )
                 raise
     except Exception as exc:
         duration_ms = int((time.perf_counter() - started) * 1000)
@@ -571,7 +594,9 @@ async def update_symbol(
                     error_details={"target_type": target_type},
                 ),
             )
-        if normalized_operation == "replace" and (new_code is None or not str(new_code).strip()):
+        if normalized_operation == "replace" and (
+            new_code is None or not str(new_code).strip()
+        ):
             duration_ms = int((time.perf_counter() - started) * 1000)
             tier = _get_current_tier()
             return make_envelope(
@@ -586,7 +611,9 @@ async def update_symbol(
                     error_details={"operation": normalized_operation},
                 ),
             )
-        if normalized_operation == "rename" and (new_name is None or not new_name.strip()):
+        if normalized_operation == "rename" and (
+            new_name is None or not new_name.strip()
+        ):
             duration_ms = int((time.perf_counter() - started) * 1000)
             tier = _get_current_tier()
             return make_envelope(
@@ -675,7 +702,9 @@ async def update_symbol(
                         "success": result.success if result else False,
                         "symbol_name": result.target_name if result else None,
                         "operation": operation,
-                        "has_backup": result.backup_path is not None if result else False,
+                        "has_backup": (
+                            result.backup_path is not None if result else False
+                        ),
                     },
                     metadata={},
                 )
@@ -693,7 +722,9 @@ async def update_symbol(
                 except Exception as exc:
                     # Log full traceback and return an error envelope so the MCP
                     # transport can still send a valid JSON response back to the client.
-                    debug_print("ERROR:update_symbol: exception while creating envelope:")
+                    debug_print(
+                        "ERROR:update_symbol: exception while creating envelope:"
+                    )
                     traceback.print_exc(file=sys.stderr)
                     # Use a generic internal_error code when the contract's ErrorCode
                     # union does not include a custom serialization error string.
@@ -729,7 +760,10 @@ async def update_symbol(
                     )
                 except Exception as e:
                     import logging
-                    logging.getLogger(__name__).warning(f"Telemetry emit failed for update_symbol: {e}")
+
+                    logging.getLogger(__name__).warning(
+                        f"Telemetry emit failed for update_symbol: {e}"
+                    )
                 raise
     except Exception as exc:
         duration_ms = int((time.perf_counter() - started) * 1000)

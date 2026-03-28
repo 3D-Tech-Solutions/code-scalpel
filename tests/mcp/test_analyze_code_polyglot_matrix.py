@@ -10,7 +10,6 @@ from importlib.util import find_spec
 
 import pytest
 
-
 pytestmark = pytest.mark.asyncio
 
 
@@ -96,7 +95,7 @@ def _parser_available(language: str) -> bool:
         ),
         (
             "csharp",
-            "using System;\nclass Program { static void Main() { Console.WriteLine(\"hi\"); } }\n",
+            'using System;\nclass Program { static void Main() { Console.WriteLine("hi"); } }\n',
             {"Main"},
             {"Program"},
             {"Program": {"Main"}},
@@ -104,7 +103,7 @@ def _parser_available(language: str) -> bool:
         ),
         (
             "go",
-            "package main\nimport \"fmt\"\nfunc add(x int, y int) int { return x + y }\n",
+            'package main\nimport "fmt"\nfunc add(x int, y int) int { return x + y }\n',
             {"add"},
             set(),
             {},
@@ -162,7 +161,9 @@ async def test_public_analyze_code_polyglot_matrix(
 ) -> None:
     """[20260314_TEST] Public analyze_code should honor the full shipped language matrix."""
     if not _parser_available(language):
-        pytest.skip(f"Parser runtime for {language} is not installed in this interpreter")
+        pytest.skip(
+            f"Parser runtime for {language} is not installed in this interpreter"
+        )
 
     from code_scalpel.mcp.server import analyze_code
 

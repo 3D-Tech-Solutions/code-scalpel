@@ -13,7 +13,6 @@ import pytest
 
 from code_scalpel.analysis.code_analyzer import AnalysisLanguage, CodeAnalyzer
 
-
 _TREE_SITTER_MODULES: dict[str, str] = {
     "c": "tree_sitter_c",
     "cpp": "tree_sitter_cpp",
@@ -41,7 +40,7 @@ _TREE_SITTER_MODULES: dict[str, str] = {
         (
             "csharp",
             "Program.cs",
-            "using System; class Program { static void Main() { Console.WriteLine(\"hi\"); } }",
+            'using System; class Program { static void Main() { Console.WriteLine("hi"); } }',
             {"Program.Main"},
             {"Program"},
         ),

@@ -22,7 +22,7 @@ from code_scalpel.mcp.protocol import set_current_tier
 @pytest.fixture
 def test_python_file():
     """Create a temporary Python file for testing."""
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
         f.write("""
 def calculate_tax(amount, rate):
     '''Calculate tax amount.'''
@@ -190,9 +190,7 @@ class TestSymbolicExecuteTelemetry:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            loop.run_until_complete(
-                symbolic_execute(code=code, language="python")
-            )
+            loop.run_until_complete(symbolic_execute(code=code, language="python"))
         finally:
             loop.close()
 
@@ -206,7 +204,10 @@ class TestSymbolicExecuteTelemetry:
         if event["status"] == "success":
             # Check for execution path metrics
             output_summary = event["output_summary"]
-            assert any(key in output_summary for key in ["paths_explored", "path_count", "total_paths"])
+            assert any(
+                key in output_summary
+                for key in ["paths_explored", "path_count", "total_paths"]
+            )
 
 
 class TestGenerateUnitTestsTelemetry:
@@ -225,9 +226,7 @@ class TestGenerateUnitTestsTelemetry:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            loop.run_until_complete(
-                generate_unit_tests(code=code, language="python")
-            )
+            loop.run_until_complete(generate_unit_tests(code=code, language="python"))
         finally:
             loop.close()
 
@@ -253,9 +252,7 @@ class TestCrawlProjectTelemetry:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            loop.run_until_complete(
-                crawl_project(root_path=test_project_dir)
-            )
+            loop.run_until_complete(crawl_project(root_path=test_project_dir))
         finally:
             loop.close()
 
@@ -314,9 +311,7 @@ class TestScanDependenciesTelemetry:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            loop.run_until_complete(
-                scan_dependencies(project_root=test_project_dir)
-            )
+            loop.run_until_complete(scan_dependencies(project_root=test_project_dir))
         finally:
             loop.close()
 
@@ -400,9 +395,11 @@ class TestTelemetryWithAuditLog:
         from code_scalpel.audit import AuditLog
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch('pathlib.Path.home', return_value=Path(tmpdir)):
+            with patch("pathlib.Path.home", return_value=Path(tmpdir)):
                 # Create audit log and register it
-                audit_log = AuditLog(session_id="test-telemetry", encryption_enabled=False)
+                audit_log = AuditLog(
+                    session_id="test-telemetry", encryption_enabled=False
+                )
                 telemetry.set_audit_log(audit_log)
 
                 telemetry.clear_events()
@@ -473,9 +470,7 @@ class TestUnifiedSinkDetectTelemetry:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            loop.run_until_complete(
-                unified_sink_detect(code=code, language="python")
-            )
+            loop.run_until_complete(unified_sink_detect(code=code, language="python"))
         finally:
             loop.close()
 
@@ -501,9 +496,7 @@ class TestGetProjectMapTelemetry:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            loop.run_until_complete(
-                get_project_map(project_root=test_project_dir)
-            )
+            loop.run_until_complete(get_project_map(project_root=test_project_dir))
         finally:
             loop.close()
 
@@ -516,7 +509,10 @@ class TestGetProjectMapTelemetry:
         assert event["duration_ms"] > 0
         # Should have file/module metrics in output
         output_summary = event["output_summary"]
-        assert any(key in output_summary for key in ["file_count", "module_count", "total_files"])
+        assert any(
+            key in output_summary
+            for key in ["file_count", "module_count", "total_files"]
+        )
 
 
 class TestTypeEvaporationScanTelemetry:
@@ -537,9 +533,7 @@ class TestTypeEvaporationScanTelemetry:
         try:
             # type_evaporation_scan may require both frontend and backend code
             # It may also not emit telemetry if it fails early
-            result = loop.run_until_complete(
-                type_evaporation_scan(frontend_code=code)
-            )
+            result = loop.run_until_complete(type_evaporation_scan(frontend_code=code))
             # Just verify the call completes without error
             assert result is not None
         finally:

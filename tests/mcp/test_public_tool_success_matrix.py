@@ -11,7 +11,6 @@ from pathlib import Path
 
 import pytest
 
-
 pytestmark = pytest.mark.asyncio
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -148,7 +147,7 @@ async def _run_unified_sink_detect(
         code=(
             "import sqlite3\n"
             "user_input = input()\n"
-            "cursor.execute(\"SELECT * FROM users WHERE id=\" + user_input)\n"
+            'cursor.execute("SELECT * FROM users WHERE id=" + user_input)\n'
         ),
         language="python",
         confidence_threshold=0.8,
@@ -186,7 +185,9 @@ async def _run_type_evaporation_scan(
     assert hasattr(result, "implicit_any_count")
 
 
-async def _run_scan_dependencies(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def _run_scan_dependencies(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from code_scalpel.mcp.server import scan_dependencies
 
     (tmp_path / "requirements.txt").write_text(
@@ -216,7 +217,9 @@ async def _run_security_scan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
     assert result.vulnerability_count >= 1
 
 
-async def _run_symbolic_execute(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def _run_symbolic_execute(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from code_scalpel.mcp.server import symbolic_execute
 
     result = await symbolic_execute(
@@ -271,7 +274,9 @@ async def _run_crawl_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
     assert summary >= 1
 
 
-async def _run_get_file_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def _run_get_file_context(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from code_scalpel.mcp.server import get_file_context
 
     source_file = tmp_path / "context_target.py"
@@ -313,8 +318,7 @@ async def _run_get_call_graph(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     from code_scalpel.mcp.server import get_call_graph
 
     (tmp_path / "graph_sample.py").write_text(
-        "def helper():\n    return 1\n\n"
-        "def main():\n    return helper()\n",
+        "def helper():\n    return 1\n\n" "def main():\n    return helper()\n",
         encoding="utf-8",
     )
 
@@ -330,8 +334,7 @@ async def _run_get_graph_neighborhood(
     from code_scalpel.mcp.server import get_call_graph, get_graph_neighborhood
 
     (tmp_path / "neighborhood_sample.py").write_text(
-        "def helper():\n    return 1\n\n"
-        "def main():\n    return helper()\n",
+        "def helper():\n    return 1\n\n" "def main():\n    return helper()\n",
         encoding="utf-8",
     )
 
@@ -503,7 +506,9 @@ class TestPublicToolSuccessMatrix:
         assert sorted(FUNCTIONAL_MCP_TOOLS) == sorted(SUCCESS_CASES)
         assert callable(server.get_capabilities)
         assert "get_capabilities" not in FUNCTIONAL_MCP_TOOLS
-        assert all(callable(getattr(server, tool_name)) for tool_name in FUNCTIONAL_MCP_TOOLS)
+        assert all(
+            callable(getattr(server, tool_name)) for tool_name in FUNCTIONAL_MCP_TOOLS
+        )
 
     @pytest.mark.parametrize("tool_name", FUNCTIONAL_MCP_TOOLS)
     async def test_public_tool_success_case(

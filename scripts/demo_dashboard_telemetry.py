@@ -10,7 +10,6 @@ Usage:
 
 import asyncio
 import sys
-import time
 from pathlib import Path
 
 # Add src to path
@@ -75,8 +74,10 @@ async def emit_demo_events():
 
     print("Emitting sample telemetry events...\n")
     for i, event_data in enumerate(events, 1):
-        print(f"  {i}. {event_data['tool_name']:20} ({event_data['status']:7}) "
-              f"{event_data['duration']:7.1f}ms")
+        print(
+            f"  {i}. {event_data['tool_name']:20} ({event_data['status']:7}) "
+            f"{event_data['duration']:7.1f}ms"
+        )
 
         # Emit the event
         event = telemetry.emit_tool_event(
@@ -120,6 +121,7 @@ async def emit_demo_events():
     except KeyboardInterrupt:
         print("\n✓ Demo stopped")
         from code_scalpel.dashboard_service import stop_dashboard
+
         stop_dashboard()
 
 

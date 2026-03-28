@@ -10,7 +10,6 @@ import ast
 import re
 from pathlib import Path
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 TOOLS_DIR = PROJECT_ROOT / "src" / "code_scalpel" / "mcp" / "tools"
 TRACKER_PATH = PROJECT_ROOT / "docs" / "oracle" / "ORACLE_MCP_CLI_TRACKING.md"
@@ -66,7 +65,9 @@ def _parse_appendix_sections(markdown: str) -> dict[str, str]:
         r"^### `(?P<tool>[^`]+)`\n(?P<body>.*?)(?=^### `|\Z)",
         re.MULTILINE | re.DOTALL,
     )
-    return {match.group("tool"): match.group("body") for match in pattern.finditer(appendix)}
+    return {
+        match.group("tool"): match.group("body") for match in pattern.finditer(appendix)
+    }
 
 
 class TestOracleTrackingInventory:
@@ -81,7 +82,9 @@ class TestOracleTrackingInventory:
 
         assert documented_tools == public_tools
 
-    def test_each_appendix_section_declares_scenario_inventory_and_checklists(self) -> None:
+    def test_each_appendix_section_declares_scenario_inventory_and_checklists(
+        self,
+    ) -> None:
         tracker = TRACKER_PATH.read_text(encoding="utf-8")
         sections = _parse_appendix_sections(tracker)
 

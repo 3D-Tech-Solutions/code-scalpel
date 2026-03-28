@@ -93,9 +93,9 @@ def create_item(**kwargs):
     return kwargs
 """
     findings = PythonBackendAnalyzer().analyze(code)
-    assert any(f.pattern == "KWARGS_WILDCARD" for f in findings), (
-        f"Expected KWARGS_WILDCARD in findings, got: {[f.pattern for f in findings]}"
-    )
+    assert any(
+        f.pattern == "KWARGS_WILDCARD" for f in findings
+    ), f"Expected KWARGS_WILDCARD in findings, got: {[f.pattern for f in findings]}"
 
 
 def test_python_backend_analyzer_detects_any_annotation():
@@ -116,9 +116,9 @@ def receive(payload: Any):
     return payload
 """
     findings = PythonBackendAnalyzer().analyze(code)
-    assert any(f.pattern == "ANY_TYPE" for f in findings), (
-        f"Expected ANY_TYPE in findings, got: {[f.pattern for f in findings]}"
-    )
+    assert any(
+        f.pattern == "ANY_TYPE" for f in findings
+    ), f"Expected ANY_TYPE in findings, got: {[f.pattern for f in findings]}"
 
 
 def test_python_backend_analyzer_detects_dict_access():
@@ -140,9 +140,9 @@ def login():
 """
     findings = PythonBackendAnalyzer().analyze(code)
     dict_access = [f for f in findings if f.pattern == "DICT_ACCESS_WITHOUT_VALIDATION"]
-    assert len(dict_access) >= 2, (
-        f"Expected 2+ DICT_ACCESS_WITHOUT_VALIDATION findings, got: {dict_access}"
-    )
+    assert (
+        len(dict_access) >= 2
+    ), f"Expected 2+ DICT_ACCESS_WITHOUT_VALIDATION findings, got: {dict_access}"
 
 
 def test_python_backend_analyzer_no_findings_for_typed_handler():
@@ -173,9 +173,9 @@ def login(payload: LoginPayload) -> dict:
         for f in findings
         if f.pattern in ("UNTYPED_PARAMETER", "DICT_ACCESS_WITHOUT_VALIDATION")
     ]
-    assert not evaporation, (
-        f"Expected no evaporation findings for fully-typed handler, got: {evaporation}"
-    )
+    assert (
+        not evaporation
+    ), f"Expected no evaporation findings for fully-typed handler, got: {evaporation}"
 
 
 def test_cross_file_js_backend_integration():
@@ -203,6 +203,6 @@ def create_item(name, qty):
         getattr(v, "pattern", getattr(v, "vulnerability_type", ""))
         for v in result.backend_vulnerabilities
     ]
-    assert any("UNTYPED_PARAMETER" in str(p) for p in backend_patterns), (
-        f"Expected UNTYPED_PARAMETER for untyped JS→Python handler, got: {backend_patterns}"
-    )
+    assert any(
+        "UNTYPED_PARAMETER" in str(p) for p in backend_patterns
+    ), f"Expected UNTYPED_PARAMETER for untyped JS→Python handler, got: {backend_patterns}"

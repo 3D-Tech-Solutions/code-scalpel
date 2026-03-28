@@ -608,14 +608,23 @@ class PythonTypeEvaporationFinding:
 
 # Flask / FastAPI / Django route decorator patterns (conservative whitelist)
 _ROUTE_DECORATOR_METHODS = frozenset(
-    {"route", "get", "post", "put", "delete", "patch", "head", "options",
-     "api_route", "api_view", "action"}
+    {
+        "route",
+        "get",
+        "post",
+        "put",
+        "delete",
+        "patch",
+        "head",
+        "options",
+        "api_route",
+        "api_view",
+        "action",
+    }
 )
 
 # Known framework prefixes for route decorators
-_ROUTE_DECORATOR_PREFIXES = frozenset(
-    {"app", "router", "bp", "blueprint", "api"}
-)
+_ROUTE_DECORATOR_PREFIXES = frozenset({"app", "router", "bp", "blueprint", "api"})
 
 
 def _is_route_decorator(dec: ast.expr) -> bool:
@@ -636,7 +645,10 @@ def _is_route_decorator(dec: ast.expr) -> bool:
         if method in _ROUTE_DECORATOR_METHODS:
             return True
         # Also accept known prefix + any attribute (e.g. @app.something_custom)
-        if isinstance(func.value, ast.Name) and func.value.id in _ROUTE_DECORATOR_PREFIXES:
+        if (
+            isinstance(func.value, ast.Name)
+            and func.value.id in _ROUTE_DECORATOR_PREFIXES
+        ):
             return True
     elif isinstance(func, ast.Name) and func.id in _ROUTE_DECORATOR_METHODS:
         # @api_view / @action / @route used bare
@@ -694,9 +706,7 @@ class PythonBackendAnalyzer:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _is_route_handler(
-        self, func: ast.FunctionDef | ast.AsyncFunctionDef
-    ) -> bool:
+    def _is_route_handler(self, func: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
         """Return True if the function has at least one route decorator."""
         return any(_is_route_decorator(dec) for dec in func.decorator_list)
 
@@ -902,10 +912,7 @@ class PythonBackendAnalyzer:
         # Detect dict-style subscript access on those variables
         for node in ast.walk(func):
             if isinstance(node, ast.Subscript):
-                if (
-                    isinstance(node.value, ast.Name)
-                    and node.value.id in json_var_names
-                ):
+                if isinstance(node.value, ast.Name) and node.value.id in json_var_names:
                     lineno = getattr(node, "lineno", 0)
                     col = getattr(node, "col_offset", 0)
                     snippet = self._snippet(source, lineno)
@@ -982,9 +989,7 @@ class PythonBackendAnalyzer:
             r"@\w+\.(route|get|post|put|delete|patch|head|options|api_route)"
         )
         func_def_pattern = re.compile(r"^(?:async\s+)?def\s+(\w+)\s*\(([^)]*)\)\s*:")
-        dict_access_pattern = re.compile(
-            r"\b(\w+)\s*\[\s*['\"](\w+)['\"]\s*\]"
-        )
+        dict_access_pattern = re.compile(r"\b(\w+)\s*\[\s*['\"](\w+)['\"]\s*\]")
 
         for i, line in enumerate(lines, 1):
             if route_dec_pattern.search(line):

@@ -194,7 +194,9 @@ async def _get_call_graph_tool(
         try:
             node_count = len(result.nodes) if result.nodes else 0
             edge_count = len(result.edges) if result.edges else 0
-            path_count = len(result.paths) if hasattr(result, 'paths') and result.paths else 0
+            path_count = (
+                len(result.paths) if hasattr(result, "paths") and result.paths else 0
+            )
 
             telemetry.emit_tool_event(
                 tool_name="get_call_graph",
@@ -212,12 +214,15 @@ async def _get_call_graph_tool(
                     "node_count": node_count,
                     "edge_count": edge_count,
                     "path_count": path_count,
-                    "truncated": getattr(result, 'truncated', False),
+                    "truncated": getattr(result, "truncated", False),
                 },
             )
         except Exception as e:
             import logging
-            logging.getLogger(__name__).warning(f"Telemetry emit failed for get_call_graph: {e}")
+
+            logging.getLogger(__name__).warning(
+                f"Telemetry emit failed for get_call_graph: {e}"
+            )
 
         return result
     except Exception as exc:
@@ -237,7 +242,10 @@ async def _get_call_graph_tool(
             )
         except Exception as e:
             import logging
-            logging.getLogger(__name__).warning(f"Telemetry emit failed for get_call_graph: {e}")
+
+            logging.getLogger(__name__).warning(
+                f"Telemetry emit failed for get_call_graph: {e}"
+            )
         raise
 
 
@@ -351,8 +359,14 @@ async def _get_graph_neighborhood_tool(
     kind = match.group("kind")
 
     if (
-        (kind == "function" and language not in {"python", "javascript", "typescript", "go"})
-        or (kind == "method" and language not in {"javascript", "typescript", "java", "go"})
+        (
+            kind == "function"
+            and language not in {"python", "javascript", "typescript", "go"}
+        )
+        or (
+            kind == "method"
+            and language not in {"javascript", "typescript", "java", "go"}
+        )
         or kind == "class"
     ):
         return make_envelope(
@@ -501,12 +515,15 @@ async def _get_graph_neighborhood_tool(
                 output_summary={
                     "node_count": node_count,
                     "edge_count": edge_count,
-                    "depth_reached": getattr(result, 'depth_reached', 0),
+                    "depth_reached": getattr(result, "depth_reached", 0),
                 },
             )
         except Exception as e:
             import logging
-            logging.getLogger(__name__).warning(f"Telemetry emit failed for get_graph_neighborhood: {e}")
+
+            logging.getLogger(__name__).warning(
+                f"Telemetry emit failed for get_graph_neighborhood: {e}"
+            )
 
         return result
     except Exception as exc:
@@ -526,7 +543,10 @@ async def _get_graph_neighborhood_tool(
             )
         except Exception as e:
             import logging
-            logging.getLogger(__name__).warning(f"Telemetry emit failed for get_graph_neighborhood: {e}")
+
+            logging.getLogger(__name__).warning(
+                f"Telemetry emit failed for get_graph_neighborhood: {e}"
+            )
         raise
 
 
@@ -701,7 +721,9 @@ async def _get_project_map_tool(
                     else:
                         payload = {
                             "service_boundaries_success": False,
-                            "service_boundaries_error": getattr(boundaries, "error", None)
+                            "service_boundaries_error": getattr(
+                                boundaries, "error", None
+                            )
                             or "Service boundary detection failed",
                         }
 
@@ -724,7 +746,11 @@ async def _get_project_map_tool(
         # Emit success telemetry
         try:
             duration_ms = (time.time() - start_time) * 1000
-            module_count = len(result.modules) if hasattr(result, 'modules') and result.modules else 0
+            module_count = (
+                len(result.modules)
+                if hasattr(result, "modules") and result.modules
+                else 0
+            )
 
             telemetry.emit_tool_event(
                 tool_name="get_project_map",
@@ -744,7 +770,10 @@ async def _get_project_map_tool(
             )
         except Exception as e:
             import logging
-            logging.getLogger(__name__).warning(f"Telemetry emit failed for get_project_map: {e}")
+
+            logging.getLogger(__name__).warning(
+                f"Telemetry emit failed for get_project_map: {e}"
+            )
 
         return result
     except Exception as exc:
@@ -765,7 +794,10 @@ async def _get_project_map_tool(
             )
         except Exception as e:
             import logging
-            logging.getLogger(__name__).warning(f"Telemetry emit failed for get_project_map: {e}")
+
+            logging.getLogger(__name__).warning(
+                f"Telemetry emit failed for get_project_map: {e}"
+            )
         raise
 
 
@@ -960,8 +992,14 @@ async def _get_cross_file_dependencies_tool(
         # Emit success telemetry
         try:
             duration_ms = (time.time() - start_time) * 1000
-            result_data = result.data if isinstance(result, ToolResponseEnvelope) else result
-            dependency_count = len(result_data.get("extracted_symbols", [])) if isinstance(result_data, dict) else 0
+            result_data = (
+                result.data if isinstance(result, ToolResponseEnvelope) else result
+            )
+            dependency_count = (
+                len(result_data.get("extracted_symbols", []))
+                if isinstance(result_data, dict)
+                else 0
+            )
 
             telemetry.emit_tool_event(
                 tool_name="get_cross_file_dependencies",
@@ -976,12 +1014,19 @@ async def _get_cross_file_dependencies_tool(
                 },
                 output_summary={
                     "dependency_count": dependency_count,
-                    "max_depth_reached": getattr(result_data, 'max_depth_reached', effective_max_depth) if not isinstance(result_data, dict) else result_data.get('max_depth_reached', effective_max_depth),
+                    "max_depth_reached": (
+                        getattr(result_data, "max_depth_reached", effective_max_depth)
+                        if not isinstance(result_data, dict)
+                        else result_data.get("max_depth_reached", effective_max_depth)
+                    ),
                 },
             )
         except Exception as e:
             import logging
-            logging.getLogger(__name__).warning(f"Telemetry emit failed for get_cross_file_dependencies: {e}")
+
+            logging.getLogger(__name__).warning(
+                f"Telemetry emit failed for get_cross_file_dependencies: {e}"
+            )
 
         return result
     except Exception as exc:
@@ -1002,7 +1047,10 @@ async def _get_cross_file_dependencies_tool(
             )
         except Exception as e:
             import logging
-            logging.getLogger(__name__).warning(f"Telemetry emit failed for get_cross_file_dependencies: {e}")
+
+            logging.getLogger(__name__).warning(
+                f"Telemetry emit failed for get_cross_file_dependencies: {e}"
+            )
         raise
 
 
@@ -1187,8 +1235,14 @@ async def _cross_file_security_scan_tool(
         # Emit success telemetry
         try:
             duration_ms = (time.time() - start_time) * 1000
-            vulnerability_count = getattr(result, 'vulnerability_count', 0)
-            high_confidence_count = len([v for v in (getattr(result, 'vulnerabilities', []) or []) if getattr(v, 'confidence', 0) >= 0.8])
+            vulnerability_count = getattr(result, "vulnerability_count", 0)
+            high_confidence_count = len(
+                [
+                    v
+                    for v in (getattr(result, "vulnerabilities", []) or [])
+                    if getattr(v, "confidence", 0) >= 0.8
+                ]
+            )
 
             telemetry.emit_tool_event(
                 tool_name="cross_file_security_scan",
@@ -1203,12 +1257,15 @@ async def _cross_file_security_scan_tool(
                 output_summary={
                     "vulnerability_count": vulnerability_count,
                     "high_confidence_count": high_confidence_count,
-                    "files_analyzed": getattr(result, 'files_analyzed', 0),
+                    "files_analyzed": getattr(result, "files_analyzed", 0),
                 },
             )
         except Exception as e:
             import logging
-            logging.getLogger(__name__).warning(f"Telemetry emit failed for cross_file_security_scan: {e}")
+
+            logging.getLogger(__name__).warning(
+                f"Telemetry emit failed for cross_file_security_scan: {e}"
+            )
 
         return result
     except Exception as exc:
@@ -1229,7 +1286,10 @@ async def _cross_file_security_scan_tool(
             )
         except Exception as e:
             import logging
-            logging.getLogger(__name__).warning(f"Telemetry emit failed for cross_file_security_scan: {e}")
+
+            logging.getLogger(__name__).warning(
+                f"Telemetry emit failed for cross_file_security_scan: {e}"
+            )
         raise
 
 

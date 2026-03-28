@@ -11,7 +11,6 @@ from pathlib import Path
 
 import pytest
 
-
 pytestmark = pytest.mark.asyncio
 
 
@@ -45,7 +44,9 @@ async def test_crawl_project_typescript_is_contract_only(
     assert result.language_breakdown["typescript"] == 2
     assert all(file.functions == [] for file in result.files)
     assert all(file.classes == [] for file in result.files)
-    assert any("./utils" in file.imports for file in result.files if file.path == "src/app.ts")
+    assert any(
+        "./utils" in file.imports for file in result.files if file.path == "src/app.ts"
+    )
 
 
 async def test_simulate_refactor_typescript_safe_change_is_bounded_useful(

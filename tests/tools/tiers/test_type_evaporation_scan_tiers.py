@@ -164,4 +164,7 @@ async def test_type_evaporation_scan_returns_correction_needed_for_unresolvable_
 
     assert result.error is not None
     assert result.error.error_code == "correction_needed"
-    assert "/mnt/k/backup/Develop/code-scalpel-ninja-warrior/frontend.ts" in result.error.error
+    assert (
+        "/mnt/k/backup/Develop/code-scalpel-ninja-warrior/frontend.ts"
+        in result.error.error
+    )

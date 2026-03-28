@@ -10,7 +10,6 @@ from pathlib import Path
 
 import pytest
 
-
 pytestmark = pytest.mark.asyncio
 
 
@@ -46,7 +45,9 @@ async def test_cross_file_security_scan_python_is_core_useful(tmp_path: Path) ->
     assert result.files_analyzed >= 2
     assert result.has_vulnerabilities is True
     assert result.vulnerability_count >= 1
-    assert any(vulnerability.cwe == "CWE-89" for vulnerability in result.vulnerabilities)
+    assert any(
+        vulnerability.cwe == "CWE-89" for vulnerability in result.vulnerabilities
+    )
     assert any(flow.sink_file == "db.py" for flow in result.taint_flows)
     assert isinstance(result.mermaid, str)
 
@@ -69,7 +70,7 @@ async def test_cross_file_security_scan_java_is_bounded_useful(tmp_path: Path) -
         "class UserController {\n"
         "    String run(Request request) {\n"
         "        UserService service = new UserService();\n"
-        "        String user = request.getParameter(\"id\");\n"
+        '        String user = request.getParameter("id");\n'
         "        return service.run(user);\n"
         "    }\n"
         "}\n",
@@ -119,7 +120,9 @@ async def test_cross_file_security_scan_java_is_bounded_useful(tmp_path: Path) -
     assert result.files_analyzed == 4
     assert result.has_vulnerabilities is True
     assert result.vulnerability_count >= 1
-    assert any(vulnerability.cwe == "CWE-89" for vulnerability in result.vulnerabilities)
+    assert any(
+        vulnerability.cwe == "CWE-89" for vulnerability in result.vulnerabilities
+    )
     assert any(
         "Java cross-file security scan currently supports a bounded IR-based subset"
         in warning
@@ -133,9 +136,7 @@ async def test_cross_file_security_scan_javascript_is_bounded_useful(
     from code_scalpel.mcp.server import cross_file_security_scan
 
     (tmp_path / "source.js").write_text(
-        "export function getUserInput() {\n"
-        "  return process.env.USER_INPUT;\n"
-        "}\n",
+        "export function getUserInput() {\n" "  return process.env.USER_INPUT;\n" "}\n",
         encoding="utf-8",
     )
     (tmp_path / "executor.js").write_text(
@@ -153,7 +154,9 @@ async def test_cross_file_security_scan_javascript_is_bounded_useful(
     assert result.files_analyzed == 2
     assert result.has_vulnerabilities is True
     assert result.vulnerability_count >= 1
-    assert any(vulnerability.cwe == "CWE-94" for vulnerability in result.vulnerabilities)
+    assert any(
+        vulnerability.cwe == "CWE-94" for vulnerability in result.vulnerabilities
+    )
     assert any(flow.sink_file == "executor.js" for flow in result.taint_flows)
     assert not any(
         warning.startswith("Java cross-file security scan")
@@ -188,7 +191,9 @@ async def test_cross_file_security_scan_typescript_is_bounded_useful(
     assert result.files_analyzed == 2
     assert result.has_vulnerabilities is True
     assert result.vulnerability_count >= 1
-    assert any(vulnerability.cwe == "CWE-94" for vulnerability in result.vulnerabilities)
+    assert any(
+        vulnerability.cwe == "CWE-94" for vulnerability in result.vulnerabilities
+    )
     assert any(flow.sink_file == "executor.ts" for flow in result.taint_flows)
     assert not any(
         warning.startswith("Java cross-file security scan")
@@ -223,7 +228,9 @@ async def test_cross_file_security_scan_typescript_tracks_named_import_aliases(
     assert result.files_analyzed == 2
     assert result.has_vulnerabilities is True
     assert result.vulnerability_count >= 1
-    assert any(vulnerability.cwe == "CWE-94" for vulnerability in result.vulnerabilities)
+    assert any(
+        vulnerability.cwe == "CWE-94" for vulnerability in result.vulnerabilities
+    )
     assert any(flow.sink_file == "executor.ts" for flow in result.taint_flows)
 
 
@@ -266,7 +273,9 @@ async def test_cross_file_security_scan_typescript_tracks_tsconfig_alias_imports
     assert result.files_analyzed == 2
     assert result.has_vulnerabilities is True
     assert result.vulnerability_count >= 1
-    assert any(vulnerability.cwe == "CWE-94" for vulnerability in result.vulnerabilities)
+    assert any(
+        vulnerability.cwe == "CWE-94" for vulnerability in result.vulnerabilities
+    )
     assert any(flow.sink_file == "executor.ts" for flow in result.taint_flows)
 
 
@@ -298,7 +307,9 @@ async def test_cross_file_security_scan_typescript_tracks_directory_index_import
     assert result.files_analyzed == 2
     assert result.has_vulnerabilities is True
     assert result.vulnerability_count >= 1
-    assert any(vulnerability.cwe == "CWE-94" for vulnerability in result.vulnerabilities)
+    assert any(
+        vulnerability.cwe == "CWE-94" for vulnerability in result.vulnerabilities
+    )
     assert any(flow.sink_file == "executor.ts" for flow in result.taint_flows)
 
 
@@ -330,7 +341,9 @@ async def test_cross_file_security_scan_typescript_tracks_req_query_sources(
     assert result.files_analyzed == 2
     assert result.has_vulnerabilities is True
     assert result.vulnerability_count >= 1
-    assert any(vulnerability.cwe == "CWE-94" for vulnerability in result.vulnerabilities)
+    assert any(
+        vulnerability.cwe == "CWE-94" for vulnerability in result.vulnerabilities
+    )
     assert any(flow.sink_file == "executor.ts" for flow in result.taint_flows)
 
 
@@ -362,7 +375,9 @@ async def test_cross_file_security_scan_typescript_tracks_req_body_sources(
     assert result.files_analyzed == 2
     assert result.has_vulnerabilities is True
     assert result.vulnerability_count >= 1
-    assert any(vulnerability.cwe == "CWE-94" for vulnerability in result.vulnerabilities)
+    assert any(
+        vulnerability.cwe == "CWE-94" for vulnerability in result.vulnerabilities
+    )
     assert any(flow.sink_file == "executor.ts" for flow in result.taint_flows)
 
 
@@ -394,7 +409,9 @@ async def test_cross_file_security_scan_typescript_tracks_req_params_sources(
     assert result.files_analyzed == 2
     assert result.has_vulnerabilities is True
     assert result.vulnerability_count >= 1
-    assert any(vulnerability.cwe == "CWE-94" for vulnerability in result.vulnerabilities)
+    assert any(
+        vulnerability.cwe == "CWE-94" for vulnerability in result.vulnerabilities
+    )
     assert any(flow.sink_file == "executor.ts" for flow in result.taint_flows)
 
 
@@ -426,7 +443,9 @@ async def test_cross_file_security_scan_typescript_tracks_req_headers_sources(
     assert result.files_analyzed == 2
     assert result.has_vulnerabilities is True
     assert result.vulnerability_count >= 1
-    assert any(vulnerability.cwe == "CWE-94" for vulnerability in result.vulnerabilities)
+    assert any(
+        vulnerability.cwe == "CWE-94" for vulnerability in result.vulnerabilities
+    )
     assert any(flow.sink_file == "executor.ts" for flow in result.taint_flows)
 
 
@@ -458,7 +477,9 @@ async def test_cross_file_security_scan_typescript_tracks_req_cookies_sources(
     assert result.files_analyzed == 2
     assert result.has_vulnerabilities is True
     assert result.vulnerability_count >= 1
-    assert any(vulnerability.cwe == "CWE-94" for vulnerability in result.vulnerabilities)
+    assert any(
+        vulnerability.cwe == "CWE-94" for vulnerability in result.vulnerabilities
+    )
     assert any(flow.sink_file == "executor.ts" for flow in result.taint_flows)
 
 
@@ -490,7 +511,9 @@ async def test_cross_file_security_scan_typescript_tracks_req_get_sources(
     assert result.files_analyzed == 2
     assert result.has_vulnerabilities is True
     assert result.vulnerability_count >= 1
-    assert any(vulnerability.cwe == "CWE-94" for vulnerability in result.vulnerabilities)
+    assert any(
+        vulnerability.cwe == "CWE-94" for vulnerability in result.vulnerabilities
+    )
     assert any(flow.sink_file == "executor.ts" for flow in result.taint_flows)
 
 
@@ -522,7 +545,9 @@ async def test_cross_file_security_scan_typescript_tracks_req_header_sources(
     assert result.files_analyzed == 2
     assert result.has_vulnerabilities is True
     assert result.vulnerability_count >= 1
-    assert any(vulnerability.cwe == "CWE-94" for vulnerability in result.vulnerabilities)
+    assert any(
+        vulnerability.cwe == "CWE-94" for vulnerability in result.vulnerabilities
+    )
     assert any(flow.sink_file == "executor.ts" for flow in result.taint_flows)
 
 
@@ -556,7 +581,9 @@ async def test_cross_file_security_scan_typescript_tracks_req_headers_get_source
     assert result.files_analyzed == 2
     assert result.has_vulnerabilities is True
     assert result.vulnerability_count >= 1
-    assert any(vulnerability.cwe == "CWE-94" for vulnerability in result.vulnerabilities)
+    assert any(
+        vulnerability.cwe == "CWE-94" for vulnerability in result.vulnerabilities
+    )
     assert any(flow.sink_file == "executor.ts" for flow in result.taint_flows)
 
 
@@ -590,7 +617,9 @@ async def test_cross_file_security_scan_typescript_tracks_req_cookies_get_source
     assert result.files_analyzed == 2
     assert result.has_vulnerabilities is True
     assert result.vulnerability_count >= 1
-    assert any(vulnerability.cwe == "CWE-94" for vulnerability in result.vulnerabilities)
+    assert any(
+        vulnerability.cwe == "CWE-94" for vulnerability in result.vulnerabilities
+    )
     assert any(flow.sink_file == "executor.ts" for flow in result.taint_flows)
 
 
@@ -622,7 +651,9 @@ async def test_cross_file_security_scan_typescript_tracks_request_get_sources(
     assert result.files_analyzed == 2
     assert result.has_vulnerabilities is True
     assert result.vulnerability_count >= 1
-    assert any(vulnerability.cwe == "CWE-94" for vulnerability in result.vulnerabilities)
+    assert any(
+        vulnerability.cwe == "CWE-94" for vulnerability in result.vulnerabilities
+    )
     assert any(flow.sink_file == "executor.ts" for flow in result.taint_flows)
 
 
@@ -654,7 +685,9 @@ async def test_cross_file_security_scan_typescript_tracks_request_header_sources
     assert result.files_analyzed == 2
     assert result.has_vulnerabilities is True
     assert result.vulnerability_count >= 1
-    assert any(vulnerability.cwe == "CWE-94" for vulnerability in result.vulnerabilities)
+    assert any(
+        vulnerability.cwe == "CWE-94" for vulnerability in result.vulnerabilities
+    )
     assert any(flow.sink_file == "executor.ts" for flow in result.taint_flows)
 
 
@@ -688,7 +721,9 @@ async def test_cross_file_security_scan_typescript_tracks_request_headers_get_so
     assert result.files_analyzed == 2
     assert result.has_vulnerabilities is True
     assert result.vulnerability_count >= 1
-    assert any(vulnerability.cwe == "CWE-94" for vulnerability in result.vulnerabilities)
+    assert any(
+        vulnerability.cwe == "CWE-94" for vulnerability in result.vulnerabilities
+    )
     assert any(flow.sink_file == "executor.ts" for flow in result.taint_flows)
 
 
@@ -722,7 +757,9 @@ async def test_cross_file_security_scan_typescript_tracks_request_cookies_get_so
     assert result.files_analyzed == 2
     assert result.has_vulnerabilities is True
     assert result.vulnerability_count >= 1
-    assert any(vulnerability.cwe == "CWE-94" for vulnerability in result.vulnerabilities)
+    assert any(
+        vulnerability.cwe == "CWE-94" for vulnerability in result.vulnerabilities
+    )
     assert any(flow.sink_file == "executor.ts" for flow in result.taint_flows)
 
 
@@ -754,7 +791,9 @@ async def test_cross_file_security_scan_typescript_tracks_request_query_sources(
     assert result.files_analyzed == 2
     assert result.has_vulnerabilities is True
     assert result.vulnerability_count >= 1
-    assert any(vulnerability.cwe == "CWE-94" for vulnerability in result.vulnerabilities)
+    assert any(
+        vulnerability.cwe == "CWE-94" for vulnerability in result.vulnerabilities
+    )
     assert any(flow.sink_file == "executor.ts" for flow in result.taint_flows)
 
 
@@ -786,7 +825,9 @@ async def test_cross_file_security_scan_typescript_tracks_request_body_sources(
     assert result.files_analyzed == 2
     assert result.has_vulnerabilities is True
     assert result.vulnerability_count >= 1
-    assert any(vulnerability.cwe == "CWE-94" for vulnerability in result.vulnerabilities)
+    assert any(
+        vulnerability.cwe == "CWE-94" for vulnerability in result.vulnerabilities
+    )
     assert any(flow.sink_file == "executor.ts" for flow in result.taint_flows)
 
 
@@ -818,7 +859,9 @@ async def test_cross_file_security_scan_typescript_tracks_request_params_sources
     assert result.files_analyzed == 2
     assert result.has_vulnerabilities is True
     assert result.vulnerability_count >= 1
-    assert any(vulnerability.cwe == "CWE-94" for vulnerability in result.vulnerabilities)
+    assert any(
+        vulnerability.cwe == "CWE-94" for vulnerability in result.vulnerabilities
+    )
     assert any(flow.sink_file == "executor.ts" for flow in result.taint_flows)
 
 
@@ -850,7 +893,9 @@ async def test_cross_file_security_scan_typescript_tracks_request_headers_source
     assert result.files_analyzed == 2
     assert result.has_vulnerabilities is True
     assert result.vulnerability_count >= 1
-    assert any(vulnerability.cwe == "CWE-94" for vulnerability in result.vulnerabilities)
+    assert any(
+        vulnerability.cwe == "CWE-94" for vulnerability in result.vulnerabilities
+    )
     assert any(flow.sink_file == "executor.ts" for flow in result.taint_flows)
 
 
@@ -882,5 +927,7 @@ async def test_cross_file_security_scan_typescript_tracks_request_cookies_source
     assert result.files_analyzed == 2
     assert result.has_vulnerabilities is True
     assert result.vulnerability_count >= 1
-    assert any(vulnerability.cwe == "CWE-94" for vulnerability in result.vulnerabilities)
+    assert any(
+        vulnerability.cwe == "CWE-94" for vulnerability in result.vulnerabilities
+    )
     assert any(flow.sink_file == "executor.ts" for flow in result.taint_flows)

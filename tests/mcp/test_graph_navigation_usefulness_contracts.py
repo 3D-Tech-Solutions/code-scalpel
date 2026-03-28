@@ -12,7 +12,6 @@ from unittest.mock import patch
 
 import pytest
 
-
 pytestmark = pytest.mark.asyncio
 
 
@@ -157,8 +156,7 @@ async def test_get_symbol_references_java_pro_tracks_static_wildcard_imports(
     assert result.category_counts.get("import", 0) >= 1
     assert result.category_counts.get("call", 0) >= 1
     assert any(
-        ref.file == "demo/App.java"
-        and "import static demo.Helper.*;" in ref.context
+        ref.file == "demo/App.java" and "import static demo.Helper.*;" in ref.context
         for ref in result.references
     )
 
@@ -167,8 +165,7 @@ async def test_get_call_graph_python_is_core_useful(tmp_path: Path) -> None:
     from code_scalpel.mcp.server import get_call_graph
 
     (tmp_path / "graph_sample.py").write_text(
-        "def helper():\n    return 1\n\n"
-        "def main():\n    return helper()\n",
+        "def helper():\n    return 1\n\n" "def main():\n    return helper()\n",
         encoding="utf-8",
     )
 
@@ -258,7 +255,10 @@ async def test_get_call_graph_typescript_tracks_tsconfig_alias_imports(
 
     assert result.error is None
     assert result.success is True
-    assert any(node.file == "src/lib/helper.ts" and node.name == "helper" for node in result.nodes)
+    assert any(
+        node.file == "src/lib/helper.ts" and node.name == "helper"
+        for node in result.nodes
+    )
     assert any(
         edge.caller == "index.ts:main" and edge.callee == "src/lib/helper.ts:helper"
         for edge in result.edges
@@ -301,8 +301,7 @@ async def test_get_cross_file_dependencies_python_is_core_useful(
         encoding="utf-8",
     )
     (tmp_path / "main.py").write_text(
-        "from helper import helper\n\n"
-        "def main():\n    return helper()\n",
+        "from helper import helper\n\n" "def main():\n    return helper()\n",
         encoding="utf-8",
     )
 
@@ -476,8 +475,7 @@ async def test_get_project_map_python_is_core_useful(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     (tmp_path / "main.py").write_text(
-        "from helper import helper\n\n"
-        "def main():\n    return helper()\n",
+        "from helper import helper\n\n" "def main():\n    return helper()\n",
         encoding="utf-8",
     )
 
@@ -560,9 +558,7 @@ async def test_get_project_map_typescript_is_bounded_useful(
     assert "run" in modules["src/main.ts"].functions
     assert "buildUser" in modules["src/api/index.ts"].functions
     assert "./api" in modules["src/main.ts"].imports
-    assert any(
-        "src/main.ts:run" in entry_point for entry_point in result.entry_points
-    )
+    assert any("src/main.ts:run" in entry_point for entry_point in result.entry_points)
 
 
 async def test_get_project_map_typescript_pro_resolves_tsconfig_alias_relationships(
@@ -624,7 +620,9 @@ async def test_get_project_map_go_is_bounded_useful(tmp_path: Path) -> None:
     assert "helper" in modules["main.go"].functions
     assert "main" in modules["main.go"].functions
     assert "fmt" in modules["main.go"].imports
-    assert any(entry_point.endswith("main.go:main") for entry_point in result.entry_points)
+    assert any(
+        entry_point.endswith("main.go:main") for entry_point in result.entry_points
+    )
 
 
 async def test_get_project_map_java_is_bounded_useful(
@@ -780,7 +778,9 @@ async def test_get_file_context_python_is_core_useful(tmp_path: Path) -> None:
 
     assert result.success is True
     assert result.language == "python"
-    assert any(getattr(item, "name", item) == "helper_function" for item in result.functions)
+    assert any(
+        getattr(item, "name", item) == "helper_function" for item in result.functions
+    )
     assert any(getattr(item, "name", item) == "MyClass" for item in result.classes)
     assert "os" in result.imports
     assert result.complexity_score >= 0
@@ -977,9 +977,7 @@ async def test_get_file_context_rust_is_bounded_useful(tmp_path: Path) -> None:
 
     source_file = tmp_path / "lib.rs"
     source_file.write_text(
-        "use std::fmt;\n\n"
-        "pub fn helper() {}\n"
-        "pub fn run() { helper(); }\n",
+        "use std::fmt;\n\n" "pub fn helper() {}\n" "pub fn run() { helper(); }\n",
         encoding="utf-8",
     )
 
@@ -998,11 +996,7 @@ async def test_get_file_context_ruby_is_bounded_useful(tmp_path: Path) -> None:
 
     source_file = tmp_path / "worker.rb"
     source_file.write_text(
-        'require "json"\n\n'
-        "class Worker\n"
-        "  def run\n"
-        "  end\n"
-        "end\n",
+        'require "json"\n\n' "class Worker\n" "  def run\n" "  end\n" "end\n",
         encoding="utf-8",
     )
 
@@ -1114,8 +1108,7 @@ async def test_get_graph_neighborhood_python_is_core_useful(
     from code_scalpel.mcp.server import get_graph_neighborhood
 
     (tmp_path / "main.py").write_text(
-        "def helper():\n    return 1\n\n"
-        "def main():\n    return helper()\n",
+        "def helper():\n    return 1\n\n" "def main():\n    return helper()\n",
         encoding="utf-8",
     )
 
@@ -1267,9 +1260,7 @@ async def test_get_graph_neighborhood_go_is_bounded_useful(tmp_path: Path) -> No
     cmd = tmp_path / "cmd"
     cmd.mkdir()
     (cmd / "main.go").write_text(
-        "package main\n\n"
-        "func helper() {}\n"
-        "func main() { helper() }\n",
+        "package main\n\n" "func helper() {}\n" "func main() { helper() }\n",
         encoding="utf-8",
     )
 

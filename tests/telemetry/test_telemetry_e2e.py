@@ -9,8 +9,6 @@ This test verifies that:
 
 import asyncio
 import json
-import time
-from unittest import mock
 
 import pytest
 import httpx
@@ -78,7 +76,6 @@ async def test_telemetry_stats():
 async def test_dashboard_starts():
     """Test that dashboard service can start and serve HTTP."""
     from code_scalpel.dashboard_service import start_dashboard
-    from code_scalpel import telemetry
 
     # Start dashboard
     dashboard_url = start_dashboard()
@@ -168,9 +165,7 @@ async def test_dashboard_websocket_broadcast():
 
             # Receive the message
             try:
-                message = await asyncio.wait_for(
-                    websocket.recv(), timeout=2.0
-                )
+                message = await asyncio.wait_for(websocket.recv(), timeout=2.0)
                 data = json.loads(message)
                 assert data["type"] == "tool_event"
                 assert data["data"]["tool_name"] == "ws_test"

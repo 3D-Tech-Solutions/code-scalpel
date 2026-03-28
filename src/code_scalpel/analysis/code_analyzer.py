@@ -334,7 +334,10 @@ class CodeAnalyzer:
         # [20260313_BUGFIX] Accept string hints as well as AnalysisLanguage enums.
         if isinstance(language, str):
             normalized_language = language.strip().lower()
-            if normalized_language and normalized_language != AnalysisLanguage.AUTO.value:
+            if (
+                normalized_language
+                and normalized_language != AnalysisLanguage.AUTO.value
+            ):
                 return normalized_language
         elif language != AnalysisLanguage.AUTO:
             return language.value

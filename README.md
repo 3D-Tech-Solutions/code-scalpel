@@ -1,6 +1,6 @@
 # Code Scalpel: Reduce AI Costs by 200x
 
-**Latest Release: v2.1.1 | March 9, 2026**
+**Latest Release: v2.2.0 | March 28, 2026**
 
 **Stop copy-pasting entire files into Claude.** Give your AI assistant surgical code analysis tools and reduce costs by 200x.
 
@@ -16,11 +16,15 @@
 
 ---
 
+## What's New in v2.2.0 — Telemetry Completeness & Crash Safety
+
+This release adds crash-safe JSONL streaming, failure-path telemetry for all 21 tools, encrypted error fields, and automatic log retention policies. All telemetry events are now captured with proper error handling and flushed incrementally per tool call for maximum durability.
+
 ## What's New in v2.1.1 — Metadata Sync
 
 This patch release refreshes public packaging metadata so PyPI and Marketplace copy match the current 22-core-tool product framing.
 
-## What's New in v2.1.0 — Expanded Language Matrix
+## Previous: v2.1.0 — Expanded Language Matrix
 
 > [20260310_DOCS] The source-of-truth tier files currently advertise 13 languages
 > on the tier-configured `analyze_code` and `unified_sink_detect` surfaces.
@@ -760,7 +764,7 @@ codescalpel capabilities
 
 ## Release Information
 **Launch Date**: January 2026
-**Version**: v2.1.1
+**Version**: v2.2.0
 **License**: MIT (Community)
 
 Code Scalpel is built for the new era of **Agentic Engineering**. It is not just a linter; it is the sensory and actuator system for the next generation of AI developers.

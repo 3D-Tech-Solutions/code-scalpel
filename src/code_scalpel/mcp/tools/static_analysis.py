@@ -28,7 +28,6 @@ from typing import Any, Dict, List, Optional
 from code_scalpel import __version__ as _pkg_version
 from code_scalpel import telemetry
 from code_scalpel.mcp.contract import ToolError, ToolResponseEnvelope, make_envelope
-from code_scalpel.mcp.oracle_middleware import PathStrategy, with_oracle_resilience
 from code_scalpel.mcp.path_resolver import resolve_path
 from code_scalpel.mcp.protocol import _get_current_tier
 
@@ -308,7 +307,10 @@ async def run_static_analysis(
                 )
             except Exception as e:
                 import logging
-                logging.getLogger(__name__).warning(f"Telemetry emit failed for run_static_analysis: {e}")
+
+                logging.getLogger(__name__).warning(
+                    f"Telemetry emit failed for run_static_analysis: {e}"
+                )
 
             return make_envelope(
                 data=result,
@@ -336,7 +338,10 @@ async def run_static_analysis(
                 )
             except Exception as e:
                 import logging
-                logging.getLogger(__name__).warning(f"Telemetry emit failed for run_static_analysis: {e}")
+
+                logging.getLogger(__name__).warning(
+                    f"Telemetry emit failed for run_static_analysis: {e}"
+                )
 
             raise
     except FileNotFoundError as exc:

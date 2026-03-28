@@ -10,7 +10,6 @@ from importlib import import_module
 
 import code_scalpel.licensing.features as feature_caps
 from code_scalpel.mcp.helpers import symbolic_helpers as sym_helpers
-from code_scalpel.mcp.models.core import TestGenerationResult
 
 # [20260213_BUGFIX] Removed jwt_validator.get_current_tier import — use protocol._get_current_tier
 # which honors CODE_SCALPEL_TIER env var for downgrade-only semantics
@@ -232,8 +231,16 @@ async def symbolic_execute(
                     "paths_explored": result.paths_explored if result else 0,
                     "total_paths": result.total_paths if result else 0,
                     "truncated": result.truncated if result else False,
-                    "symbolic_variables": len(result.symbolic_variables) if (result and result.symbolic_variables) else 0,
-                    "constraints": len(result.constraints) if (result and result.constraints) else 0,
+                    "symbolic_variables": (
+                        len(result.symbolic_variables)
+                        if (result and result.symbolic_variables)
+                        else 0
+                    ),
+                    "constraints": (
+                        len(result.constraints)
+                        if (result and result.constraints)
+                        else 0
+                    ),
                 },
                 metadata={
                     "language": language,
@@ -268,7 +275,10 @@ async def symbolic_execute(
                 )
             except Exception as e:
                 import logging
-                logging.getLogger(__name__).warning(f"Telemetry emit failed for symbolic_execute: {e}")
+
+                logging.getLogger(__name__).warning(
+                    f"Telemetry emit failed for symbolic_execute: {e}"
+                )
             raise
     except Exception as exc:
         duration_ms = int((time.perf_counter() - started) * 1000)
@@ -366,7 +376,9 @@ async def generate_unit_tests(
                 error=ToolError(
                     error="Either 'code' or 'file_path' must be provided.",
                     error_code="invalid_argument",
-                    error_details={"hint": "Provide source code directly or pass a file_path for test generation."},
+                    error_details={
+                        "hint": "Provide source code directly or pass a file_path for test generation."
+                    },
                 ),
             )
 
@@ -405,7 +417,10 @@ async def generate_unit_tests(
                 error=ToolError(
                     error="Data-driven test generation requires Pro tier or higher.",
                     error_code="upgrade_required",
-                    error_details={"feature": "data_driven_tests", "current_tier": tier},
+                    error_details={
+                        "feature": "data_driven_tests",
+                        "current_tier": tier,
+                    },
                 ),
             )
 
@@ -423,7 +438,10 @@ async def generate_unit_tests(
                 ),
             )
 
-        if isinstance(allowed_frameworks, (list, tuple, set)) and framework not in allowed_frameworks:
+        if (
+            isinstance(allowed_frameworks, (list, tuple, set))
+            and framework not in allowed_frameworks
+        ):
             return make_envelope(
                 data=None,
                 tool_id="generate_unit_tests",
@@ -433,7 +451,10 @@ async def generate_unit_tests(
                 error=ToolError(
                     error=f"Unsupported framework: {framework}",
                     error_code="invalid_argument",
-                    error_details={"framework": framework, "allowed_frameworks": allowed_frameworks},
+                    error_details={
+                        "framework": framework,
+                        "allowed_frameworks": allowed_frameworks,
+                    },
                 ),
             )
 
@@ -540,7 +561,9 @@ async def generate_unit_tests(
                     "test_count": result.test_count if result else 0,
                     "total_test_cases": result.total_test_cases if result else 0,
                     "framework_used": result.framework_used if result else None,
-                    "data_driven_enabled": result.data_driven_enabled if result else False,
+                    "data_driven_enabled": (
+                        result.data_driven_enabled if result else False
+                    ),
                     "truncated": result.truncated if result else False,
                 },
                 metadata={
@@ -578,7 +601,10 @@ async def generate_unit_tests(
                 )
             except Exception as e:
                 import logging
-                logging.getLogger(__name__).warning(f"Telemetry emit failed for generate_unit_tests: {e}")
+
+                logging.getLogger(__name__).warning(
+                    f"Telemetry emit failed for generate_unit_tests: {e}"
+                )
             raise
     except Exception as exc:
         duration_ms = int((time.perf_counter() - started) * 1000)
@@ -730,8 +756,14 @@ async def simulate_refactor(
                     "success": result.success if result else False,
                     "is_safe": result.is_safe if result else False,
                     "status": result.status if result else None,
-                    "security_issues": len(result.security_issues) if (result and result.security_issues) else 0,
-                    "structural_changes": bool(result.structural_changes) if result else False,
+                    "security_issues": (
+                        len(result.security_issues)
+                        if (result and result.security_issues)
+                        else 0
+                    ),
+                    "structural_changes": (
+                        bool(result.structural_changes) if result else False
+                    ),
                 },
                 metadata={
                     "analysis_depth": analysis_depth,
@@ -756,7 +788,9 @@ async def simulate_refactor(
                     status="failure",
                     error=str(exc),
                     input_summary={
-                        "original_code_length": len(original_code) if original_code else 0,
+                        "original_code_length": (
+                            len(original_code) if original_code else 0
+                        ),
                         "new_code_provided": new_code is not None,
                         "new_code_length": len(new_code) if new_code else 0,
                         "patch_provided": patch is not None,
@@ -766,7 +800,10 @@ async def simulate_refactor(
                 )
             except Exception as e:
                 import logging
-                logging.getLogger(__name__).warning(f"Telemetry emit failed for simulate_refactor: {e}")
+
+                logging.getLogger(__name__).warning(
+                    f"Telemetry emit failed for simulate_refactor: {e}"
+                )
             raise
     except Exception as exc:
         duration_ms = int((time.perf_counter() - started) * 1000)

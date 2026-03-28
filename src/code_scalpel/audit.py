@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class EncryptionConfig:
     """Encryption configuration for audit logs."""
+
     enabled: bool = True
     key: Optional[bytes] = None
     cipher: Optional[Fernet] = None
@@ -90,10 +91,18 @@ class AuditLog:
         """)
 
         # Create indices for common queries
-        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_request_id ON tool_calls(request_id)")
-        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_session_id ON tool_calls(session_id)")
-        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_tool_name ON tool_calls(tool_name)")
-        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_timestamp ON tool_calls(timestamp DESC)")
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_request_id ON tool_calls(request_id)"
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_session_id ON tool_calls(session_id)"
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_tool_name ON tool_calls(tool_name)"
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_timestamp ON tool_calls(timestamp DESC)"
+        )
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_status ON tool_calls(status)")
 
         self.conn.commit()
@@ -141,7 +150,9 @@ class AuditLog:
                 "request_id": request_id,
                 "session_id": session_id,
                 "timestamp": timestamp,
-                "timestamp_iso": datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat(),
+                "timestamp_iso": datetime.fromtimestamp(
+                    timestamp, tz=timezone.utc
+                ).isoformat(),
                 "tool_name": tool_name,
                 "tier_applied": tier_applied,
                 "status": status,
@@ -188,6 +199,7 @@ class AuditLog:
         """
         if timestamp is None:
             import time
+
             timestamp = time.time()
 
         # Serialize JSON fields
@@ -202,11 +214,19 @@ class AuditLog:
         encrypted = 0
         if self.encryption.enabled and self.encryption.cipher:
             try:
-                input_json = self.encryption.cipher.encrypt(input_json.encode()).decode()
-                output_json = self.encryption.cipher.encrypt(output_json.encode()).decode()
-                metadata_json = self.encryption.cipher.encrypt(metadata_json.encode()).decode()
+                input_json = self.encryption.cipher.encrypt(
+                    input_json.encode()
+                ).decode()
+                output_json = self.encryption.cipher.encrypt(
+                    output_json.encode()
+                ).decode()
+                metadata_json = self.encryption.cipher.encrypt(
+                    metadata_json.encode()
+                ).decode()
                 if error_stored:
-                    error_stored = self.encryption.cipher.encrypt(error_stored.encode()).decode()
+                    error_stored = self.encryption.cipher.encrypt(
+                        error_stored.encode()
+                    ).decode()
                 encrypted = 1
             except Exception as e:
                 logger.warning(f"Encryption failed for event {event_id}: {e}")
@@ -332,11 +352,17 @@ class AuditLog:
         """
         try:
             total = self.conn.execute("SELECT COUNT(*) FROM tool_calls").fetchone()[0]
-            success = self.conn.execute("SELECT COUNT(*) FROM tool_calls WHERE status = 'success'").fetchone()[0]
-            failure = self.conn.execute("SELECT COUNT(*) FROM tool_calls WHERE status = 'failure'").fetchone()[0]
+            success = self.conn.execute(
+                "SELECT COUNT(*) FROM tool_calls WHERE status = 'success'"
+            ).fetchone()[0]
+            failure = self.conn.execute(
+                "SELECT COUNT(*) FROM tool_calls WHERE status = 'failure'"
+            ).fetchone()[0]
 
             tool_counts = {}
-            for row in self.conn.execute("SELECT tool_name, COUNT(*) as count FROM tool_calls GROUP BY tool_name"):
+            for row in self.conn.execute(
+                "SELECT tool_name, COUNT(*) as count FROM tool_calls GROUP BY tool_name"
+            ):
                 tool_counts[row[0]] = row[1]
 
             return {
@@ -365,19 +391,25 @@ class AuditLog:
         if data.get("encrypted") and self.encryption.cipher:
             try:
                 if data.get("input_summary"):
-                    decrypted = self.encryption.cipher.decrypt(data["input_summary"].encode()).decode()
+                    decrypted = self.encryption.cipher.decrypt(
+                        data["input_summary"].encode()
+                    ).decode()
                     data["input_summary"] = json.loads(decrypted)
                 else:
                     data["input_summary"] = {}
 
                 if data.get("output_summary"):
-                    decrypted = self.encryption.cipher.decrypt(data["output_summary"].encode()).decode()
+                    decrypted = self.encryption.cipher.decrypt(
+                        data["output_summary"].encode()
+                    ).decode()
                     data["output_summary"] = json.loads(decrypted)
                 else:
                     data["output_summary"] = {}
 
                 if data.get("metadata"):
-                    decrypted = self.encryption.cipher.decrypt(data["metadata"].encode()).decode()
+                    decrypted = self.encryption.cipher.decrypt(
+                        data["metadata"].encode()
+                    ).decode()
                     data["metadata"] = json.loads(decrypted)
                 else:
                     data["metadata"] = {}
@@ -385,7 +417,9 @@ class AuditLog:
                 # Decrypt error field if present
                 if data.get("error"):
                     try:
-                        data["error"] = self.encryption.cipher.decrypt(data["error"].encode()).decode()
+                        data["error"] = self.encryption.cipher.decrypt(
+                            data["error"].encode()
+                        ).decode()
                     except Exception:
                         # Leave as-is if decryption fails
                         pass
@@ -407,7 +441,10 @@ class AuditLog:
             Path to exported JSONL file
         """
         timestamp = datetime.now(timezone.utc).isoformat()
-        export_file = self.base_dir / f"audit_{self.session_id}_{timestamp.replace(':', '-')}.jsonl"
+        export_file = (
+            self.base_dir
+            / f"audit_{self.session_id}_{timestamp.replace(':', '-')}.jsonl"
+        )
 
         try:
             with open(export_file, "w") as f:
@@ -439,7 +476,9 @@ class AuditLog:
             archive_file = None
             if live_file.exists():
                 timestamp = datetime.now(timezone.utc).isoformat().replace(":", "-")
-                archive_file = self.base_dir / f"audit_{self.session_id}_{timestamp}.jsonl"
+                archive_file = (
+                    self.base_dir / f"audit_{self.session_id}_{timestamp}.jsonl"
+                )
                 try:
                     live_file.rename(archive_file)
                     logger.info(f"Renamed live JSONL to archive: {archive_file}")
@@ -450,7 +489,10 @@ class AuditLog:
             # Apply retention policy: purge files older than RETENTION_DAYS
             import os
             import time as time_module
-            retention_days = int(os.environ.get("CODESCALPEL_AUDIT_RETENTION_DAYS", "30"))
+
+            retention_days = int(
+                os.environ.get("CODESCALPEL_AUDIT_RETENTION_DAYS", "30")
+            )
             retention_seconds = retention_days * 86400
             cutoff_time = time_module.time() - retention_seconds
 

@@ -6,7 +6,6 @@ import os
 import subprocess
 import sys
 
-
 # [20260311_TEST] Keep subprocess CLI tests importable without editable install.
 _TEST_DIR = os.path.dirname(os.path.abspath(__file__))
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(_TEST_DIR))

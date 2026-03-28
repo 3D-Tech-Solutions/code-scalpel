@@ -455,8 +455,7 @@ func run() int {
     assert category_counts.get("call", 0) >= 1
     references = data.get("references") or []
     assert any(
-        ref.get("file") == "src/main.go"
-        and "helper.Tool()" in ref.get("context", "")
+        ref.get("file") == "src/main.go" and "helper.Tool()" in ref.get("context", "")
         for ref in references
     )
 
@@ -511,8 +510,7 @@ func execute(worker Worker) {
     assert category_counts.get("call", 0) >= 1
     references = data.get("references") or []
     assert any(
-        ref.get("file") == "src/worker.go"
-        and "worker.Run()" in ref.get("context", "")
+        ref.get("file") == "src/worker.go" and "worker.Run()" in ref.get("context", "")
         for ref in references
     )
 

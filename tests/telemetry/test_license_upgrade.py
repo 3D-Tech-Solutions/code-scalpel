@@ -88,9 +88,9 @@ def test_license_javascript():
     ]
 
     for func in js_functions:
-        assert f"function {func}" in html or f"{func}(" in html, (
-            f"JavaScript function {func} not found"
-        )
+        assert (
+            f"function {func}" in html or f"{func}(" in html
+        ), f"JavaScript function {func} not found"
 
     print("✓ License JavaScript functions present")
 

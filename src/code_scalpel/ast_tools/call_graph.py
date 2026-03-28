@@ -2733,7 +2733,9 @@ class CallGraphBuilder:
                 return None
             try:
                 if resolved_file.exists() and resolved_file.is_file():
-                    return str(resolved_file.relative_to(self.root_path)).replace("\\", "/")
+                    return str(resolved_file.relative_to(self.root_path)).replace(
+                        "\\", "/"
+                    )
             except Exception:
                 return None
             return None

@@ -59,7 +59,11 @@ def test_telemetry_stats():
     assert stats["total_events"] == 3
     assert stats["success_count"] == 2
     assert stats["failure_count"] == 1
-    assert stats["success_rate"] == pytest.approx(2/3, abs=0.01) if "pytest" in sys.modules else True
+    assert (
+        stats["success_rate"] == pytest.approx(2 / 3, abs=0.01)
+        if "pytest" in sys.modules
+        else True
+    )
     assert stats["avg_duration_ms"] == 150.0
     assert stats["tool_counts"]["tool_a"] == 2
     print("✓ Stats calculation works")

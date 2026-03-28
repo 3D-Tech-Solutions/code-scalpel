@@ -211,7 +211,9 @@ def _read_go_project_map_module_name(root_path: Path) -> str | None:
         return None
 
     try:
-        for raw_line in go_mod.read_text(encoding="utf-8", errors="ignore").splitlines():
+        for raw_line in go_mod.read_text(
+            encoding="utf-8", errors="ignore"
+        ).splitlines():
             line = raw_line.strip()
             if not line or line.startswith("//"):
                 continue
@@ -465,10 +467,16 @@ def _scan_go_project_map_module(
     entry_points: list[str] = []
 
     def fallback_scan() -> ModuleInfo:
-        function_pattern = re.compile(r"\bfunc\s+(?:\([^)]*\)\s*)?([A-Za-z_][A-Za-z0-9_]*)\s*\(")
-        type_pattern = re.compile(r"\btype\s+([A-Za-z_][A-Za-z0-9_]*)\s+(?:struct|interface)\b")
+        function_pattern = re.compile(
+            r"\bfunc\s+(?:\([^)]*\)\s*)?([A-Za-z_][A-Za-z0-9_]*)\s*\("
+        )
+        type_pattern = re.compile(
+            r"\btype\s+([A-Za-z_][A-Za-z0-9_]*)\s+(?:struct|interface)\b"
+        )
         import_block_pattern = re.compile(r"(?ms)^import\s*\((.*?)\)")
-        import_line_pattern = re.compile(r'^import\s+(?:[A-Za-z_][A-Za-z0-9_]*\s+)?"([^"]+)"$', re.MULTILINE)
+        import_line_pattern = re.compile(
+            r'^import\s+(?:[A-Za-z_][A-Za-z0-9_]*\s+)?"([^"]+)"$', re.MULTILINE
+        )
         import_path_pattern = re.compile(r'"([^"]+)"')
 
         local_functions = sorted(set(function_pattern.findall(code)))
@@ -482,9 +490,13 @@ def _scan_go_project_map_module(
             local_imports.extend(import_path_pattern.findall(block_match.group(1)))
 
         local_entry_points = [
-            f"{rel_path}:main" for function_name in local_functions if function_name == "main"
+            f"{rel_path}:main"
+            for function_name in local_functions
+            if function_name == "main"
         ]
-        complexity = _calculate_go_project_map_complexity(code) if include_complexity else 0
+        complexity = (
+            _calculate_go_project_map_complexity(code) if include_complexity else 0
+        )
 
         return ModuleInfo(
             path=rel_path,
@@ -777,7 +789,9 @@ def _get_call_graph_sync(
                 return index + 1
         return len(lines)
 
-    def _build_go_runtime_slice(root: Path) -> tuple[list[CallNodeModel], list[CallEdgeModel]]:
+    def _build_go_runtime_slice(
+        root: Path,
+    ) -> tuple[list[CallNodeModel], list[CallEdgeModel]]:
         # [20260315_BUGFIX] Provide a bounded local Go call-graph fallback when
         # optional Go parser support is unavailable in the active runtime.
         function_pattern = re.compile(
@@ -824,7 +838,11 @@ def _get_call_graph_sync(
                 function_bodies.append((rel_path, symbol_name, body))
 
         for rel_path, caller_name, body in function_bodies:
-            for callee_name, (callee_file, _callee_line, _is_entry) in known_symbols.items():
+            for callee_name, (
+                callee_file,
+                _callee_line,
+                _is_entry,
+            ) in known_symbols.items():
                 base_name = callee_name.split(".", 1)[-1]
                 if callee_file != rel_path:
                     continue
@@ -2871,16 +2889,18 @@ def _get_project_map_sync(
                         java_scan.relation_hints
                     )
                     if java_scan.package_name:
-                        java_package_by_module[java_module.path] = java_scan.package_name
+                        java_package_by_module[java_module.path] = (
+                            java_scan.package_name
+                        )
                         package_path = java_scan.package_name.replace(".", "/")
                         _register_project_map_package(
                             packages,
                             package_path,
                             java_module.path,
                         )
-                        java_package_index.setdefault(java_scan.package_name, set()).add(
-                            java_module.path
-                        )
+                        java_package_index.setdefault(
+                            java_scan.package_name, set()
+                        ).add(java_module.path)
                     continue
 
                 if file_path.suffix.lower() in _PROJECT_MAP_GO_SUFFIXES:
@@ -3041,9 +3061,14 @@ def _get_project_map_sync(
 
         go_module_name = _read_go_project_map_module_name(root_path)
         java_resolver = None
-        if any(Path(mod.path).suffix.lower() in _PROJECT_MAP_JAVA_SUFFIXES for mod in modules):
+        if any(
+            Path(mod.path).suffix.lower() in _PROJECT_MAP_JAVA_SUFFIXES
+            for mod in modules
+        ):
             try:
-                from code_scalpel.ast_tools.java_import_resolver import JavaImportResolver
+                from code_scalpel.ast_tools.java_import_resolver import (
+                    JavaImportResolver,
+                )
 
                 # [20260315_FEATURE] Reuse JavaImportResolver edges so project-map
                 # Java relationships honor explicit, static, and wildcard imports.
@@ -3100,7 +3125,9 @@ def _get_project_map_sync(
                 if package_dir not in {"", "."}:
                     module_index[package_dir] = mod.path
                     if go_module_name:
-                        module_index[f"{go_module_name}/{package_dir}".strip("/")] = mod.path
+                        module_index[f"{go_module_name}/{package_dir}".strip("/")] = (
+                            mod.path
+                        )
                 elif go_module_name:
                     module_index[go_module_name] = mod.path
 

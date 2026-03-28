@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # TypeScript (Core Useful) — MCP community-tier boundary
 # ---------------------------------------------------------------------------
@@ -42,9 +41,9 @@ async function submitRole(roleInput: any) {
 
     assert result.success is True
     # TS frontend analysis runs at community tier and must find the `as Role` cast
-    assert result.frontend_vulnerabilities >= 1, (
-        "Expected at least one TS type-evaporation finding for `roleInput as Role`"
-    )
+    assert (
+        result.frontend_vulnerabilities >= 1
+    ), "Expected at least one TS type-evaporation finding for `roleInput as Role`"
 
 
 # ---------------------------------------------------------------------------
@@ -110,12 +109,12 @@ def role():
 
     result = analyze_type_evaporation_cross_file(ts_code, py_code)
 
-    assert result.matched_endpoints, (
-        "Expected TS fetch('/api/role') to match Python @app.post('/api/role') route"
-    )
-    assert result.cross_file_issues, (
-        "Expected at least one CROSS_FILE_TYPE_TRUST issue for TS `Role` type assertion"
-    )
+    assert (
+        result.matched_endpoints
+    ), "Expected TS fetch('/api/role') to match Python @app.post('/api/role') route"
+    assert (
+        result.cross_file_issues
+    ), "Expected at least one CROSS_FILE_TYPE_TRUST issue for TS `Role` type assertion"
 
 
 def test_python_untyped_handler_generates_backend_vulnerabilities() -> None:
@@ -138,9 +137,9 @@ def submit(user_id, payload):
 
     result = analyze_type_evaporation_cross_file(ts_code, py_code)
 
-    assert result.backend_vulnerabilities, (
-        "Expected PythonBackendAnalyzer to flag untyped params and dict access in handler"
-    )
+    assert (
+        result.backend_vulnerabilities
+    ), "Expected PythonBackendAnalyzer to flag untyped params and dict access in handler"
     py_patterns = [
         getattr(v, "pattern", getattr(v, "vulnerability_type", ""))
         for v in result.backend_vulnerabilities
@@ -203,6 +202,6 @@ def orders():
 
     result = analyze_type_evaporation_cross_file(ts_code, py_code)
 
-    assert result.matched_endpoints == [], (
-        "Non-overlapping routes /api/users vs /api/orders must not match"
-    )
+    assert (
+        result.matched_endpoints == []
+    ), "Non-overlapping routes /api/users vs /api/orders must not match"

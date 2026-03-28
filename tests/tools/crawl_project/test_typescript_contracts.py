@@ -8,7 +8,9 @@ def _write(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
 
 
-def test_crawl_project_sync_preserves_typescript_summary_contract(tmp_path: Path) -> None:
+def test_crawl_project_sync_preserves_typescript_summary_contract(
+    tmp_path: Path,
+) -> None:
     from code_scalpel.mcp.helpers.context_helpers import _crawl_project_sync
 
     root = tmp_path / "ts-helper"

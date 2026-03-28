@@ -153,11 +153,13 @@ def _build_typescript_contract_test_result(
 
     truncated = False
     truncation_warning: str | None = None
-    if max_test_cases is not None and max_test_cases >= 0 and total_cases > max_test_cases:
+    if (
+        max_test_cases is not None
+        and max_test_cases >= 0
+        and total_cases > max_test_cases
+    ):
         truncated = True
-        truncation_warning = (
-            f"Generated {total_cases} test case; returned {max_test_cases} due to configured limits."
-        )
+        truncation_warning = f"Generated {total_cases} test case; returned {max_test_cases} due to configured limits."
         test_cases = test_cases[:max_test_cases]
 
     return TestGenerationResult(
@@ -286,11 +288,13 @@ def _build_typescript_bounded_test_result(
     concrete_cases = suite.test_cases
     truncated = False
     truncation_warning: str | None = None
-    if max_test_cases is not None and max_test_cases >= 0 and total_cases > max_test_cases:
+    if (
+        max_test_cases is not None
+        and max_test_cases >= 0
+        and total_cases > max_test_cases
+    ):
         truncated = True
-        truncation_warning = (
-            f"Generated {total_cases} test cases; returned {max_test_cases} due to configured limits."
-        )
+        truncation_warning = f"Generated {total_cases} test cases; returned {max_test_cases} due to configured limits."
         concrete_cases = concrete_cases[:max_test_cases]
 
     public_cases = [
@@ -312,8 +316,12 @@ def _build_typescript_bounded_test_result(
         total_test_cases=total_cases,
         truncated=truncated,
         truncation_warning=truncation_warning,
-        pytest_code=_build_typescript_bounded_pytest_scaffold(target_name, concrete_cases),
-        unittest_code=_build_typescript_bounded_unittest_scaffold(target_name, concrete_cases),
+        pytest_code=_build_typescript_bounded_pytest_scaffold(
+            target_name, concrete_cases
+        ),
+        unittest_code=_build_typescript_bounded_unittest_scaffold(
+            target_name, concrete_cases
+        ),
         framework_used=framework,
         max_test_cases_limit=max_test_cases,
         data_driven_enabled=False,
@@ -391,7 +399,9 @@ def _find_first_ir_callable(nodes: list[IRNode]) -> IRFunctionDef | None:
 def _basic_typescript_ir_symbolic_analysis(code: str, max_paths: int) -> SymbolicResult:
     """[20260315_FEATURE] Build a bounded TypeScript fallback result from normalized IR control-flow."""
     try:
-        from code_scalpel.ir.normalizers.typescript_normalizer import TypeScriptNormalizer
+        from code_scalpel.ir.normalizers.typescript_normalizer import (
+            TypeScriptNormalizer,
+        )
 
         ir_module = TypeScriptNormalizer().normalize(code)
         if not isinstance(ir_module, IRModule):
@@ -1049,21 +1059,29 @@ def _symbolic_execute_sync(
             prefer_readable_ir_slice
             or not symbolic_vars
             or not constraints_list
-            or (language in {"java", "typescript"} and not any(path.conditions for path in paths))
+            or (
+                language in {"java", "typescript"}
+                and not any(path.conditions for path in paths)
+            )
         ):
             basic = _basic_symbolic_analysis(
                 code, max_paths=fallback_max_paths, language=language
             )
-            if (prefer_readable_ir_slice or not symbolic_vars) and basic.symbolic_variables:
+            if (
+                prefer_readable_ir_slice or not symbolic_vars
+            ) and basic.symbolic_variables:
                 symbolic_vars = basic.symbolic_variables
             if (prefer_readable_ir_slice or not constraints_list) and basic.constraints:
                 constraints_list = basic.constraints
             if basic.paths and (
                 prefer_readable_ir_slice
                 or (
-                not paths
-                or (language in {"java", "typescript"} and not any(path.conditions for path in paths))
-                or len(basic.paths) > len(paths)
+                    not paths
+                    or (
+                        language in {"java", "typescript"}
+                        and not any(path.conditions for path in paths)
+                    )
+                    or len(basic.paths) > len(paths)
                 )
             ):
                 paths = basic.paths
@@ -1194,7 +1212,12 @@ def _generate_tests_sync(
             code = resolved.read_text(encoding="utf-8")
             if language == "python" and resolved.suffix.lower() == ".java":
                 language = "java"
-            elif language == "python" and resolved.suffix.lower() in {".ts", ".tsx", ".mts", ".cts"}:
+            elif language == "python" and resolved.suffix.lower() in {
+                ".ts",
+                ".tsx",
+                ".mts",
+                ".cts",
+            }:
                 language = "typescript"
         except Exception as e:
             return TestGenerationResult(
