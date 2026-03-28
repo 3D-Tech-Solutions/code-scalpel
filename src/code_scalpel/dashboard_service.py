@@ -177,6 +177,58 @@ def create_app() -> tuple[FastAPI, int]:
                 "message": f"Failed to save license: {str(e)}",
             }
 
+    @app.post("/api/shutdown")
+    async def shutdown_server() -> dict[str, Any]:
+        """Gracefully shut down the MCP server.
+
+        Closes WebSocket connections, saves audit log, and initiates shutdown.
+        Returns immediately with confirmation.
+        """
+        try:
+            # Close all WebSocket clients
+            closed_count = len(_WEBSOCKET_CLIENTS)
+            for client in list(_WEBSOCKET_CLIENTS):
+                try:
+                    await client.close(code=1000, reason="Server shutting down")
+                except Exception as e:
+                    logger.debug(f"Error closing WebSocket: {e}")
+            _WEBSOCKET_CLIENTS.clear()
+
+            # Cleanup audit log (saves JSONL export if available)
+            export_path = None
+            try:
+                from code_scalpel import telemetry
+                if telemetry._AUDIT_LOG:
+                    export_path = telemetry._AUDIT_LOG.cleanup()
+                    logger.info(f"Audit log exported to: {export_path}")
+            except Exception as e:
+                logger.warning(f"Error cleaning up audit log: {e}")
+
+            # Schedule server shutdown after response is sent
+            import asyncio
+            async def shutdown():
+                await asyncio.sleep(0.5)
+                global _dashboard_instance
+                if _dashboard_instance and _dashboard_instance.server:
+                    _dashboard_instance.server.should_exit = True
+
+            asyncio.create_task(shutdown())
+
+            return {
+                "success": True,
+                "message": "Server shutting down gracefully",
+                "websockets_closed": closed_count,
+                "audit_log_exported": export_path is not None,
+                "status": "shutdown_initiated",
+            }
+        except Exception as e:
+            logger.error(f"Error during shutdown: {e}")
+            return {
+                "success": False,
+                "message": f"Error during shutdown: {str(e)}",
+                "status": "error",
+            }
+
     @app.get("/api/audit/events")
     async def get_audit_events(
         limit: int = 100,
@@ -839,13 +891,129 @@ def get_dashboard_html() -> str:
             font-weight: 600;
             margin-left: 5px;
         }
+
+        .header-actions {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .stop-button {
+            background: #dc3545;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 13px;
+            transition: background 0.3s;
+        }
+
+        .stop-button:hover {
+            background: #c82333;
+        }
+
+        .shutdown-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .shutdown-modal.active {
+            display: flex;
+        }
+
+        .shutdown-modal-content {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+            max-width: 400px;
+            text-align: center;
+        }
+
+        .shutdown-modal-content h2 {
+            color: #dc3545;
+            margin-bottom: 15px;
+            font-size: 20px;
+        }
+
+        .shutdown-modal-content p {
+            color: #666;
+            margin-bottom: 20px;
+            line-height: 1.5;
+        }
+
+        .shutdown-modal-buttons {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+        }
+
+        .shutdown-modal-buttons button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 13px;
+            transition: background 0.3s;
+        }
+
+        .confirm-shutdown {
+            background: #dc3545;
+            color: white;
+        }
+
+        .confirm-shutdown:hover {
+            background: #c82333;
+        }
+
+        .cancel-shutdown {
+            background: #f0f0f0;
+            color: #333;
+        }
+
+        .cancel-shutdown:hover {
+            background: #e0e0e0;
+        }
+
+        .shutdown-success {
+            display: none;
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: #d4edda;
+            color: #155724;
+            padding: 15px 20px;
+            border-radius: 4px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            z-index: 2000;
+        }
+
+        .shutdown-success.active {
+            display: block;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>📊 Code Scalpel Dashboard</h1>
-            <p>Real-time telemetry for MCP tool calls</p>
+            <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                <div>
+                    <h1>📊 Code Scalpel Dashboard</h1>
+                    <p>Real-time telemetry for MCP tool calls</p>
+                </div>
+                <button class="stop-button" onclick="showShutdownConfirmation()">⏹️ Stop Server</button>
+            </div>
         </header>
 
         <!-- License Panel -->
@@ -957,6 +1125,29 @@ def get_dashboard_html() -> str:
                 </div>
             </div>
         </div>
+    </div>
+
+    <!-- Shutdown Confirmation Modal -->
+    <div class="shutdown-modal" id="shutdown-modal">
+        <div class="shutdown-modal-content">
+            <h2>⏹️ Stop Server?</h2>
+            <p>This will gracefully shut down the Code Scalpel MCP server.</p>
+            <p style="font-size: 12px; color: #999;">
+                ✓ WebSocket connections will be closed<br>
+                ✓ Audit log will be exported<br>
+                ✓ You can restart the server anytime
+            </p>
+            <div class="shutdown-modal-buttons">
+                <button class="confirm-shutdown" onclick="confirmShutdown()">Yes, Stop Server</button>
+                <button class="cancel-shutdown" onclick="cancelShutdown()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Shutdown Success Message -->
+    <div class="shutdown-success" id="shutdown-success">
+        <strong>✓ Server shutting down...</strong>
+        <p style="margin: 5px 0 0 0; font-size: 12px;">You can close this window.</p>
     </div>
 
     <script>
@@ -1348,6 +1539,51 @@ def get_dashboard_html() -> str:
             } catch (e) {
                 uploadMessage.textContent = `✗ Upload failed: ${e.message}`;
                 uploadMessage.className = 'upload-message error';
+            }
+        }
+
+        // Shutdown functions
+        function showShutdownConfirmation() {
+            const modal = document.getElementById('shutdown-modal');
+            modal.classList.add('active');
+        }
+
+        function cancelShutdown() {
+            const modal = document.getElementById('shutdown-modal');
+            modal.classList.remove('active');
+        }
+
+        async function confirmShutdown() {
+            const modal = document.getElementById('shutdown-modal');
+            const successMsg = document.getElementById('shutdown-success');
+
+            try {
+                const response = await fetch('/api/shutdown', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'}
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    modal.classList.remove('active');
+                    successMsg.classList.add('active');
+
+                    // Attempt to close WebSocket gracefully
+                    if (ws) {
+                        ws.close();
+                    }
+
+                    // Show message for 2 seconds then allow user to close
+                    setTimeout(() => {
+                        console.log('Server shutdown complete');
+                    }, 2000);
+                } else {
+                    alert(`Error: ${result.message}`);
+                }
+            } catch (e) {
+                console.error('Shutdown request failed:', e);
+                alert(`Failed to shutdown server: ${e.message}`);
             }
         }
 
