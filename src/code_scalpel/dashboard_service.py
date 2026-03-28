@@ -177,6 +177,125 @@ def create_app() -> tuple[FastAPI, int]:
                 "message": f"Failed to save license: {str(e)}",
             }
 
+    @app.get("/api/audit/events")
+    async def get_audit_events(
+        limit: int = 100,
+        offset: int = 0,
+        tool_name: str | None = None,
+        request_id: str | None = None,
+        status: str | None = None,
+    ) -> dict[str, Any]:
+        """Get audit log events with optional filtering.
+
+        Query parameters:
+        - limit: Max events to return (default: 100)
+        - offset: Pagination offset (default: 0)
+        - tool_name: Filter by tool name
+        - request_id: Filter by request ID (correlates multiple calls)
+        - status: Filter by status (success/failure/timeout)
+        """
+        from code_scalpel import telemetry
+
+        try:
+            audit_log = telemetry._AUDIT_LOG
+            if not audit_log:
+                return {
+                    "error": "Audit log not initialized",
+                    "events": [],
+                    "stats": {},
+                }
+
+            events = audit_log.get_events(
+                limit=limit,
+                offset=offset,
+                tool_name=tool_name,
+                request_id=request_id,
+                status=status,
+            )
+
+            stats = audit_log.get_stats()
+
+            return {
+                "events": events,
+                "stats": stats,
+                "pagination": {"limit": limit, "offset": offset},
+                "filters": {
+                    "tool_name": tool_name,
+                    "request_id": request_id,
+                    "status": status,
+                },
+            }
+        except Exception as e:
+            logger.error(f"Error querying audit log: {e}")
+            return {
+                "error": str(e),
+                "events": [],
+                "stats": {},
+            }
+
+    @app.get("/api/audit/call-chain")
+    async def get_call_chain(request_id: str) -> dict[str, Any]:
+        """Get all calls made during a single request.
+
+        This correlates all tool calls that happened as part of a single MCP request.
+
+        Query parameters:
+        - request_id: The request ID to query
+        """
+        from code_scalpel import telemetry
+
+        try:
+            audit_log = telemetry._AUDIT_LOG
+            if not audit_log:
+                return {"error": "Audit log not initialized", "calls": []}
+
+            calls = audit_log.get_events(
+                limit=999999,
+                request_id=request_id,
+            )
+
+            return {
+                "request_id": request_id,
+                "call_count": len(calls),
+                "calls": calls,
+            }
+        except Exception as e:
+            logger.error(f"Error fetching call chain: {e}")
+            return {"error": str(e), "calls": []}
+
+    @app.get("/api/audit/status")
+    async def get_audit_status() -> dict[str, Any]:
+        """Get audit log status and encryption info."""
+        from code_scalpel import telemetry
+
+        try:
+            audit_log = telemetry._AUDIT_LOG
+            if not audit_log:
+                return {
+                    "status": "not_initialized",
+                    "encryption": None,
+                }
+
+            status = audit_log.get_encryption_status()
+            stats = audit_log.get_stats()
+
+            return {
+                "status": "active",
+                "encryption": {
+                    "enabled": status["enabled"],
+                    "has_key": status["has_key"],
+                    "note": "Key exists only in memory during server runtime",
+                },
+                "database": {
+                    "path": status["db_path"],
+                    "session_id": status["session_id"],
+                },
+                "stats": stats,
+            }
+        except Exception as e:
+            logger.error(f"Error getting audit status: {e}")
+            return {"error": str(e), "status": "error"}
+
     @app.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket) -> None:
         """WebSocket endpoint for live event streaming."""
@@ -602,6 +721,45 @@ def get_dashboard_html() -> str:
         .license-instructions li {
             margin: 5px 0;
         }
+
+        .event-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            width: 100%;
+        }
+
+        .event-details-panel {
+            background: #f5f5f5;
+            border-top: 1px solid #ddd;
+            margin-top: 5px;
+            padding: 15px;
+            border-radius: 0 0 4px 4px;
+            font-family: 'Monaco', 'Courier New', monospace;
+        }
+
+        .event-details-panel pre {
+            background: #fff;
+            padding: 10px;
+            border-radius: 4px;
+            border-left: 3px solid #007bff;
+            overflow-x: auto;
+            font-size: 12px;
+            margin: 0 0 15px 0;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .event-details-panel > div {
+            margin-bottom: 15px;
+        }
+
+        .event-details-panel > div > div:first-child {
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 5px;
+            font-size: 13px;
+        }
     </style>
 </head>
 <body>
@@ -651,6 +809,21 @@ def get_dashboard_html() -> str:
                             <li>Upload it here using the file picker above</li>
                             <li>Restart the MCP server to apply the new tier</li>
                         </ol>
+                    </div>
+
+                    <div class="license-instructions" style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #ddd;">
+                        <strong>🔧 License File Location (Alternative Methods)</strong>
+                        <p style="margin: 10px 0 5px 0; font-size: 12px; color: #666;">
+                            If upload doesn't work, you can place your <code style="background: #f0f0f0; padding: 2px 4px;">license.jwt</code> file at:
+                        </p>
+                        <ul style="margin: 5px 0; font-size: 12px; color: #555;">
+                            <li><code style="background: #f0f0f0; padding: 2px 4px;">~/.code-scalpel/license/license.jwt</code> (recommended)</li>
+                            <li><code style="background: #f0f0f0; padding: 2px 4px;">.code-scalpel/license/license.jwt</code> (project root)</li>
+                            <li>Set <code style="background: #f0f0f0; padding: 2px 4px;">CODE_SCALPEL_LICENSE_PATH</code> environment variable to custom location</li>
+                        </ul>
+                        <p style="margin: 10px 0 0 0; font-size: 11px; color: #999;">
+                            After placing the file, restart the MCP server for changes to take effect.
+                        </p>
                     </div>
                 </div>
             </div>
@@ -780,33 +953,98 @@ def get_dashboard_html() -> str:
 
             list.innerHTML = events.map((event, index) => `
                 <div class="event-item">
-                    <div class="event-info">
-                        <div class="event-tool">${event.tool_name}</div>
-                        <div class="event-details">
-                            <span>${formatTime(event.timestamp)}</span>
-                            <span class="event-status ${event.status === 'success' ? 'status-success' : 'status-failure'}">
-                                ${event.status.toUpperCase()}
-                            </span>
-                            ${event.error ? `<span style="color: #721c24;">${event.error}</span>` : ''}
+                    <div class="event-header" onclick="toggleEventDetails('event-${index}')" style="cursor: pointer;">
+                        <div class="event-info">
+                            <div class="event-tool">${event.tool_name}</div>
+                            <div class="event-details">
+                                <span>${formatTime(event.timestamp)}</span>
+                                <span class="event-status ${event.status === 'success' ? 'status-success' : 'status-failure'}">
+                                    ${event.status.toUpperCase()}
+                                </span>
+                                ${event.error ? `<span style="color: #721c24;">Error</span>` : ''}
+                            </div>
+                        </div>
+                        <div class="event-meta">
+                            <span class="event-tier">Tier: ${event.tier_applied}</span>
+                            <span class="event-duration">${event.duration_ms.toFixed(0)}ms</span>
+                            <span style="cursor: pointer; margin-left: 10px; font-weight: bold;">▼</span>
                         </div>
                     </div>
-                    <div class="event-meta">
-                        <span class="event-tier">Tier: ${event.tier_applied}</span>
-                        <span class="event-duration">${event.duration_ms.toFixed(0)}ms</span>
+                    <div class="event-details-panel" id="event-${index}" style="display: none; padding: 15px; background: #f5f5f5; border-top: 1px solid #ddd; margin-top: 5px;">
+                        ${event.input_summary ? `
+                            <div style="margin-bottom: 15px;">
+                                <div style="font-weight: bold; color: #333; margin-bottom: 5px;">📥 Input</div>
+                                <pre style="background: #fff; padding: 10px; border-radius: 4px; border-left: 3px solid #007bff; overflow-x: auto; font-size: 12px; margin: 0;">${JSON.stringify(event.input_summary, null, 2)}</pre>
+                            </div>
+                        ` : ''}
+                        ${event.output_summary ? `
+                            <div style="margin-bottom: 15px;">
+                                <div style="font-weight: bold; color: #333; margin-bottom: 5px;">📤 Output</div>
+                                <pre style="background: #fff; padding: 10px; border-radius: 4px; border-left: 3px solid #28a745; overflow-x: auto; font-size: 12px; margin: 0;">${JSON.stringify(event.output_summary, null, 2)}</pre>
+                            </div>
+                        ` : ''}
+                        ${event.error ? `
+                            <div style="margin-bottom: 15px;">
+                                <div style="font-weight: bold; color: #721c24; margin-bottom: 5px;">⚠️ Error</div>
+                                <pre style="background: #fff; padding: 10px; border-radius: 4px; border-left: 3px solid #dc3545; overflow-x: auto; font-size: 12px; margin: 0; color: #721c24;">${event.error}</pre>
+                            </div>
+                        ` : ''}
+                        <div style="padding-top: 10px; border-top: 1px solid #ddd;">
+                            <div style="font-size: 12px; color: #666;">
+                                <span>Event ID: ${event.event_id}</span> |
+                                <span>Duration: ${event.duration_ms.toFixed(1)}ms</span>
+                                ${event.session_id ? `| <span>Session: ${event.session_id}</span>` : ''}
+                            </div>
+                        </div>
                     </div>
                 </div>
             `).join('');
         }
 
+        function toggleEventDetails(eventId) {
+            const panel = document.getElementById(eventId);
+            if (panel) {
+                panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+            }
+        }
+
         async function fetchInitialEvents() {
             try {
-                const response = await fetch('/api/events');
+                // Fetch from audit log (persistent, with filtering support)
+                const response = await fetch('/api/audit/events?limit=100');
                 const data = await response.json();
-                events = data.events || [];
+
+                // Handle both audit log format and fallback to telemetry queue format
+                if (data.events) {
+                    events = data.events;
+                    // Update stats from audit log if available
+                    if (data.stats) {
+                        document.getElementById('total-events').textContent = data.stats.total_events || 0;
+                        document.getElementById('success-rate').textContent =
+                            ((data.stats.success_rate || 0) * 100).toFixed(1) + '%';
+                    }
+                } else if (data.error) {
+                    console.warn('Audit log not available:', data.error);
+                    // Fallback to telemetry queue if audit log not initialized
+                    const fallbackResponse = await fetch('/api/events');
+                    const fallbackData = await fallbackResponse.json();
+                    events = fallbackData.events || [];
+                }
+
                 renderEvents();
                 updateStats();
             } catch (e) {
                 console.error('Failed to fetch events:', e);
+                // Try fallback to ephemeral queue on error
+                try {
+                    const fallbackResponse = await fetch('/api/events');
+                    const fallbackData = await fallbackResponse.json();
+                    events = fallbackData.events || [];
+                    renderEvents();
+                    updateStats();
+                } catch (fallbackError) {
+                    console.error('Fallback to ephemeral queue also failed:', fallbackError);
+                }
             }
         }
 
