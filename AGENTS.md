@@ -284,6 +284,6 @@ See `wiki/Language-Completion-Roadmap.md` for full gap analysis, implementation 
 
 ---
 
-**Last Updated:** March 3, 2026
-**Project Version:** 2.1.0
+**Last Updated:** March 27, 2026
+**Project Version:** 2.1.2
 **Python Support:** 3.10, 3.11, 3.12, 3.13

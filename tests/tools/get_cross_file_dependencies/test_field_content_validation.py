@@ -463,6 +463,49 @@ class TestDependencyChainContent:
         assert "demo_Helper_java" in result.mermaid
 
     @pytest.mark.asyncio
+    async def test_java_static_wildcard_dependency_chains_use_relative_modules(
+        self, pro_server, tmp_path
+    ):
+        """[20260315_TEST] Java dependency extraction should resolve local static wildcard imports."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+        (package_dir / "Helper.java").write_text(
+            "package demo;\n\n"
+            "public class Helper {\n"
+            "    public static void tool() {\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        target_file = package_dir / "App.java"
+        target_file.write_text(
+            "package demo;\n\n"
+            "import static demo.Helper.*;\n\n"
+            "public class App {\n"
+            "    public static void entry() {\n"
+            "        tool();\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        result = await pro_server.get_cross_file_dependencies(
+            target_file=str(target_file),
+            target_symbol="entry",
+            project_root=str(tmp_path),
+            include_code=False,
+            include_diagram=False,
+        )
+
+        assert result.success is True
+        assert result.target_file == "demo/App.java"
+        extracted = {(symbol.name, symbol.file) for symbol in result.extracted_symbols}
+        assert ("App.entry", "demo/App.java") in extracted
+        assert ("Helper.tool", "demo/Helper.java") in extracted
+        assert result.import_graph == {"demo/App.java": ["demo/Helper.java"]}
+        assert ["demo/App.java", "demo/Helper.java"] in result.dependency_chains
+
+    @pytest.mark.asyncio
     async def test_java_ambiguous_bare_method_name_returns_guidance(
         self, pro_server, tmp_path
     ):
@@ -931,7 +974,854 @@ class TestDependencyChainContent:
         assert ("Child.run", "demo/Child.java") in extracted
         assert ("Child.helper", "demo/Child.java") in extracted
         assert ("Base.helper", "demo/Base.java") not in extracted
-        assert result.import_graph == {}
+
+    @pytest.mark.asyncio
+    async def test_java_constructor_dependency_slice_tracks_this_constructor_chain(
+        self, pro_server, tmp_path
+    ):
+        """[20260309_TEST] Java dependency extraction should include this(...) constructor chaining targets."""
+        target_file = tmp_path / "Helper.java"
+        target_file.write_text(
+            "public class Helper {\n"
+            "    public Helper() {\n"
+            "        this(1);\n"
+            "    }\n\n"
+            "    public Helper(int value) {\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        result = await pro_server.get_cross_file_dependencies(
+            target_file=str(target_file),
+            target_symbol="Helper()",
+            project_root=str(tmp_path),
+            include_code=False,
+            include_diagram=False,
+        )
+
+        assert result.success is True
+        extracted = {(symbol.name, symbol.file) for symbol in result.extracted_symbols}
+        assert ("Helper.Helper()", "Helper.java") in extracted
+        assert ("Helper.Helper(int)", "Helper.java") in extracted
+
+    @pytest.mark.asyncio
+    async def test_java_constructor_dependency_slice_tracks_super_constructor_chain(
+        self, pro_server, tmp_path
+    ):
+        """[20260309_TEST] Java dependency extraction should include super(...) constructor chaining targets across files."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+        (package_dir / "Base.java").write_text(
+            "package demo;\n\n"
+            "public class Base {\n"
+            "    public Base(String value) {\n"
+            "    }\n\n"
+            "    public Base(int value) {\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        target_file = package_dir / "Child.java"
+        target_file.write_text(
+            "package demo;\n\n"
+            "public class Child extends Base {\n"
+            "    public Child() {\n"
+            "        super(1);\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        result = await pro_server.get_cross_file_dependencies(
+            target_file=str(target_file),
+            target_symbol="Child()",
+            project_root=str(tmp_path),
+            include_code=False,
+            include_diagram=False,
+        )
+
+        assert result.success is True
+        extracted = {(symbol.name, symbol.file) for symbol in result.extracted_symbols}
+        assert ("Child.Child", "demo/Child.java") in extracted
+        assert ("Base.Base(int)", "demo/Base.java") in extracted
+        assert ("Base.Base(String)", "demo/Base.java") not in extracted
+        assert result.import_graph == {"demo/Child.java": ["demo/Base.java"]}
+
+    @pytest.mark.asyncio
+    async def test_java_dependency_slice_infers_var_locals_for_overloaded_calls(
+        self, pro_server, tmp_path
+    ):
+        """[20260309_TEST] Java dependency extraction should infer var local types from initializers for overloaded call targets."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+        (package_dir / "Helper.java").write_text(
+            "package demo;\n\n"
+            "public class Helper {\n"
+            "    public static void tool(int value) {\n"
+            "    }\n\n"
+            "    public static void tool(String value) {\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        target_file = package_dir / "App.java"
+        target_file.write_text(
+            "package demo;\n\n"
+            "public class App {\n"
+            "    public void run() {\n"
+            "        var value = make();\n"
+            "        Helper.tool(value);\n"
+            "    }\n\n"
+            "    public String make() {\n"
+            '        return "ok";\n'
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        result = await pro_server.get_cross_file_dependencies(
+            target_file=str(target_file),
+            target_symbol="run",
+            project_root=str(tmp_path),
+            include_code=False,
+            include_diagram=False,
+        )
+
+        assert result.success is True
+        extracted = {(symbol.name, symbol.file) for symbol in result.extracted_symbols}
+        assert ("App.make", "demo/App.java") in extracted
+        assert ("Helper.tool(String)", "demo/Helper.java") in extracted
+        assert ("Helper.tool(int)", "demo/Helper.java") not in extracted
+
+    @pytest.mark.asyncio
+    async def test_java_dependency_slice_infers_field_access_types_for_overloaded_calls(
+        self, pro_server, tmp_path
+    ):
+        """[20260309_TEST] Java dependency extraction should use field-access types like this.name for overloaded call targets."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+        (package_dir / "Helper.java").write_text(
+            "package demo;\n\n"
+            "public class Helper {\n"
+            "    public static void tool(int value) {\n"
+            "    }\n\n"
+            "    public static void tool(String value) {\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        target_file = package_dir / "App.java"
+        target_file.write_text(
+            "package demo;\n\n"
+            "public class App {\n"
+            "    private String name;\n\n"
+            "    public void run() {\n"
+            "        Helper.tool(this.name);\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        result = await pro_server.get_cross_file_dependencies(
+            target_file=str(target_file),
+            target_symbol="run",
+            project_root=str(tmp_path),
+            include_code=False,
+            include_diagram=False,
+        )
+
+        assert result.success is True
+        extracted = {(symbol.name, symbol.file) for symbol in result.extracted_symbols}
+        assert ("Helper.tool(String)", "demo/Helper.java") in extracted
+        assert ("Helper.tool(int)", "demo/Helper.java") not in extracted
+
+    @pytest.mark.asyncio
+    async def test_java_dependency_slice_matches_boxed_arguments_for_overloaded_method_calls(
+        self, pro_server, tmp_path
+    ):
+        """[20260309_TEST] Java dependency extraction should treat boxed and primitive types as compatible when selecting overloaded method call targets."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+        (package_dir / "Helper.java").write_text(
+            "package demo;\n\n"
+            "public class Helper {\n"
+            "    public static void tool(int value) {\n"
+            "    }\n\n"
+            "    public static void tool(String value) {\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        target_file = package_dir / "App.java"
+        target_file.write_text(
+            "package demo;\n\n"
+            "public class App {\n"
+            "    public void run() {\n"
+            "        Integer value = 7;\n"
+            "        Helper.tool(value);\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        result = await pro_server.get_cross_file_dependencies(
+            target_file=str(target_file),
+            target_symbol="run",
+            project_root=str(tmp_path),
+            include_code=False,
+            include_diagram=False,
+        )
+
+        assert result.success is True
+        extracted = {(symbol.name, symbol.file) for symbol in result.extracted_symbols}
+        assert ("Helper.tool(int)", "demo/Helper.java") in extracted
+        assert ("Helper.tool(String)", "demo/Helper.java") not in extracted
+
+    @pytest.mark.asyncio
+    async def test_java_dependency_slice_matches_boxed_arguments_for_overloaded_constructors(
+        self, pro_server, tmp_path
+    ):
+        """[20260309_TEST] Java dependency extraction should treat boxed and primitive types as compatible when selecting overloaded constructors from direct object creation."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+        (package_dir / "Box.java").write_text(
+            "package demo;\n\n"
+            "public class Box {\n"
+            "    public Box(int value) {\n"
+            "    }\n\n"
+            "    public Box(String value) {\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        target_file = package_dir / "App.java"
+        target_file.write_text(
+            "package demo;\n\n"
+            "public class App {\n"
+            "    public void run() {\n"
+            "        Integer value = 7;\n"
+            "        new Box(value);\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        result = await pro_server.get_cross_file_dependencies(
+            target_file=str(target_file),
+            target_symbol="run",
+            project_root=str(tmp_path),
+            include_code=False,
+            include_diagram=False,
+        )
+
+        assert result.success is True
+        extracted = {(symbol.name, symbol.file) for symbol in result.extracted_symbols}
+        assert ("Box.Box(int)", "demo/Box.java") in extracted
+        assert ("Box.Box(String)", "demo/Box.java") not in extracted
+
+    @pytest.mark.asyncio
+    async def test_java_dependency_slice_infers_functional_interface_return_types_for_overloaded_calls(
+        self, pro_server, tmp_path
+    ):
+        """[20260309_TEST] Java dependency extraction should use functional-interface generic return types when method-reference-backed abstractions feed overloaded call targets."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+        (package_dir / "Helper.java").write_text(
+            "package demo;\n\n"
+            "public class Helper {\n"
+            "    public static void tool(int value) {\n"
+            "    }\n\n"
+            "    public static void tool(String value) {\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        target_file = package_dir / "App.java"
+        target_file.write_text(
+            "package demo;\n\n"
+            "import java.util.function.Supplier;\n\n"
+            "public class App {\n"
+            "    public void run() {\n"
+            "        Supplier<String> supplier = this::make;\n"
+            "        Helper.tool(supplier.get());\n"
+            "    }\n\n"
+            "    public String make() {\n"
+            '        return "ok";\n'
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        result = await pro_server.get_cross_file_dependencies(
+            target_file=str(target_file),
+            target_symbol="run",
+            project_root=str(tmp_path),
+            include_code=False,
+            include_diagram=False,
+        )
+
+        assert result.success is True
+        extracted = {(symbol.name, symbol.file) for symbol in result.extracted_symbols}
+        assert ("Helper.tool(String)", "demo/Helper.java") in extracted
+        assert ("Helper.tool(int)", "demo/Helper.java") not in extracted
+
+    @pytest.mark.asyncio
+    async def test_java_dependency_slice_tracks_simple_method_reference_edges(
+        self, pro_server, tmp_path
+    ):
+        """[20260309_TEST] Java dependency extraction should retain direct method-reference targets like this::make."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+        target_file = package_dir / "App.java"
+        target_file.write_text(
+            "package demo;\n\n"
+            "public class App {\n"
+            "    public void run() {\n"
+            "        Runnable runnable = this::make;\n"
+            "    }\n\n"
+            "    public void make() {\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        result = await pro_server.get_cross_file_dependencies(
+            target_file=str(target_file),
+            target_symbol="run",
+            project_root=str(tmp_path),
+            include_code=False,
+            include_diagram=False,
+        )
+
+        assert result.success is True
+        extracted = {(symbol.name, symbol.file) for symbol in result.extracted_symbols}
+        assert ("App.make", "demo/App.java") in extracted
+
+    @pytest.mark.asyncio
+    async def test_java_dependency_slice_infers_lambda_parameter_types_for_overloaded_calls(
+        self, pro_server, tmp_path
+    ):
+        """[20260309_TEST] Java dependency extraction should use functional-interface parameter types inside lambda bodies for overloaded call targets."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+        (package_dir / "Helper.java").write_text(
+            "package demo;\n\n"
+            "public class Helper {\n"
+            "    public static void tool(int value) {\n"
+            "    }\n\n"
+            "    public static void tool(String value) {\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        target_file = package_dir / "App.java"
+        target_file.write_text(
+            "package demo;\n\n"
+            "import java.util.function.Consumer;\n\n"
+            "public class App {\n"
+            "    public void run() {\n"
+            "        Consumer<String> consumer = value -> Helper.tool(value);\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        result = await pro_server.get_cross_file_dependencies(
+            target_file=str(target_file),
+            target_symbol="run",
+            project_root=str(tmp_path),
+            include_code=False,
+            include_diagram=False,
+        )
+
+        assert result.success is True
+        extracted = {(symbol.name, symbol.file) for symbol in result.extracted_symbols}
+        assert ("Helper.tool(String)", "demo/Helper.java") in extracted
+        assert ("Helper.tool(int)", "demo/Helper.java") not in extracted
+
+    @pytest.mark.asyncio
+    async def test_java_dependency_slice_preserves_lambda_block_local_flow_for_overloaded_calls(
+        self, pro_server, tmp_path
+    ):
+        """[20260309_TEST] Java dependency extraction should keep lambda block bodies selector-aware after local declaration and assignment flow."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+        (package_dir / "Helper.java").write_text(
+            "package demo;\n\n"
+            "public class Helper {\n"
+            "    public static void tool(int value) {\n"
+            "    }\n\n"
+            "    public static void tool(String value) {\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        target_file = package_dir / "App.java"
+        target_file.write_text(
+            "package demo;\n\n"
+            "import java.util.function.Consumer;\n\n"
+            "public class App {\n"
+            "    public void run() {\n"
+            "        Consumer<String> consumer = value -> {\n"
+            "            String local;\n"
+            "            local = value;\n"
+            "            Helper.tool(local);\n"
+            "        };\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        result = await pro_server.get_cross_file_dependencies(
+            target_file=str(target_file),
+            target_symbol="run",
+            project_root=str(tmp_path),
+            include_code=False,
+            include_diagram=False,
+        )
+
+        assert result.success is True
+        extracted = {(symbol.name, symbol.file) for symbol in result.extracted_symbols}
+        assert ("Helper.tool(String)", "demo/Helper.java") in extracted
+        assert ("Helper.tool(int)", "demo/Helper.java") not in extracted
+
+    @pytest.mark.asyncio
+    async def test_java_dependency_slice_preserves_multi_parameter_lambda_block_local_flow(
+        self, pro_server, tmp_path
+    ):
+        """[20260309_TEST] Java dependency extraction should keep multi-parameter lambda block bodies selector-aware after mixed local flow refinements."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+        (package_dir / "Helper.java").write_text(
+            "package demo;\n\n"
+            "public class Helper {\n"
+            "    public static void tool(int left, String right) {\n"
+            "    }\n\n"
+            "    public static void tool(String left, String right) {\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        target_file = package_dir / "App.java"
+        target_file.write_text(
+            "package demo;\n\n"
+            "import java.util.function.BiConsumer;\n\n"
+            "public class App {\n"
+            "    public void run() {\n"
+            "        BiConsumer<Integer, String> consumer = (left, right) -> {\n"
+            "            Integer localLeft = left;\n"
+            "            String localRight;\n"
+            "            localRight = right;\n"
+            "            Helper.tool(localLeft, localRight);\n"
+            "        };\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        result = await pro_server.get_cross_file_dependencies(
+            target_file=str(target_file),
+            target_symbol="run",
+            project_root=str(tmp_path),
+            include_code=False,
+            include_diagram=False,
+        )
+
+        assert result.success is True
+        extracted = {(symbol.name, symbol.file) for symbol in result.extracted_symbols}
+        assert ("Helper.tool(int, String)", "demo/Helper.java") in extracted
+        assert ("Helper.tool(String, String)", "demo/Helper.java") not in extracted
+
+    @pytest.mark.asyncio
+    async def test_java_dependency_slice_tracks_constructor_method_reference_edges(
+        self, pro_server, tmp_path
+    ):
+        """[20260309_TEST] Java dependency extraction should resolve constructor references like Box::new to canonical constructor targets."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+        (package_dir / "Box.java").write_text(
+            "package demo;\n\n"
+            "public class Box {\n"
+            "    public Box() {\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        target_file = package_dir / "App.java"
+        target_file.write_text(
+            "package demo;\n\n"
+            "import java.util.function.Supplier;\n\n"
+            "public class App {\n"
+            "    public void run() {\n"
+            "        Supplier<Box> supplier = Box::new;\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        result = await pro_server.get_cross_file_dependencies(
+            target_file=str(target_file),
+            target_symbol="run",
+            project_root=str(tmp_path),
+            include_code=False,
+            include_diagram=False,
+        )
+
+        assert result.success is True
+        extracted = {(symbol.name, symbol.file) for symbol in result.extracted_symbols}
+        assert ("Box.Box", "demo/Box.java") in extracted
+
+    @pytest.mark.asyncio
+    async def test_java_dependency_slice_tracks_overloaded_function_constructor_reference_edges(
+        self, pro_server, tmp_path
+    ):
+        """[20260309_TEST] Java dependency extraction should use Function<T, R> parameter types to select overloaded constructor references."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+        (package_dir / "Box.java").write_text(
+            "package demo;\n\n"
+            "public class Box {\n"
+            "    public Box(int value) {\n"
+            "    }\n\n"
+            "    public Box(String value) {\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        target_file = package_dir / "App.java"
+        target_file.write_text(
+            "package demo;\n\n"
+            "import java.util.function.Function;\n\n"
+            "public class App {\n"
+            "    public void run() {\n"
+            "        Function<String, Box> factory = Box::new;\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        result = await pro_server.get_cross_file_dependencies(
+            target_file=str(target_file),
+            target_symbol="run",
+            project_root=str(tmp_path),
+            include_code=False,
+            include_diagram=False,
+        )
+
+        assert result.success is True
+        extracted = {(symbol.name, symbol.file) for symbol in result.extracted_symbols}
+        assert ("Box.Box(String)", "demo/Box.java") in extracted
+        assert ("Box.Box(int)", "demo/Box.java") not in extracted
+
+    @pytest.mark.asyncio
+    async def test_java_dependency_slice_tracks_overloaded_bifunction_constructor_reference_edges(
+        self, pro_server, tmp_path
+    ):
+        """[20260309_TEST] Java dependency extraction should use BiFunction<A, B, R> parameter types, including boxed primitives, to select overloaded constructor references."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+        (package_dir / "Box.java").write_text(
+            "package demo;\n\n"
+            "public class Box {\n"
+            "    public Box(int left, String right) {\n"
+            "    }\n\n"
+            "    public Box(String left, String right) {\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        target_file = package_dir / "App.java"
+        target_file.write_text(
+            "package demo;\n\n"
+            "import java.util.function.BiFunction;\n\n"
+            "public class App {\n"
+            "    public void run() {\n"
+            "        BiFunction<Integer, String, Box> factory = Box::new;\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        result = await pro_server.get_cross_file_dependencies(
+            target_file=str(target_file),
+            target_symbol="run",
+            project_root=str(tmp_path),
+            include_code=False,
+            include_diagram=False,
+        )
+
+        assert result.success is True
+        extracted = {(symbol.name, symbol.file) for symbol in result.extracted_symbols}
+        assert ("Box.Box(int, String)", "demo/Box.java") in extracted
+        assert ("Box.Box(String, String)", "demo/Box.java") not in extracted
+
+    @pytest.mark.asyncio
+    async def test_java_dependency_slice_tracks_qualified_static_method_reference_edges(
+        self, pro_server, tmp_path
+    ):
+        """[20260309_TEST] Java dependency extraction should resolve imported or qualified static method references to canonical targets."""
+        util_dir = tmp_path / "util"
+        util_dir.mkdir()
+        (util_dir / "Factory.java").write_text(
+            "package util;\n\n"
+            "public class Factory {\n"
+            "    public static String make() {\n"
+            '        return "ok";\n'
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        demo_dir = tmp_path / "demo"
+        demo_dir.mkdir()
+        target_file = demo_dir / "App.java"
+        target_file.write_text(
+            "package demo;\n\n"
+            "import java.util.function.Supplier;\n"
+            "import util.Factory;\n\n"
+            "public class App {\n"
+            "    public void run() {\n"
+            "        Supplier<String> supplier = Factory::make;\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        result = await pro_server.get_cross_file_dependencies(
+            target_file=str(target_file),
+            target_symbol="run",
+            project_root=str(tmp_path),
+            include_code=False,
+            include_diagram=False,
+        )
+
+        assert result.success is True
+        extracted = {(symbol.name, symbol.file) for symbol in result.extracted_symbols}
+        assert ("Factory.make", "util/Factory.java") in extracted
+
+    @pytest.mark.asyncio
+    async def test_java_dependency_slice_infers_custom_sam_lambda_parameter_types_for_overloaded_calls(
+        self, pro_server, tmp_path
+    ):
+        """[20260309_TEST] Java dependency extraction should use project-local generic SAM interfaces to type lambda parameters for overloaded call targets."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+        (package_dir / "Helper.java").write_text(
+            "package demo;\n\n"
+            "public class Helper {\n"
+            "    public static void tool(int value) {\n"
+            "    }\n\n"
+            "    public static void tool(String value) {\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        target_file = package_dir / "App.java"
+        target_file.write_text(
+            "package demo;\n\n"
+            "interface Mapper<T> {\n"
+            "    void apply(T value);\n"
+            "}\n\n"
+            "public class App {\n"
+            "    public void run() {\n"
+            "        Mapper<String> mapper = value -> Helper.tool(value);\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        result = await pro_server.get_cross_file_dependencies(
+            target_file=str(target_file),
+            target_symbol="run",
+            project_root=str(tmp_path),
+            include_code=False,
+            include_diagram=False,
+        )
+
+        assert result.success is True
+        extracted = {(symbol.name, symbol.file) for symbol in result.extracted_symbols}
+        assert ("Helper.tool(String)", "demo/Helper.java") in extracted
+        assert ("Helper.tool(int)", "demo/Helper.java") not in extracted
+
+    @pytest.mark.asyncio
+    async def test_java_dependency_slice_tracks_custom_sam_constructor_reference_edges(
+        self, pro_server, tmp_path
+    ):
+        """[20260309_TEST] Java dependency extraction should use project-local generic SAM interfaces to select overloaded constructor references."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+        (package_dir / "Box.java").write_text(
+            "package demo;\n\n"
+            "public class Box {\n"
+            "    public Box(int value) {\n"
+            "    }\n\n"
+            "    public Box(String value) {\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        target_file = package_dir / "App.java"
+        target_file.write_text(
+            "package demo;\n\n"
+            "interface Factory<T, R> {\n"
+            "    R create(T value);\n"
+            "}\n\n"
+            "public class App {\n"
+            "    public void run() {\n"
+            "        Factory<String, Box> factory = Box::new;\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        result = await pro_server.get_cross_file_dependencies(
+            target_file=str(target_file),
+            target_symbol="run",
+            project_root=str(tmp_path),
+            include_code=False,
+            include_diagram=False,
+        )
+
+        assert result.success is True
+        extracted = {(symbol.name, symbol.file) for symbol in result.extracted_symbols}
+        assert ("Box.Box(String)", "demo/Box.java") in extracted
+        assert ("Box.Box(int)", "demo/Box.java") not in extracted
+
+    @pytest.mark.asyncio
+    async def test_java_dependency_slice_infers_multi_parameter_custom_sam_lambda_types(
+        self, pro_server, tmp_path
+    ):
+        """[20260309_TEST] Java dependency extraction should use project-local multi-parameter SAM interfaces to type lambda parameters for overloaded call targets."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+        (package_dir / "Helper.java").write_text(
+            "package demo;\n\n"
+            "public class Helper {\n"
+            "    public static void tool(int left, String right) {\n"
+            "    }\n\n"
+            "    public static void tool(String left, String right) {\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        target_file = package_dir / "App.java"
+        target_file.write_text(
+            "package demo;\n\n"
+            "interface Combiner<A, B> {\n"
+            "    void apply(A left, B right);\n"
+            "}\n\n"
+            "public class App {\n"
+            "    public void run() {\n"
+            "        Combiner<Integer, String> combiner = (left, right) -> Helper.tool(left, right);\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        result = await pro_server.get_cross_file_dependencies(
+            target_file=str(target_file),
+            target_symbol="run",
+            project_root=str(tmp_path),
+            include_code=False,
+            include_diagram=False,
+        )
+
+        assert result.success is True
+        extracted = {(symbol.name, symbol.file) for symbol in result.extracted_symbols}
+        assert ("Helper.tool(int, String)", "demo/Helper.java") in extracted
+        assert ("Helper.tool(String, String)", "demo/Helper.java") not in extracted
+
+    @pytest.mark.asyncio
+    async def test_java_dependency_slice_infers_inherited_custom_sam_lambda_types(
+        self, pro_server, tmp_path
+    ):
+        """[20260309_TEST] Java dependency extraction should resolve inherited project-local SAM signatures for lambdas."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+        (package_dir / "Helper.java").write_text(
+            "package demo;\n\n"
+            "public class Helper {\n"
+            "    public static void tool(int value) {\n"
+            "    }\n\n"
+            "    public static void tool(String value) {\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        target_file = package_dir / "App.java"
+        target_file.write_text(
+            "package demo;\n\n"
+            "interface BaseMapper<T> {\n"
+            "    void apply(T value);\n"
+            "}\n\n"
+            "interface Mapper<T> extends BaseMapper<T> {\n"
+            "}\n\n"
+            "public class App {\n"
+            "    public void run() {\n"
+            "        Mapper<String> mapper = value -> Helper.tool(value);\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        result = await pro_server.get_cross_file_dependencies(
+            target_file=str(target_file),
+            target_symbol="run",
+            project_root=str(tmp_path),
+            include_code=False,
+            include_diagram=False,
+        )
+
+        assert result.success is True
+        extracted = {(symbol.name, symbol.file) for symbol in result.extracted_symbols}
+        assert ("Helper.tool(String)", "demo/Helper.java") in extracted
+        assert ("Helper.tool(int)", "demo/Helper.java") not in extracted
+
+    @pytest.mark.asyncio
+    async def test_java_dependency_slice_tracks_inherited_custom_sam_constructor_reference_edges(
+        self, pro_server, tmp_path
+    ):
+        """[20260309_TEST] Java dependency extraction should resolve inherited project-local SAM signatures for constructor references."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+        (package_dir / "Box.java").write_text(
+            "package demo;\n\n"
+            "public class Box {\n"
+            "    public Box(int value) {\n"
+            "    }\n\n"
+            "    public Box(String value) {\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        target_file = package_dir / "App.java"
+        target_file.write_text(
+            "package demo;\n\n"
+            "interface BaseFactory<T, R> {\n"
+            "    R create(T value);\n"
+            "}\n\n"
+            "interface Factory<T, R> extends BaseFactory<T, R> {\n"
+            "}\n\n"
+            "public class App {\n"
+            "    public void run() {\n"
+            "        Factory<String, Box> factory = Box::new;\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        result = await pro_server.get_cross_file_dependencies(
+            target_file=str(target_file),
+            target_symbol="run",
+            project_root=str(tmp_path),
+            include_code=False,
+            include_diagram=False,
+        )
+
+        assert result.success is True
+        extracted = {(symbol.name, symbol.file) for symbol in result.extracted_symbols}
+        assert ("Box.Box(String)", "demo/Box.java") in extracted
+        assert ("Box.Box(int)", "demo/Box.java") not in extracted
 
 
 class TestCircularImportContent:
@@ -1007,3 +1897,42 @@ class TestMaxDepthReachedAccuracy:
 
         # For deep chain project, should have meaningful depth
         assert result.max_depth_reached > 0, "Should find some depth"
+
+
+class TestGoDependencySliceContent:
+    """Validate Go graph-backed dependency slice content."""
+
+    @pytest.mark.asyncio
+    async def test_go_dependency_chains_use_relative_file_modules(
+        self, pro_server, tmp_path
+    ):
+        """[20260311_TEST] Go graph-backed slices should preserve relative file-backed module paths."""
+        pytest.importorskip("tree_sitter_go")
+
+        (tmp_path / "main.go").write_text(
+            "package main\n\n"
+            "func main() {\n"
+            "\thelper()\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "helper.go").write_text(
+            "package main\n\n"
+            "func helper() {\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        result = await pro_server.get_cross_file_dependencies(
+            target_file=str(tmp_path / "main.go"),
+            target_symbol="main",
+            project_root=str(tmp_path),
+        )
+
+        assert result.success is True
+        assert result.target_file == "main.go"
+        extracted = {(symbol.name, symbol.file) for symbol in result.extracted_symbols}
+        assert ("main", "main.go") in extracted
+        assert ("helper", "helper.go") in extracted
+        assert result.import_graph == {"main.go": ["helper.go"]}
+        assert ["main.go", "helper.go"] in result.dependency_chains

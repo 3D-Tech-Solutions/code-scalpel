@@ -70,6 +70,7 @@ from ..ir.nodes import (
     IRCompare,
     IRConstant,
     IRContinue,
+    IRExport,
     IRExpr,
     IRExprStmt,
     IRFor,
@@ -542,6 +543,8 @@ _SEMANTICS_REGISTRY: Dict[str, Type[LanguageSemantics]] = {
     "python": PythonSemantics,
     "javascript": JavaScriptSemantics,
     "js": JavaScriptSemantics,
+    "typescript": JavaScriptSemantics,
+    "ts": JavaScriptSemantics,
     "unknown": PythonSemantics,  # Default to Python
 }
 
@@ -743,6 +746,10 @@ class IRSymbolicInterpreter(IRNodeVisitor):
         elif isinstance(stmt, IRExprStmt):
             # Expression statement - evaluate for side effects
             self._eval_expr(stmt.value, state)
+            return [state]
+        elif isinstance(stmt, IRExport):
+            if stmt.declaration is not None:
+                return self._execute_statement(stmt.declaration, state, result)
             return [state]
         elif isinstance(stmt, (IRFunctionDef, IRClassDef)):
             # Skip definitions (not executed at module level)

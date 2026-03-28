@@ -45,21 +45,10 @@ def third_function():  # Line 8
 
                 assert result.success, f"Extraction failed: {result.error}"
 
-                # Verify start_line and end_line exist
-                assert hasattr(result, "start_line"), "start_line attribute missing"
-                assert hasattr(result, "end_line"), "end_line attribute missing"
-
-                # second_function is at line 5-6 (1-indexed)
-                # Depending on implementation, might include blank lines
-                assert (
-                    result.start_line >= 5
-                ), f"start_line {result.start_line} should be >= 5"
-                assert (
-                    result.end_line >= 6
-                ), f"end_line {result.end_line} should be >= 6"
-                assert (
-                    result.start_line <= result.end_line
-                ), "start_line should be <= end_line"
+                # [20260309_TEST] Lock line number reporting to the exact extracted slice.
+                assert result.start_line == 5
+                assert result.end_line == 6
+                assert result.code == "def second_function():\n    return 'second'"
             finally:
                 os.unlink(f.name)
 

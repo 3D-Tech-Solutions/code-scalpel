@@ -106,6 +106,7 @@ LICENSE_CRL_PATH_ENV_VAR = "CODE_SCALPEL_LICENSE_CRL_PATH"
 
 # [20251228_FEATURE] Support explicit license file path override.
 LICENSE_PATH_ENV_VAR = "CODE_SCALPEL_LICENSE_PATH"
+PROJECT_ROOT_ENV_VAR = "CODE_SCALPEL_PROJECT_ROOT"
 
 # Try to import PyJWT, but make it optional for Community tier
 try:
@@ -332,7 +333,10 @@ BwIDAQAB
         # [20251228_FEATURE] Allow explicit path override for deployments and CLI wiring.
         explicit_path = os.getenv(LICENSE_PATH_ENV_VAR)
         if explicit_path:
-            path = Path(explicit_path).expanduser()
+            # [20260311_FEATURE] Allow ${root} placeholders in
+            # CODE_SCALPEL_LICENSE_PATH so MCP --root can be the single source
+            # of truth for both filesystem scope and license discovery.
+            path = self._resolve_explicit_license_path(explicit_path)
             # If user supplied a file, return it
             if path.exists() and path.is_file():
                 logger.debug(f"Found license file from {LICENSE_PATH_ENV_VAR}: {path}")
@@ -384,6 +388,30 @@ BwIDAQAB
 
         logger.debug("No license file found in standard locations")
         return None
+
+    @staticmethod
+    def _resolve_explicit_license_path(explicit_path: str) -> Path:
+        """Resolve placeholders in an explicit license path.
+
+        Supported placeholders:
+        - ${root}
+        - ${ROOT}
+        """
+        # [20260311_FEATURE] Expand root placeholders from the MCP startup
+        # environment. This allows config authors to use
+        # CODE_SCALPEL_LICENSE_PATH=${root}/.code-scalpel/license.
+        project_root = (
+            os.getenv(PROJECT_ROOT_ENV_VAR)
+            or os.getenv("SCALPEL_ROOT")
+            or os.getenv("CODE_SCALPEL_ROOT")
+            or ""
+        )
+        expanded = explicit_path
+        if project_root:
+            expanded = expanded.replace("${root}", project_root)
+            expanded = expanded.replace("${ROOT}", project_root)
+
+        return Path(expanded).expanduser()
 
     def load_license_token(self) -> Optional[str]:
         """

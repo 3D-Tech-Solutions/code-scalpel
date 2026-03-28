@@ -1,5 +1,7 @@
 # Marketing Materials - Enterprise Compliance
 
+> [20260310_DOCS] Runtime-aligned note: built-in HIPAA, SOC2, GDPR, and PCI-DSS checks plus compliance report generation are Enterprise-tier features. Community and Pro should be described as returning explicit `upgrade_required` responses for those requests.
+
 **Last Updated:** February 24, 2026  
 **Target Audience:** Sales, Marketing, Business Development
 
@@ -7,11 +9,31 @@
 
 ## Overview
 
-This directory contains sales and marketing collateral for Code Scalpel's Enterprise Compliance features. All materials are backed by comprehensive testing (7,575+ tests, 100% passing).
+This directory contains sales and marketing collateral for Code Scalpel's Enterprise Compliance features. Built-in compliance scanning and report generation are Enterprise-tier capabilities. All materials are backed by comprehensive testing (7,575+ tests, 100% passing).
 
 ---
 
 ## Available Materials
+
+### 0. [Presentation Library (presentations/README.md)](presentations/README.md)
+
+**Use For:** Slide deck creation for customers, clients, investors, and Aegis OS platform positioning
+
+**Content:**
+- Shared presentation system and reusable slide modules
+- Customer deck blueprint
+- Client deck blueprint
+- Investor deck blueprint
+- Aegis OS plus Code Scalpel deck blueprint
+- Presentation-ready deck scripts
+- Single bundled approval packet
+- Buyer tone variants for startup versus enterprise audiences
+- Marp-compatible slide source files
+- Technical specialist briefing for deep architecture and integration questions
+
+**Format:** Markdown deck blueprints with slide-by-slide talking points and positioning guidance
+
+---
 
 ### 1. [One-Pager (COMPLIANCE_ONE_PAGER.md)](COMPLIANCE_ONE_PAGER.md) ⭐
 
@@ -93,8 +115,8 @@ This directory contains sales and marketing collateral for Code Scalpel's Enterp
 **Buyer:** CTO or VP Engineering  
 **Pain Point:** Need HIPAA compliance for due diligence  
 **Code Scalpel Value:**
-- Automated HIPAA scanning (vs $15K consultant)
-- PDF reports for investors
+- Enterprise-tier built-in HIPAA scanning (vs $15K consultant)
+- Enterprise PDF reports for investors and auditors
 - Pass due diligence faster
 
 **Materials to Use:**
@@ -107,8 +129,8 @@ This directory contains sales and marketing collateral for Code Scalpel's Enterp
 **Buyer:** Security Officer or Compliance Lead  
 **Pain Point:** Need SOC2 for enterprise contracts  
 **Code Scalpel Value:**
-- Continuous SOC2 monitoring in CI/CD
-- Audit evidence (PDF reports)
+- Enterprise-tier SOC2 policy checks in CI/CD
+- Audit evidence via Enterprise PDF reports
 - Win $2M+ enterprise deals
 
 **Materials to Use:**
@@ -121,7 +143,7 @@ This directory contains sales and marketing collateral for Code Scalpel's Enterp
 **Buyer:** CTO or Security Lead  
 **Pain Point:** Expensive PCI-DSS consultants ($50K/year)  
 **Code Scalpel Value:**
-- Automated PCI-DSS scanning
+- Enterprise-tier built-in PCI-DSS scanning
 - 80% cost reduction
 - Zero card data leaks
 
@@ -137,7 +159,7 @@ This directory contains sales and marketing collateral for Code Scalpel's Enterp
 ### Objection 1: "We already use ESLint/Pylint"
 
 **Response:**
-- "Those are great for code style, but they don't detect HIPAA/SOC2 violations."
+- "Those are great for code style, but they don't perform Code Scalpel's built-in Enterprise HIPAA/SOC2 policy checks."
 - Show: [Capability comparison table](COMPLIANCE_COMPARISON.md#capability-comparison-vs-generic-linters)
 - Proof: Code Scalpel detects HIPAA001 (PHI in logs), ESLint doesn't
 

@@ -17,6 +17,25 @@ import re
 from dataclasses import dataclass
 from typing import Any, TypedDict
 
+from code_scalpel.ir.nodes import (
+    IRAssign,
+    IRAugAssign,
+    IRAttribute,
+    IRBinaryOp,
+    IRBoolOp,
+    IRClassDef,
+    IRCompare,
+    IRConstant,
+    IRExport,
+    IRFunctionDef,
+    IRIf,
+    IRName,
+    IRNode,
+    IRReturn,
+    IRTernary,
+    IRUnaryOp,
+)
+
 
 class SymbolicResultDict(TypedDict, total=False):
     """Type-safe structure for symbolic execution results.
@@ -29,6 +48,28 @@ class SymbolicResultDict(TypedDict, total=False):
     feasible_count: int
     infeasible_count: int
     total_paths: int
+
+
+_JAVA_UNRESOLVED = object()
+
+
+def _find_first_ir_callable(
+    nodes: list[IRNode], function_name: str | None = None
+) -> IRFunctionDef | None:
+    """[20260315_FEATURE] Find the first matching callable through class/export IR wrappers."""
+    for node in nodes:
+        if isinstance(node, IRFunctionDef):
+            if function_name is None or node.name == function_name:
+                return node
+        if isinstance(node, IRExport) and node.declaration is not None:
+            nested = _find_first_ir_callable([node.declaration], function_name)
+            if nested is not None:
+                return nested
+        if isinstance(node, IRClassDef):
+            nested = _find_first_ir_callable(node.body, function_name)
+            if nested is not None:
+                return nested
+    return None
 
 
 @dataclass
@@ -443,8 +484,7 @@ class TestGenerator:
         symbolic_result: SymbolicResultDict | dict[str, Any] | None = None,
         language: str = "python",
     ) -> GeneratedTestSuite:
-        """Generate test suite from code.
-
+        """[20260315_BUGFIX] Generate a test suite from source or symbolic results.
         Args:
             code: Source code to generate tests for
             function_name: Name of function to test (auto-detected if None)
@@ -482,7 +522,7 @@ class TestGenerator:
         function_name: str,
         language: str = "python",
     ) -> GeneratedTestSuite:
-        """Generate tests directly from a SymbolicResult dict.
+        """[20260315_BUGFIX] Generate tests directly from a symbolic result dict.
 
         Args:
             symbolic_result: Dict with paths, symbolic_variables, constraints from AnalysisResult.to_dict()
@@ -657,6 +697,16 @@ class TestGenerator:
             match = re.search(r"const\s+(\w+)\s*=\s*(?:async\s*)?\(", code)
             if match:
                 return match.group(1)
+        elif language == "typescript":
+            patterns = [
+                r"(?:export\s+)?(?:async\s+)?function\s+(\w+)\s*\(",
+                r"(?:export\s+)?const\s+(\w+)\s*=\s*(?:async\s*)?\(",
+                r"(?:export\s+)?const\s+(\w+)\s*=\s*(?:async\s*)?[A-Za-z_$][\w$]*\s*=>",
+            ]
+            for pattern in patterns:
+                match = re.search(pattern, code)
+                if match:
+                    return match.group(1)
         elif language == "java":
             # Java method detection
             match = re.search(r"(?:public|private|protected)?\s*\w+\s+(\w+)\s*\(", code)
@@ -672,7 +722,22 @@ class TestGenerator:
 
             analyzer = SymbolicAnalyzer(enable_cache=False)
             result = analyzer.analyze(code, language=language)
-            return result.to_dict()
+            result_dict = result.to_dict()
+
+            # [20260309_FEATURE] The shared Java symbolic engine currently emits a
+            # coarse single path in some cases. Fall back to branch-aware IR path
+            # analysis so generate_unit_tests can still emit concrete Java cases.
+            if language == "java":
+                raw_paths = result_dict.get("paths", [])
+                has_branch_conditions = any(
+                    path.get("constraints")
+                    for path in raw_paths
+                    if isinstance(path, dict)
+                )
+                if not has_branch_conditions:
+                    return self._basic_path_analysis(code, language)
+
+            return result_dict
         except (ImportError, ValueError, SyntaxError, Exception):
             # Fallback to basic path analysis when symbolic execution fails.
             # This keeps generate_unit_tests reliable even if Z3 cannot solve
@@ -748,11 +813,249 @@ class TestGenerator:
             except SyntaxError:
                 pass
 
+        elif language == "java":
+            func_node = self._get_java_function_ir(code)
+            if func_node is not None:
+                symbolic_vars = [param.name for param in func_node.params if param.name]
+                raw_paths = self._enumerate_java_paths(func_node.body)
+                if not raw_paths:
+                    raw_paths = [[]]
+
+                for condition_list in raw_paths:
+                    for condition in condition_list:
+                        if condition not in constraints:
+                            constraints.append(condition)
+
+                for path_id, condition_list in enumerate(raw_paths):
+                    state = self._build_java_state_for_conditions(
+                        condition_list, symbolic_vars
+                    )
+                    paths.append(
+                        {
+                            "path_id": path_id,
+                            "conditions": condition_list,
+                            "state": state,
+                            "reachable": True,
+                        }
+                    )
+
+                if not paths:
+                    paths.append(
+                        {
+                            "path_id": 0,
+                            "conditions": [],
+                            "state": {var: 0 for var in symbolic_vars},
+                            "reachable": True,
+                        }
+                    )
+
         return {
             "paths": paths,
             "symbolic_vars": symbolic_vars,
             "constraints": constraints,
         }
+
+    def _get_java_function_context(
+        self, code: str, function_name: str | None = None
+    ) -> tuple[IRFunctionDef | None, dict[str, Any]]:
+        """[20260309_BUGFIX] Return Java method IR plus simple enclosing field initializers."""
+        try:
+            from code_scalpel.ir.normalizers.java_normalizer import JavaNormalizer
+
+            ir_module = JavaNormalizer().normalize(code)
+        except Exception:
+            return None, {}
+
+        def collect_class_fields(class_node: IRClassDef) -> dict[str, Any]:
+            fields: dict[str, Any] = {}
+            for child in class_node.body:
+                if not isinstance(child, IRAssign):
+                    continue
+                target = child.targets[0] if child.targets else None
+                if isinstance(target, IRName):
+                    fields[target.id] = child.value
+            return fields
+
+        def walk(nodes: list[IRNode]) -> tuple[IRFunctionDef | None, dict[str, Any]]:
+            for node in nodes:
+                if isinstance(node, IRFunctionDef):
+                    if function_name is None or node.name == function_name:
+                        return node, {}
+                if isinstance(node, IRClassDef):
+                    class_fields = collect_class_fields(node)
+                    for child in node.body:
+                        if isinstance(child, IRFunctionDef):
+                            if function_name is None or child.name == function_name:
+                                return child, class_fields
+                        if isinstance(child, IRClassDef):
+                            nested, nested_fields = walk([child])
+                            if nested is not None:
+                                return nested, nested_fields
+            return None, {}
+
+        return walk(getattr(ir_module, "body", []))
+
+    def _get_java_function_ir(
+        self, code: str, function_name: str | None = None
+    ) -> IRFunctionDef | None:
+        """Return a Java method/function IR node from the snippet."""
+        func_node, _ = self._get_java_function_context(code, function_name)
+        return func_node
+
+    def _get_typescript_function_ir(
+        self, code: str, function_name: str | None = None
+    ) -> IRFunctionDef | None:
+        """[20260315_FEATURE] Return a TypeScript function IR node from the snippet."""
+        try:
+            from code_scalpel.ir.normalizers.typescript_normalizer import (
+                TypeScriptNormalizer,
+            )
+
+            ir_module = TypeScriptNormalizer().normalize(code)
+        except Exception:
+            return None
+
+        return _find_first_ir_callable(getattr(ir_module, "body", []), function_name)
+
+    def _java_expr_to_text(self, expr: Any) -> str:
+        """Render a readable Java IR expression for path and return analysis."""
+        if expr is None:
+            return "condition"
+        if isinstance(expr, IRName):
+            return expr.id or "name"
+        if isinstance(expr, IRConstant):
+            if isinstance(expr.value, str):
+                return repr(expr.value)
+            return str(expr.value)
+        if isinstance(expr, IRCompare):
+            left_text = self._java_expr_to_text(expr.left)
+            current = left_text
+            parts = []
+            for op, comparator in zip(expr.ops, expr.comparators):
+                right_text = self._java_expr_to_text(comparator)
+                parts.append(f"{current} {op.value} {right_text}")
+                current = right_text
+            return " and ".join(parts) if parts else left_text
+        if isinstance(expr, IRBoolOp):
+            op_text = f" {expr.op.value} " if expr.op is not None else " && "
+            return op_text.join(self._java_expr_to_text(value) for value in expr.values)
+        if isinstance(expr, IRUnaryOp):
+            op_text = expr.op.value if expr.op is not None else "!"
+            return f"{op_text}{self._java_expr_to_text(expr.operand)}"
+        return str(expr)
+
+    def _enumerate_java_paths(self, statements: list[IRNode]) -> list[list[str]]:
+        """Enumerate simple Java branch condition paths from IR statements."""
+
+        def walk_block(
+            block: list[IRNode], active_paths: list[list[str]]
+        ) -> tuple[list[list[str]], list[list[str]]]:
+            terminal_paths: list[list[str]] = []
+            current_paths = active_paths
+
+            for stmt in block:
+                if isinstance(stmt, IRReturn):
+                    if isinstance(stmt.value, IRTernary):
+                        condition = self._java_expr_to_text(stmt.value.test)
+                        for base in current_paths:
+                            terminal_paths.append(base + [condition])
+                            terminal_paths.append(base + [f"!({condition})"])
+                        return terminal_paths, []
+                    terminal_paths.extend(current_paths)
+                    return terminal_paths, []
+
+                if not isinstance(stmt, IRIf):
+                    continue
+
+                condition = self._java_expr_to_text(stmt.test)
+                next_active: list[list[str]] = []
+
+                for base in current_paths:
+                    true_terminal, true_active = walk_block(
+                        stmt.body, [base + [condition]]
+                    )
+                    terminal_paths.extend(true_terminal)
+
+                    if stmt.orelse:
+                        false_terminal, false_active = walk_block(
+                            stmt.orelse, [base + [f"!({condition})"]]
+                        )
+                    else:
+                        false_terminal, false_active = (
+                            [],
+                            [base + [f"!({condition})"]],
+                        )
+
+                    terminal_paths.extend(false_terminal)
+                    next_active.extend(true_active)
+                    next_active.extend(false_active)
+
+                current_paths = next_active
+
+            return terminal_paths, current_paths
+
+        terminal_paths, fallthrough_paths = walk_block(statements, [[]])
+        all_paths = terminal_paths + fallthrough_paths
+        return all_paths or [[]]
+
+    def _condition_matches_value(self, condition: str, var: str, value: Any) -> bool:
+        """Check whether a concrete value satisfies a simple generated condition."""
+        condition = condition.strip()
+        should_satisfy = True
+        if condition.startswith("!(") and condition.endswith(")"):
+            should_satisfy = False
+            condition = condition[2:-1].strip()
+
+        if condition == var:
+            result = bool(value)
+            return result if should_satisfy else not result
+
+        match = re.search(rf"{var}\s*([<>]=?|==|!=)\s*(-?\d+(?:\.\d+)?)", condition)
+        if not match:
+            return True
+
+        op = match.group(1)
+        threshold = float(match.group(2))
+        numeric_value = float(value)
+        comparisons = {
+            ">": numeric_value > threshold,
+            ">=": numeric_value >= threshold,
+            "<": numeric_value < threshold,
+            "<=": numeric_value <= threshold,
+            "==": numeric_value == threshold,
+            "!=": numeric_value != threshold,
+        }
+        result = comparisons.get(op, True)
+        return result if should_satisfy else not result
+
+    def _build_java_state_for_conditions(
+        self, conditions: list[str], symbolic_vars: list[str]
+    ) -> dict[str, Any]:
+        """Create concrete Java inputs that satisfy the enumerated path conditions."""
+        state = {var: 0 for var in symbolic_vars}
+
+        for condition in conditions:
+            for var in symbolic_vars:
+                if var not in condition:
+                    continue
+                if condition == var or condition == f"!({var})":
+                    state[var] = condition == var
+                    continue
+                should_satisfy = not (
+                    condition.startswith("!(") and condition.endswith(")")
+                )
+                base_condition = (
+                    condition[2:-1].strip()
+                    if condition.startswith("!(") and condition.endswith(")")
+                    else condition
+                )
+                candidate = self._generate_satisfying_value(
+                    base_condition, var, should_satisfy
+                )
+                if not self._condition_matches_value(condition, var, state[var]):
+                    state[var] = candidate
+
+        return state
 
     def _generate_satisfying_value(
         self, condition: str, var: str, should_satisfy: bool
@@ -946,6 +1249,27 @@ class TestGenerator:
         Returns:
             A concrete expected return value, or None if unsupported.
         """
+        if language == "java":
+            func_node, class_fields = self._get_java_function_context(
+                code, function_name
+            )
+            if func_node is None:
+                return None
+            java_state = dict(inputs)
+            for field_name, field_value in class_fields.items():
+                evaluated = self._evaluate_java_expr(field_value, java_state)
+                if evaluated is None:
+                    evaluated = self._java_ir_value_to_python(field_value)
+                if evaluated is not None:
+                    java_state[field_name] = evaluated
+            return self._safe_interpret_return_java(func_node.body, java_state)
+
+        if language == "typescript":
+            func_node = self._get_typescript_function_ir(code, function_name)
+            if func_node is None:
+                return None
+            return self._safe_interpret_return_java(func_node.body, dict(inputs))
+
         if language != "python":
             return None
 
@@ -1045,6 +1369,205 @@ class TestGenerator:
 
         return walk_statements(func_node.body)
 
+    def _evaluate_java_condition(self, expr: Any, inputs: dict[str, Any]) -> Any:
+        """Evaluate a narrow Java IR condition against concrete inputs."""
+        return self._evaluate_java_expr(expr, inputs)
+
+    def _evaluate_java_expr(self, expr: Any, inputs: dict[str, Any]) -> Any:
+        """Evaluate a narrow Java IR expression against concrete inputs."""
+        if isinstance(expr, IRConstant):
+            return expr.value
+        if isinstance(expr, IRName):
+            return inputs.get(expr.id)
+        if isinstance(expr, IRAttribute):
+            if isinstance(expr.value, IRName) and expr.value.id == "this":
+                return inputs.get(expr.attr)
+            base = self._evaluate_java_expr(expr.value, inputs)
+            if isinstance(base, dict):
+                return base.get(expr.attr)
+            return None
+        if isinstance(expr, IRTernary):
+            test_val = self._evaluate_java_expr(expr.test, inputs)
+            if test_val is None:
+                return None
+            branch = expr.body if bool(test_val) else expr.orelse
+            return self._evaluate_java_expr(branch, inputs)
+        if isinstance(expr, IRUnaryOp):
+            operand = self._evaluate_java_expr(expr.operand, inputs)
+            if operand is None:
+                return None
+            if expr.op is not None and expr.op.value in {"!", "not"}:
+                return not bool(operand)
+            if expr.op is not None and expr.op.value == "-":
+                try:
+                    return -operand
+                except (TypeError, ValueError):
+                    return None
+            if expr.op is not None and expr.op.value == "+":
+                try:
+                    return +operand
+                except (TypeError, ValueError):
+                    return None
+            return None
+        if isinstance(expr, IRBoolOp):
+            values = [self._evaluate_java_expr(v, inputs) for v in expr.values]
+            if any(v is None for v in values):
+                return None
+            if expr.op is not None and expr.op.value == "and":
+                return all(bool(v) for v in values)
+            if expr.op is not None and expr.op.value == "or":
+                return any(bool(v) for v in values)
+            return None
+        if isinstance(expr, IRCompare):
+            left = self._evaluate_java_expr(expr.left, inputs)
+            if left is None:
+                return None
+            current = left
+            for op, comparator in zip(expr.ops, expr.comparators):
+                right = self._evaluate_java_expr(comparator, inputs)
+                if right is None:
+                    return None
+                try:
+                    if op.value == ">":
+                        ok = current > right
+                    elif op.value == ">=":
+                        ok = current >= right
+                    elif op.value == "<":
+                        ok = current < right
+                    elif op.value == "<=":
+                        ok = current <= right
+                    elif op.value == "==":
+                        ok = current == right
+                    elif op.value == "!=":
+                        ok = current != right
+                    else:
+                        return None
+                except (TypeError, ValueError):
+                    return None
+                if not ok:
+                    return False
+                current = right
+            return True
+        if isinstance(expr, IRBinaryOp):
+            left = self._evaluate_java_expr(expr.left, inputs)
+            right = self._evaluate_java_expr(expr.right, inputs)
+            if left is None or right is None or expr.op is None:
+                return None
+            try:
+                if expr.op.value == "+":
+                    return left + right
+                if expr.op.value == "-":
+                    return left - right
+                if expr.op.value == "*":
+                    return left * right
+                if expr.op.value == "/":
+                    return left / right
+                if expr.op.value == "%":
+                    return left % right
+            except (TypeError, ValueError, ZeroDivisionError):
+                return None
+        return None
+
+    def _safe_interpret_return_java(
+        self, statements: list[IRNode], inputs: dict[str, Any]
+    ) -> Any:
+        """[20260309_BUGFIX] Safely interpret simple Java returns with branch-aware state."""
+        returned, value, _state = self._interpret_java_block(statements, inputs)
+        if not returned or value is _JAVA_UNRESOLVED:
+            return None
+        return value
+
+    def _get_java_target_value(self, target: Any, state: dict[str, Any]) -> Any:
+        """[20260309_FEATURE] Resolve assignable Java targets from interpreter state."""
+        if isinstance(target, IRName):
+            return state.get(target.id)
+        if isinstance(target, IRAttribute):
+            if isinstance(target.value, IRName) and target.value.id == "this":
+                return state.get(target.attr)
+            base = self._evaluate_java_expr(target.value, state)
+            if isinstance(base, dict):
+                return base.get(target.attr)
+        return None
+
+    def _set_java_target_value(
+        self, target: Any, state: dict[str, Any], value: Any
+    ) -> bool:
+        """[20260309_FEATURE] Store assignable Java targets back into interpreter state."""
+        if isinstance(target, IRName):
+            state[target.id] = value
+            return True
+        if isinstance(target, IRAttribute):
+            if isinstance(target.value, IRName) and target.value.id == "this":
+                state[target.attr] = value
+                return True
+            base = self._evaluate_java_expr(target.value, state)
+            if isinstance(base, dict):
+                base[target.attr] = value
+                return True
+        return False
+
+    def _interpret_java_block(
+        self, statements: list[IRNode], inputs: dict[str, Any]
+    ) -> tuple[bool, Any, dict[str, Any]]:
+        """[20260309_FEATURE] Interpret a Java IR block while preserving assignment state."""
+        state = dict(inputs)
+
+        for stmt in statements:
+            if isinstance(stmt, IRAssign):
+                target = stmt.targets[0] if stmt.targets else None
+                value = self._evaluate_java_expr(stmt.value, state)
+                if value is None:
+                    value = self._java_ir_value_to_python(stmt.value)
+                if value is not None:
+                    self._set_java_target_value(target, state, value)
+                continue
+
+            if isinstance(stmt, IRAugAssign):
+                current = self._get_java_target_value(stmt.target, state)
+                operand = self._evaluate_java_expr(stmt.value, state)
+                if current is None or operand is None or stmt.op is None:
+                    continue
+                try:
+                    result = None
+                    if stmt.op.value == "+=":
+                        result = current + operand
+                    elif stmt.op.value == "-=":
+                        result = current - operand
+                    elif stmt.op.value == "*=":
+                        result = current * operand
+                    elif stmt.op.value == "/=":
+                        result = current / operand
+                    elif stmt.op.value == "%=":
+                        result = current % operand
+                    if result is not None:
+                        self._set_java_target_value(stmt.target, state, result)
+                except (TypeError, ValueError, ZeroDivisionError):
+                    pass
+                continue
+
+            if isinstance(stmt, IRReturn):
+                direct = self._java_ir_value_to_python(stmt.value)
+                if direct is not None:
+                    return True, direct, state
+                evaluated = self._evaluate_java_expr(stmt.value, state)
+                if evaluated is None:
+                    return True, _JAVA_UNRESOLVED, state
+                return True, evaluated, state
+
+            if isinstance(stmt, IRIf):
+                cond_val = self._evaluate_java_condition(stmt.test, state)
+                if cond_val is None:
+                    return True, _JAVA_UNRESOLVED, state
+                branch = stmt.body if bool(cond_val) else stmt.orelse
+                returned, branch_value, branch_state = self._interpret_java_block(
+                    branch, dict(state)
+                )
+                if returned:
+                    return True, branch_value, branch_state
+                state = branch_state
+
+        return False, _JAVA_UNRESOLVED, state
+
     def _extract_parameter_types(
         self, code: str, function_name: str, language: str
     ) -> dict[str, str]:
@@ -1053,6 +1576,45 @@ class TestGenerator:
         Returns:
             Dict mapping parameter names to their type annotations (e.g., {'role': 'str', 'level': 'int'})
         """
+        if language == "java":
+            func_node = self._get_java_function_ir(code, function_name)
+            if func_node is None:
+                return {}
+            return {
+                param.name: param.type_annotation or "Object"
+                for param in func_node.params
+                if param.name
+            }
+
+        if language == "typescript":
+            patterns = [
+                rf"(?:export\s+)?(?:async\s+)?function\s+{re.escape(function_name)}\s*\(([^)]*)\)",
+                rf"(?:export\s+)?const\s+{re.escape(function_name)}\s*=\s*(?:async\s*)?\(([^)]*)\)\s*=>",
+            ]
+            for pattern in patterns:
+                match = re.search(pattern, code)
+                if not match:
+                    continue
+                raw_params = match.group(1).strip()
+                if not raw_params:
+                    return {}
+                param_types: dict[str, str] = {}
+                for part in raw_params.split(","):
+                    chunk = part.strip()
+                    if not chunk:
+                        continue
+                    typed = re.match(
+                        r"([A-Za-z_$][\w$]*)\s*:\s*([^=]+?)(?:\s*=.+)?$",
+                        chunk,
+                    )
+                    if typed:
+                        param_types[typed.group(1)] = typed.group(2).strip()
+                        continue
+                    bare = re.match(r"([A-Za-z_$][\w$]*)", chunk)
+                    if bare:
+                        param_types[bare.group(1)] = "unknown"
+                return param_types
+
         if language != "python":
             return {}
 
@@ -1154,6 +1716,18 @@ class TestGenerator:
         Returns:
             Dict mapping condition patterns to expected return values
         """
+        if language == "java":
+            func_node = self._get_java_function_ir(code, function_name)
+            if func_node is None:
+                return {}
+            return self._extract_return_map_java(func_node.body)
+
+        if language == "typescript":
+            func_node = self._get_typescript_function_ir(code, function_name)
+            if func_node is None:
+                return {}
+            return self._extract_return_map_java(func_node.body)
+
         if language != "python":
             return {}
 
@@ -1206,6 +1780,40 @@ class TestGenerator:
 
         visit_body(func_node.body, [])
         return return_map
+
+    def _extract_return_map_java(self, body: list[IRNode]) -> dict[str, Any]:
+        """Extract Java branch-condition to return-value mappings from IR."""
+        return_map: dict[str, Any] = {}
+
+        def visit(statements: list[IRNode], condition_stack: list[str]) -> None:
+            for stmt in statements:
+                if isinstance(stmt, IRReturn):
+                    ret_val = self._java_ir_value_to_python(stmt.value)
+                    cond_key = (
+                        " AND ".join(condition_stack) if condition_stack else "default"
+                    )
+                    return_map[cond_key] = ret_val
+                elif isinstance(stmt, IRIf):
+                    condition = self._java_expr_to_text(stmt.test)
+                    visit(stmt.body, condition_stack + [condition])
+                    if stmt.orelse:
+                        visit(stmt.orelse, condition_stack + [f"not ({condition})"])
+
+        visit(body, [])
+        return return_map
+
+    def _java_ir_value_to_python(self, value: Any) -> Any:
+        """Convert a Java IR return expression to a concrete Python value when simple."""
+        if isinstance(value, IRConstant):
+            return value.value
+        if isinstance(value, IRName):
+            if value.id == "true":
+                return True
+            if value.id == "false":
+                return False
+            if value.id == "null":
+                return None
+        return None
 
     def _ast_value_to_python(self, node: ast.expr) -> Any:
         """Convert AST constant/name to Python value."""

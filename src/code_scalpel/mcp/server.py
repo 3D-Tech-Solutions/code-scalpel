@@ -36,14 +36,8 @@ if TYPE_CHECKING:
 
 from pydantic import BaseModel, Field
 
-
-# [20251216_FEATURE] v2.5.0 - Unified sink detection MCP tool
-from code_scalpel.security.analyzers.unified_sink_detector import (
-    UnifiedSinkDetector,
-)
-
-# [20251218_BUGFIX] Import version from package instead of hardcoding
 from code_scalpel import __version__
+from code_scalpel.dashboard_service import start_dashboard
 from code_scalpel.licensing.authorization import compute_effective_tier_for_startup
 from code_scalpel.licensing.jwt_validator import JWTLicenseValidator
 from code_scalpel.mcp.helpers.analyze_helpers import (
@@ -52,15 +46,17 @@ from code_scalpel.mcp.helpers.analyze_helpers import (
     _analyze_java_code as helper_analyze_java_code,
     _analyze_javascript_code as helper_analyze_js_code,
 )
-from code_scalpel.mcp.helpers.context_helpers import (
-    EXT_TO_LANGUAGE,  # [20260306_REFACTOR] Canonical extension-to-language map
-)
+from code_scalpel.mcp.helpers.context_helpers import EXT_TO_LANGUAGE
 from code_scalpel.mcp.models.core import (
     AnalysisResult,
     ClassInfo,
+    ExecutionPath,
     FunctionInfo,
-    GeneratedTestCase,  # noqa: F401 – re-exported for backward compatibility
-    TestGenerationResult,  # noqa: F401 – re-exported for backward compatibility
+    GeneratedTestCase,
+    SecurityResult,
+    SymbolicResult,
+    TestGenerationResult,
+    VulnerabilityInfo,
 )
 from code_scalpel.mcp.models.policy import PolicyVerificationResult
 from code_scalpel.mcp.paths import (
@@ -79,24 +75,46 @@ CURRENT_TIER = "community"
 try:
     _PROJECT_ROOT_HOLDER: list[Path] = [Path.cwd()]
 except FileNotFoundError:
-    _PROJECT_ROOT_HOLDER = [Path("/tmp")]  # nosec B108
+    _PROJECT_ROOT_HOLDER = [Path("/tmp")]
 try:
     PROJECT_ROOT: Path = Path.cwd()
 except FileNotFoundError:
-    PROJECT_ROOT = Path("/tmp")  # nosec B108
+    PROJECT_ROOT = Path("/tmp")
 ALLOWED_ROOTS: list[Path] = []
+
+logger = logging.getLogger(__name__)
+
+
+def _default_project_root() -> Path:
+    """[20260316_BUGFIX] Recover from stale temp roots left by prior in-process tests."""
+    env_root = os.environ.get("CODE_SCALPEL_PROJECT_ROOT") or os.environ.get(
+        "PROJECT_ROOT"
+    )
+    if env_root:
+        candidate = Path(env_root).expanduser()
+        if candidate.exists():
+            return candidate.resolve()
+    try:
+        return Path.cwd().resolve()
+    except FileNotFoundError:
+        return Path("/tmp")
 
 
 def get_project_root() -> Path:
-    """Get the current project root."""
-    return _PROJECT_ROOT_HOLDER[0]
+    root = _PROJECT_ROOT_HOLDER[0]
+    if root.exists():
+        return root
+
+    recovered = _default_project_root()
+    _PROJECT_ROOT_HOLDER[0] = recovered
+    return recovered
 
 
 def set_project_root(path: Path) -> None:
-    """Set the project root (called by main())."""
     global PROJECT_ROOT
-    _PROJECT_ROOT_HOLDER[0] = path
-    PROJECT_ROOT = path
+    resolved = path.resolve()
+    _PROJECT_ROOT_HOLDER[0] = resolved
+    PROJECT_ROOT = resolved
 
 
 _LAST_VALID_LICENSE_TIER: str | None = None
@@ -105,7 +123,6 @@ _MID_SESSION_EXPIRY_GRACE_SECONDS = 24 * 60 * 60
 
 
 def _configure_logging(transport: str = "stdio"):
-    """Configure logging based on transport type."""
     root_logger = logging.getLogger()
     for handler in root_logger.handlers[:]:
         root_logger.removeHandler(handler)
@@ -114,7 +131,7 @@ def _configure_logging(transport: str = "stdio"):
     handler.setFormatter(
         logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
     )
-
+    level = logging.WARNING
     env_level = os.environ.get("SCALPEL_MCP_OUTPUT", "WARNING").upper()
     if env_level == "DEBUG":
         level = logging.DEBUG
@@ -122,19 +139,12 @@ def _configure_logging(transport: str = "stdio"):
         level = logging.INFO
     elif env_level == "ALERT":
         level = logging.CRITICAL
-    else:
-        level = logging.WARNING
-
     handler.setLevel(level)
     root_logger.setLevel(level)
     root_logger.addHandler(handler)
 
 
-logger = logging.getLogger(__name__)
-
-
 def _debug_print(msg: str) -> None:
-    """Print debug output only when explicitly requested."""
     if os.environ.get("SCALPEL_MCP_OUTPUT", "").upper() == "DEBUG":
         try:
             print(msg, file=sys.stderr)
@@ -143,19 +153,15 @@ def _debug_print(msg: str) -> None:
 
 
 def _normalize_tier(value: str | None) -> str:
-    """Normalize tier string to canonical form."""
     if not value:
         return "community"
     normalized = value.strip().lower()
-    if normalized == "community":
-        return "community"
     if normalized == "all":
         return "enterprise"
     return normalized
 
 
 def _requested_tier_from_env() -> str | None:
-    """Get requested tier from environment variables for downgrade testing."""
     requested = os.environ.get("CODE_SCALPEL_TIER") or os.environ.get("SCALPEL_TIER")
     if requested is None:
         return None
@@ -166,27 +172,6 @@ def _requested_tier_from_env() -> str | None:
 
 
 def _get_current_tier() -> str:
-    """Get the current tier from license validation with env var override.
-
-    The tier system works as follows:
-    1. License file determines the MAXIMUM tier you're entitled to
-    2. Environment variable can REQUEST a tier (downgrade only - no upgrade via env var)
-    3. The effective tier is the MINIMUM of licensed and requested
-
-    This allows Enterprise license holders to test Pro/Community behavior
-    by setting CODE_SCALPEL_TIER=pro or CODE_SCALPEL_TIER=community.
-
-    SECURITY NOTE: Environment variables can ONLY downgrade, not upgrade.
-    To access a higher tier, you must provide a valid license file.
-
-    Environment Variables:
-        CODE_SCALPEL_TIER: Request a specific tier (downgrade only)
-        SCALPEL_TIER: Legacy alias for CODE_SCALPEL_TIER
-        CODE_SCALPEL_LICENSE_PATH: Path to JWT license file
-
-    Returns:
-        str: One of 'community', 'pro', or 'enterprise'
-    """
     global _LAST_VALID_LICENSE_AT, _LAST_VALID_LICENSE_TIER
 
     requested = _requested_tier_from_env()
@@ -199,49 +184,26 @@ def _get_current_tier() -> str:
         _LAST_VALID_LICENSE_TIER = licensed
         _LAST_VALID_LICENSE_AT = __import__("time").time()
     else:
-        # Revocation is immediate: no grace.
         err = (license_data.error_message or "").lower()
         if "revoked" in err:
             licensed = "community"
-        # Expiration mid-session: allow 24h grace based on last known valid tier.
         elif getattr(license_data, "is_expired", False) and _LAST_VALID_LICENSE_AT:
             now = __import__("time").time()
             if now - _LAST_VALID_LICENSE_AT <= _MID_SESSION_EXPIRY_GRACE_SECONDS:
                 if _LAST_VALID_LICENSE_TIER in {"pro", "enterprise"}:
                     licensed = _LAST_VALID_LICENSE_TIER
 
-    # If no tier requested via env var, use the licensed tier
     if requested is None:
         return licensed
 
-    # [20260119_SECURITY] Allow downgrade ONLY: effective tier = min(requested, licensed)
-    # Environment variables CANNOT be used to upgrade to a higher tier.
-    # Users must provide a valid license file to access higher tiers.
     rank = {"community": 0, "pro": 1, "enterprise": 2}
     effective = requested if rank[requested] <= rank[licensed] else licensed
-
-    # Log if user tried to upgrade via env var (security audit)
     if rank[requested] > rank[licensed]:
-        import sys
-
         print(
-            f"Warning: Tier downgrade ignored - requested {requested} but licensed {licensed}. "
-            f"Use a valid license file to upgrade tier.",
+            f"Warning: Tier downgrade ignored - requested {requested} but licensed {licensed}. Use a valid license file to upgrade tier.",
             file=sys.stderr,
         )
-
     return effective
-
-
-# [20251230_FEATURE] Support "invisible" onboarding: MCP startup can generate
-# the `.code-scalpel/` directory so users do not need to run `code-scalpel init`.
-#
-# This is intentionally opt-in because it writes files.
-#
-# Environment:
-# - SCALPEL_AUTO_INIT=1 enables auto-init
-# - SCALPEL_AUTO_INIT_MODE=full|templates_only selects init behavior
-# - SCALPEL_AUTO_INIT_TARGET=project|user selects where to create `.code-scalpel/`
 
 
 def auto_init_if_enabled(
@@ -251,7 +213,6 @@ def auto_init_if_enabled(
     mode: str | None = None,
     target: str | None = None,
 ) -> dict[str, Any] | None:
-    """Auto-initialize .code-scalpel/ if enabled via env."""
     if enabled is None:
         enabled = _env_truthy(os.environ.get("SCALPEL_AUTO_INIT"))
     if not enabled:
@@ -266,7 +227,6 @@ def auto_init_if_enabled(
         selected_target = "project"
 
     init_root = project_root if selected_target == "project" else _scalpel_home_dir()
-
     config_dir = init_root / ".code-scalpel"
     if config_dir.exists():
         return {
@@ -280,7 +240,6 @@ def auto_init_if_enabled(
         (mode or os.environ.get("SCALPEL_AUTO_INIT_MODE") or "").strip().lower()
     )
     if not selected_mode:
-        # Default: don't create secrets unless Pro/Enterprise.
         selected_mode = "full" if tier in {"pro", "enterprise"} else "templates_only"
     if selected_mode not in {"full", "templates_only"}:
         selected_mode = "templates_only"
@@ -298,18 +257,13 @@ def auto_init_if_enabled(
     }
 
 
-# Caching enabled by default
 CACHE_ENABLED = os.environ.get("SCALPEL_CACHE_ENABLED", "1") != "0"
 
-# [20251220_PERF] v3.0.5 - AST Cache for parsed Python files
-# Stores parsed ASTs keyed by (file_path, mtime) to avoid re-parsing unchanged files
-# Format: {(file_path_str, mtime): ast.Module}
 _AST_CACHE: dict[tuple[str, float], "ast.Module"] = {}
-_AST_CACHE_MAX_SIZE = 500  # Limit memory usage - keep last 500 files
+_AST_CACHE_MAX_SIZE = 500
 
 
 def _get_cached_ast(file_path: Path) -> "ast.Module | None":
-    """Get cached AST for a file if it hasn't changed."""
     try:
         mtime = file_path.stat().st_mtime
         key = (str(file_path.resolve()), mtime)
@@ -319,31 +273,23 @@ def _get_cached_ast(file_path: Path) -> "ast.Module | None":
 
 
 def _cache_ast(file_path: Path, tree: "ast.Module") -> None:
-    """Cache a parsed AST for a file."""
     try:
         mtime = file_path.stat().st_mtime
         key = (str(file_path.resolve()), mtime)
-
-        # Evict old entries if cache is too large
         if len(_AST_CACHE) >= _AST_CACHE_MAX_SIZE:
-            # Remove oldest 20% of entries
             entries_to_remove = _AST_CACHE_MAX_SIZE // 5
             keys_to_remove = list(_AST_CACHE.keys())[:entries_to_remove]
-            for k in keys_to_remove:
-                del _AST_CACHE[k]
-
+            for old_key in keys_to_remove:
+                del _AST_CACHE[old_key]
         _AST_CACHE[key] = tree
     except OSError:
         pass
 
 
 def _parse_file_cached(file_path: Path) -> "ast.Module | None":
-    """Parse a Python file with caching."""
-    # Check cache first
     cached = _get_cached_ast(file_path)
     if cached is not None:
         return cached
-
     try:
         code = file_path.read_text(encoding="utf-8")
         tree = ast.parse(code)
@@ -353,7 +299,6 @@ def _parse_file_cached(file_path: Path) -> "ast.Module | None":
         return None
 
 
-# [20251220_PERF] v3.0.5 - Singleton UnifiedSinkDetector to avoid rebuilding patterns
 _SINK_DETECTOR: "UnifiedSinkDetector | None" = None
 
 
@@ -369,12 +314,8 @@ def _get_sink_detector() -> "UnifiedSinkDetector":  # type: ignore[return-value]
     return _SINK_DETECTOR  # type: ignore[return-value]
 
 
-# [20251219_FEATURE] v3.0.4 - Call graph cache for get_graph_neighborhood
-# Stores UniversalGraph objects keyed by project root path
-# Format: {project_root_str: (UniversalGraph, timestamp)}
-# [20251220_PERF] v3.0.5 - Increased cache TTL from 60s to 300s for large codebases
 _GRAPH_CACHE: dict[str, tuple[UniversalGraph, float]] = {}  # type: ignore[name-defined]
-_GRAPH_CACHE_TTL = 300.0  # seconds (5 minutes for stable codebases)
+_GRAPH_CACHE_TTL = 300.0
 
 
 def _get_cached_graph(project_root: Path) -> UniversalGraph | None:  # type: ignore[name-defined]
@@ -387,10 +328,8 @@ def _get_cached_graph(project_root: Path) -> UniversalGraph | None:  # type: ign
         if time.time() - timestamp < _GRAPH_CACHE_TTL:
             logger.debug(f"Using cached graph for {key}")
             return graph
-        else:
-            # Cache expired
-            del _GRAPH_CACHE[key]
-            logger.debug(f"Graph cache expired for {key}")
+        del _GRAPH_CACHE[key]
+        logger.debug(f"Graph cache expired for {key}")
     return None
 
 
@@ -416,20 +355,8 @@ def _invalidate_graph_cache(project_root: Path | None = None) -> None:
 
 
 def _is_path_allowed(path: Path) -> bool:
-    """
-    Check if a path is within allowed roots.
-
-    [20251215_FEATURE] v2.0.0 - Security boundary enforcement
-
-    Args:
-        path: Path to validate
-
-    Returns:
-        True if path is within allowed roots, False otherwise
-    """
+    """Check if a path is within allowed roots."""
     resolved = path.resolve()
-
-    # If no roots specified, use PROJECT_ROOT
     roots_to_check = ALLOWED_ROOTS if ALLOWED_ROOTS else [PROJECT_ROOT]
 
     for root in roots_to_check:
@@ -443,175 +370,10 @@ def _is_path_allowed(path: Path) -> bool:
 
 
 def _validate_path_security(path: Path) -> Path:
-    """Validate a path against configured security roots.
-
-    [20251215_FEATURE] v2.0.0 - Security boundary enforcement
-    """
+    """Validate a path against configured security roots."""
     if not _is_path_allowed(path):
-        allowed = ", ".join(str(root) for root in (ALLOWED_ROOTS or [PROJECT_ROOT]))
-        raise ValueError(f"Access denied: {path} is outside allowed roots: {allowed}")
+        raise PermissionError(f"Path outside allowed roots: {path}")
     return path
-
-
-# [20251216_FEATURE] Unified sink detection result model
-class UnifiedDetectedSink(BaseModel):
-    """Detected sink with confidence and OWASP mapping."""
-
-    pattern: str = Field(description="Sink pattern matched")
-    sink_type: str = Field(description="Sink type classification")
-    confidence: float = Field(description="Confidence score (0.0-1.0)")
-    line: int = Field(default=0, description="Line number of sink occurrence")
-    column: int = Field(default=0, description="Column offset of sink occurrence")
-    code_snippet: str = Field(default="", description="Snippet around the sink")
-    vulnerability_type: str | None = Field(
-        default=None, description="Vulnerability category key"
-    )
-    owasp_category: str | None = Field(
-        default=None, description="Mapped OWASP Top 10 category"
-    )
-
-
-class UnifiedSinkResult(BaseModel):
-    """Result of unified polyglot sink detection."""
-
-    success: bool = Field(description="Whether detection succeeded")
-    server_version: str = Field(default=__version__, description="Code Scalpel version")
-    language: str = Field(description="Language analyzed")
-    sink_count: int = Field(description="Number of sinks detected")
-    sinks: list[UnifiedDetectedSink] = Field(
-        default_factory=list, description="Detected sinks meeting threshold"
-    )
-    coverage_summary: dict[str, Any] = Field(
-        default_factory=dict, description="Summary of sink pattern coverage"
-    )
-    error: str | None = Field(default=None, description="Error message if failed")
-
-
-class CrawlFunctionInfo(BaseModel):
-    """Information about a function from project crawl."""
-
-    name: str = Field(description="Function name (qualified if method)")
-    lineno: int = Field(description="Line number")
-    complexity: int = Field(description="Cyclomatic complexity")
-
-
-class CrawlClassInfo(BaseModel):
-    """Information about a class from project crawl."""
-
-    name: str = Field(description="Class name")
-    lineno: int = Field(description="Line number")
-    methods: list[CrawlFunctionInfo] = Field(
-        default_factory=list, description="Methods in the class"
-    )
-    bases: list[str] = Field(default_factory=list, description="Base classes")
-
-
-class CrawlFileResult(BaseModel):
-    """Result of analyzing a single file during crawl."""
-
-    path: str = Field(description="Relative path to the file")
-    status: str = Field(description="success or error")
-    lines_of_code: int = Field(default=0, description="Lines of code")
-    functions: list[CrawlFunctionInfo] = Field(
-        default_factory=list, description="Top-level functions"
-    )
-    classes: list[CrawlClassInfo] = Field(
-        default_factory=list, description="Classes found"
-    )
-    imports: list[str] = Field(default_factory=list, description="Import statements")
-    complexity_warnings: list[CrawlFunctionInfo] = Field(
-        default_factory=list, description="High-complexity functions"
-    )
-    error: str | None = Field(default=None, description="Error if failed")
-
-
-class CrawlSummary(BaseModel):
-    """Summary statistics from project crawl."""
-
-    total_files: int = Field(description="Total files scanned")
-    successful_files: int = Field(description="Files analyzed successfully")
-    failed_files: int = Field(description="Files that failed analysis")
-    total_lines_of_code: int = Field(description="Total lines of code")
-    total_functions: int = Field(description="Total functions found")
-    total_classes: int = Field(description="Total classes found")
-    complexity_warnings: int = Field(description="Number of high-complexity functions")
-
-
-class ProjectCrawlResult(BaseModel):
-    """Result of crawling an entire project."""
-
-    # Allow tier-gated feature fields without breaking older clients.
-    try:
-        from pydantic import ConfigDict as _ConfigDict  # type: ignore
-
-        model_config = _ConfigDict(extra="allow")
-    except Exception:
-
-        class Config:  # type: ignore
-            extra = "allow"
-
-    success: bool = Field(description="Whether crawl succeeded")
-    server_version: str = Field(default=__version__, description="Code Scalpel version")
-    root_path: str = Field(description="Project root path")
-    timestamp: str = Field(description="When the crawl was performed")
-    summary: CrawlSummary = Field(description="Summary statistics")
-    files: list[CrawlFileResult] = Field(
-        default_factory=list, description="Analyzed files"
-    )
-    errors: list[CrawlFileResult] = Field(
-        default_factory=list, description="Files with errors"
-    )
-    markdown_report: str = Field(default="", description="Markdown report")
-    error: str | None = Field(default=None, description="Error if failed")
-    # [20260106_FEATURE] v1.0 pre-release - Output transparency metadata
-    tier_applied: str | None = Field(
-        default=None,
-        description="Which tier's rules were applied (community/pro/enterprise)",
-    )
-    crawl_mode: str | None = Field(
-        default=None,
-        description="Crawl mode used: 'discovery' (Community) or 'deep' (Pro/Enterprise)",
-    )
-    files_limit_applied: int | None = Field(
-        default=None, description="Max files limit that was applied (None = unlimited)"
-    )
-    # Tier-gated fields (best-effort, optional)
-    language_breakdown: dict[str, int] | None = Field(
-        default=None, description="Counts of files per detected language"
-    )
-    cache_hits: int | None = Field(
-        default=None,
-        description="Number of files reused from cache (Pro/Enterprise incremental)",
-    )
-    compliance_summary: dict[str, Any] | None = Field(
-        default=None, description="Enterprise compliance scanning summary"
-    )
-    framework_hints: list[str] | None = Field(
-        default=None, description="Detected frameworks/entrypoints in discovery mode"
-    )
-    entrypoints: list[str] | None = Field(
-        default=None, description="Detected entrypoint file paths"
-    )
-
-
-class SurgicalExtractionResult(BaseModel):
-    """Result of surgical code extraction."""
-
-    success: bool = Field(description="Whether extraction succeeded")
-    server_version: str = Field(default=__version__, description="Code Scalpel version")
-    name: str = Field(description="Name of extracted element")
-    code: str = Field(description="Extracted source code")
-    node_type: str = Field(description="Type: function, class, or method")
-    line_start: int = Field(default=0, description="Starting line number")
-    line_end: int = Field(default=0, description="Ending line number")
-    dependencies: list[str] = Field(
-        default_factory=list, description="Names of dependencies"
-    )
-    imports_needed: list[str] = Field(
-        default_factory=list, description="Required import statements"
-    )
-    token_estimate: int = Field(default=0, description="Estimated token count")
-    error: str | None = Field(default=None, description="Error if failed")
 
 
 class ContextualExtractionResult(BaseModel):
@@ -3236,6 +2998,16 @@ from code_scalpel.mcp.models.graph import (  # noqa: E402
     NeighborhoodNodeModel,
 )
 
+from code_scalpel.mcp.models.graph import (  # noqa: E402
+    ModuleInfo as _ProjectMapModuleInfoCanonical,
+    PackageInfo as _ProjectMapPackageInfoCanonical,
+    ProjectMapResult as _ProjectMapResultCanonical,
+)
+
+ModuleInfo = _ProjectMapModuleInfoCanonical
+PackageInfo = _ProjectMapPackageInfoCanonical
+ProjectMapResult = _ProjectMapResultCanonical
+
 
 def _generate_neighborhood_mermaid(
     nodes: list[NeighborhoodNodeModel],
@@ -3743,6 +3515,42 @@ def _get_project_map_sync(
         )
 
 
+def _get_project_map_sync(
+    project_root: str | None,
+    include_complexity: bool,
+    complexity_threshold: int,
+    include_circular_check: bool,
+    *,
+    tier: str | None = None,
+    capabilities: dict | None = None,
+    max_files_limit: int | None = None,
+    max_modules_limit: int | None = None,
+) -> ProjectMapResult:
+    """[20260314_REFACTOR] Delegate to the canonical helper implementation."""
+    from code_scalpel.mcp.helpers.graph_helpers import (
+        _get_project_map_sync as _helper_get_project_map_sync,
+    )
+
+    return _helper_get_project_map_sync(
+        project_root,
+        include_complexity,
+        complexity_threshold,
+        include_circular_check,
+        tier=tier,
+        capabilities=capabilities,
+        max_files_limit=max_files_limit,
+        max_modules_limit=max_modules_limit,
+    )
+
+
+# [20260315_BUGFIX] Rebind the legacy server project-map models after the local
+# compatibility class block so imports from server.py match the delegated helper
+# return types from code_scalpel.mcp.models.graph.
+ModuleInfo = _ProjectMapModuleInfoCanonical
+PackageInfo = _ProjectMapPackageInfoCanonical
+ProjectMapResult = _ProjectMapResultCanonical
+
+
 class ImportNodeModel(BaseModel):
     """Information about an import in the import graph."""
 
@@ -4236,6 +4044,10 @@ class CrossFileSecurityResult(BaseModel):
     dangerous_sinks: list[str] = Field(
         default_factory=list, description="Functions containing dangerous sinks"
     )
+    warnings: list[str] = Field(
+        default_factory=list,
+        description="Non-fatal warnings about unsupported or skipped analysis paths",
+    )
 
     error: str | None = Field(default=None, description="Error message if failed")
 
@@ -4419,6 +4231,14 @@ def _cross_file_security_scan_sync(
 
         # Determine risk level
         vuln_count = len(vulnerabilities)
+        warnings: list[str] = []
+        if result.modules_analyzed == 0:
+            java_file = next(root_path.rglob("*.java"), None)
+            if java_file is not None:
+                warnings.append(
+                    "Cross-file security scan currently analyzes Python module graphs only; detected Java files were not analyzed."
+                )
+
         if vuln_count == 0:
             risk_level = "low"
         elif vuln_count <= 2:
@@ -4460,6 +4280,7 @@ def _cross_file_security_scan_sync(
             taint_flows=taint_flows,
             taint_sources=taint_sources,
             dangerous_sinks=dangerous_sinks,
+            warnings=warnings,
             # [20260120_FEATURE] v1.0 pre-release - Output transparency metadata
             tier_applied=tier,
             max_depth_applied=max_depth if max_depth else None,
@@ -4620,6 +4441,44 @@ def _spawn_update_check(output) -> None:
     threading.Thread(target=_check, daemon=True).start()
 
 
+def _initialize_telemetry_and_dashboard() -> str:
+    """Initialize telemetry and dashboard services.
+
+    [20260327_FEATURE] Dashboard telemetry for MCP observability.
+    Starts the dashboard web service and sets up event broadcasting.
+
+    Returns:
+        Dashboard URL
+    """
+    # Start dashboard service
+    dashboard_url = start_dashboard()
+
+    # Set up telemetry event broadcasting to dashboard
+    try:
+        from code_scalpel import telemetry
+        from code_scalpel.dashboard_service import broadcast_event
+        import asyncio
+
+        original_emit = telemetry.emit_tool_event
+
+        def emit_with_broadcast(*args, **kwargs):
+            """Emit event and broadcast to dashboard WebSocket clients."""
+            event = original_emit(*args, **kwargs)
+            # Broadcast in background to avoid blocking tool execution
+            try:
+                asyncio.create_task(broadcast_event(event.to_dict()))
+            except Exception:
+                pass  # Never block on telemetry
+            return event
+
+        telemetry.emit_tool_event = emit_with_broadcast
+
+    except Exception as e:
+        logger.warning(f"Failed to set up telemetry broadcasting: {e}")
+
+    return dashboard_url
+
+
 def run_server(
     transport: str = "stdio",
     host: str = "127.0.0.1",
@@ -4657,15 +4516,36 @@ def run_server(
     # [20251215_BUGFIX] Configure logging to stderr before anything else
     _configure_logging(transport)
 
-    # [20260220_FEATURE] Check for version mismatch in background
-    from code_scalpel.mcp.version_check import start_version_check_thread
+    # [20260315_BUGFIX] Stdio MCP sessions cannot tolerate unsolicited version
+    # mismatch banner output during startup, so only run the background PyPI
+    # version check for non-stdio transports.
+    if transport != "stdio":
+        from code_scalpel.mcp.version_check import start_version_check_thread
 
-    start_version_check_thread()
+        start_version_check_thread()
 
     # Debug: emit startup parameters to stderr so test harness can capture flow
     _debug_print(
         f"DEBUG: run_server called transport={transport!r} host={host!r} port={port!r} allow_lan={allow_lan!r} root_path={root_path!r} tier={tier!r}"
     )
+
+    # [20260311_FEATURE] Apply --root before license validation so dependent
+    # environment placeholders (for example ${root} in license path env) resolve
+    # consistently during startup tier detection.
+    if root_path:
+        resolved_root = Path(root_path).resolve()
+        if not resolved_root.exists():
+            # Use stderr for warnings to avoid corrupting stdio transport.
+            print(
+                f"Warning: Root path {resolved_root} does not exist. Using current directory.",
+                file=sys.stderr,
+            )
+            resolved_root = Path.cwd()
+        set_project_root(resolved_root)
+
+    # [20260311_FEATURE] Expose effective project root as an env var for
+    # downstream consumers (for example license path resolution).
+    os.environ["CODE_SCALPEL_PROJECT_ROOT"] = str(get_project_root())
 
     # [20260116_REFACTOR] Register tools, resources, and prompts from dedicated modules
     try:
@@ -4703,9 +4583,13 @@ def run_server(
         _LAST_VALID_LICENSE_TIER = effective_tier
         _LAST_VALID_LICENSE_AT = __import__("time").time()
 
-    # Emit startup warnings (e.g., revoked -> community) to stderr for stdio safety.
+    # [20260316_BUGFIX] Keep stdio transport quiet so MCP framing is not polluted.
+    # Startup warnings remain visible on non-stdio transports and in debug logs.
     if startup_warning:
-        print(startup_warning, file=sys.stderr)
+        if transport == "stdio":
+            _debug_print(startup_warning)
+        else:
+            print(startup_warning, file=sys.stderr)
 
     tier = effective_tier
 
@@ -4718,18 +4602,6 @@ def run_server(
     # NOTE: this is process-global; the server is intended to run once per process.
     _apply_tier_tool_filter(tier)
 
-    # [20260120_BUGFIX] Use set_project_root() to update both holder and global.
-    if root_path:
-        resolved_root = Path(root_path).resolve()
-        if not resolved_root.exists():
-            # Use stderr for warnings to avoid corrupting stdio transport
-            print(
-                f"Warning: Root path {resolved_root} does not exist. Using current directory.",
-                file=sys.stderr,
-            )
-            resolved_root = Path.cwd()
-        set_project_root(resolved_root)
-
     # [20260117_FEATURE] v1.0.0 - Auto-initialize .code-scalpel/ on first run
     # Creates essential config files if the directory doesn't exist.
     # Uses "templates_only" mode (no secrets) by default for safety.
@@ -4741,51 +4613,63 @@ def run_server(
         target="project",
     )
     if init_result and init_result.get("created"):
-        print(
-            f"Created .code-scalpel/ configuration at {init_result['path']}",
-            file=sys.stderr,
-        )
+        if transport == "stdio":
+            _debug_print(
+                f"Created .code-scalpel/ configuration at {init_result['path']}"
+            )
+        else:
+            print(
+                f"Created .code-scalpel/ configuration at {init_result['path']}",
+                file=sys.stderr,
+            )
 
     # Debug: confirm auto-init result
     _debug_print(f"DEBUG: auto_init result={init_result}")
 
-    # [20251215_BUGFIX] Print to stderr for stdio transport
-    # [20260210_FEATURE] Enhanced boot display with license information
-    output = sys.stderr if transport == "stdio" else sys.stdout
-    print("=" * 60, file=output)
-    print(f"Code Scalpel MCP Server v{__version__}", file=output)
-    print("=" * 60, file=output)
-    print(f"Project Root: {get_project_root()}", file=output)
+    # [20260327_FEATURE] Start dashboard telemetry service
+    try:
+        dashboard_url = _initialize_telemetry_and_dashboard()
+    except Exception as e:
+        logger.warning(f"Dashboard initialization failed: {e}")
+        dashboard_url = None
 
-    # Show tier
-    tier_display = tier.upper()
-    print(f"License Tier: {tier_display}", file=output)
+    if transport != "stdio":
+        # [20251215_BUGFIX] Keep stdio startup silent; HTTP/SSE can print banner.
+        output = sys.stdout
+        print("=" * 60, file=output)
+        print(f"Code Scalpel MCP Server v{__version__}", file=output)
+        print("=" * 60, file=output)
+        print(f"Project Root: {get_project_root()}", file=output)
 
-    # Show license source if available
-    validator = JWTLicenseValidator()
-    license_file = validator.find_license_file()
-    if license_file:
-        try:
-            # Show relative path if in project, else show full path
+        tier_display = tier.upper()
+        print(f"License Tier: {tier_display}", file=output)
+
+        validator = JWTLicenseValidator()
+        license_file = validator.find_license_file()
+        if license_file:
             try:
-                rel_path = license_file.relative_to(get_project_root())
-                license_display = f"./{rel_path}"
-            except ValueError:
-                license_display = str(license_file)
-            print(f"License File: {license_display}", file=output)
-        except Exception:
-            pass
-    else:
-        if tier == "community":
-            print(
-                "License File: None (Community tier - no license required)",
-                file=output,
-            )
+                try:
+                    rel_path = license_file.relative_to(get_project_root())
+                    license_display = f"./{rel_path}"
+                except ValueError:
+                    license_display = str(license_file)
+                print(f"License File: {license_display}", file=output)
+            except Exception:
+                pass
         else:
-            print("License File: Not found (using environment/fallback)", file=output)
+            if tier == "community":
+                print(
+                    "License File: None (Community tier - no license required)",
+                    file=output,
+                )
+            else:
+                print(
+                    "License File: Not found (using environment/fallback)",
+                    file=output,
+                )
 
-    # [20260210_FEATURE] Non-blocking PyPI update check
-    _spawn_update_check(output)
+        # [20260210_FEATURE] Non-blocking PyPI update check
+        _spawn_update_check(output)
 
     # [20251215_FEATURE] SSL/HTTPS support for production deployments
     use_https = ssl_certfile and ssl_keyfile
@@ -4833,6 +4717,12 @@ def run_server(
         # [20251215_FEATURE] Register HTTP health endpoint for Docker health checks
         _register_http_health_endpoint(mcp, host, port, ssl_certfile, ssl_keyfile)
 
+        # [20260327_FEATURE] Print dashboard URL
+        if dashboard_url:
+            print("=" * 60, file=output)
+            print(f"Dashboard: {dashboard_url}", file=output)
+            print("=" * 60, file=output)
+
         try:
             print(f"DEBUG: starting mcp.run transport={transport}", file=sys.stderr)
             mcp.run(transport=transport)
@@ -4875,6 +4765,12 @@ def run_server(
                 )
             except Exception:
                 pass
+
+            # [20260327_FEATURE] Print dashboard URL to stderr (stdout is MCP framing)
+            if dashboard_url:
+                print("=" * 60, file=sys.stderr)
+                print(f"Dashboard: {dashboard_url}", file=sys.stderr)
+                print("=" * 60, file=sys.stderr)
 
             # Explicitly pass transport so FastMCP uses stdio even when stdout is a pipe
             mcp.run(transport=transport)  # type: ignore[arg-type]
@@ -5123,7 +5019,9 @@ __all__ = [
     "GeneratedTestCase",
     "TestGenerationResult",
     "SecurityResult",
+    "VulnerabilityInfo",
     "SymbolicResult",
+    "ExecutionPath",
     "RefactorSimulationResult",
     "ProjectCrawlResult",
     "ContextualExtractionResult",

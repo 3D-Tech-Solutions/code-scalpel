@@ -334,6 +334,190 @@ public class App {
 
 
 @pytest.mark.asyncio
+async def test_java_static_wildcard_import_references(
+    make_project, patch_tier, patch_capabilities
+):
+    """[20260315_TEST] Java symbol references should classify static wildcard imports for local members."""
+    import code_scalpel.mcp.tools.context as server
+
+    project = make_project(
+        {
+            "src/demo/Helper.java": """
+package demo;
+
+public class Helper {
+    public static int tool() {
+        return 1;
+    }
+}
+""",
+            "src/demo/App.java": """
+package demo;
+
+import static demo.Helper.*;
+
+public class App {
+    public int run() {
+        return tool();
+    }
+}
+""",
+        }
+    )
+
+    patch_tier("pro")
+    patch_capabilities(
+        {
+            "limits": {},
+            "capabilities": [
+                "usage_categorization",
+                "read_write_classification",
+                "import_classification",
+            ],
+        }
+    )
+
+    result = await server.get_symbol_references("tool", project_root=str(project))
+
+    data = (
+        result.data if hasattr(result, "data") and isinstance(result.data, dict) else {}
+    )
+    assert data.get("success", getattr(result, "success", False)) is True
+    assert data.get("definition_file") == "src/demo/Helper.java"
+    category_counts = data.get("category_counts") or {}
+    assert category_counts.get("definition", 0) >= 1
+    assert category_counts.get("import", 0) >= 1
+    assert category_counts.get("call", 0) >= 1
+    references = data.get("references") or []
+    assert any(
+        ref.get("file") == "src/demo/App.java"
+        and "import static demo.Helper.*;" in ref.get("context", "")
+        for ref in references
+    )
+    assert any(
+        ref.get("file") == "src/demo/App.java"
+        and "return tool();" in ref.get("context", "")
+        for ref in references
+    )
+
+
+@pytest.mark.asyncio
+async def test_go_definition_and_call_references(
+    make_project, patch_tier, patch_capabilities
+):
+    """[20260311_TEST] Go symbol references should include local definitions and call sites."""
+    import code_scalpel.mcp.tools.context as server
+
+    pytest.importorskip("tree_sitter_go")
+
+    project = make_project(
+        {
+            "src/helper/helper.go": """
+package helper
+
+func Tool() int {
+    return 1
+}
+""",
+            "src/main.go": """
+package main
+
+import "src/helper"
+
+func run() int {
+    return helper.Tool()
+}
+""",
+        }
+    )
+
+    patch_tier("pro")
+    patch_capabilities(
+        {
+            "limits": {},
+            "capabilities": [
+                "usage_categorization",
+                "read_write_classification",
+                "import_classification",
+            ],
+        }
+    )
+
+    result = await server.get_symbol_references("Tool", project_root=str(project))
+
+    data = (
+        result.data if hasattr(result, "data") and isinstance(result.data, dict) else {}
+    )
+    assert data.get("success", getattr(result, "success", False)) is True
+    assert data.get("definition_file") == "src/helper/helper.go"
+    category_counts = data.get("category_counts") or {}
+    assert category_counts.get("definition", 0) >= 1
+    assert category_counts.get("call", 0) >= 1
+    references = data.get("references") or []
+    assert any(
+        ref.get("file") == "src/main.go"
+        and "helper.Tool()" in ref.get("context", "")
+        for ref in references
+    )
+
+
+@pytest.mark.asyncio
+async def test_go_method_definition_and_call_references(
+    make_project, patch_tier, patch_capabilities
+):
+    """[20260311_TEST] Go symbol references should include receiver methods and method calls."""
+    import code_scalpel.mcp.tools.context as server
+
+    pytest.importorskip("tree_sitter_go")
+
+    project = make_project(
+        {
+            "src/worker.go": """
+package demo
+
+type Worker struct{}
+
+func (w Worker) Run() {
+}
+
+func execute(worker Worker) {
+    worker.Run()
+}
+""",
+        }
+    )
+
+    patch_tier("pro")
+    patch_capabilities(
+        {
+            "limits": {},
+            "capabilities": [
+                "usage_categorization",
+                "read_write_classification",
+                "import_classification",
+            ],
+        }
+    )
+
+    result = await server.get_symbol_references("Run", project_root=str(project))
+
+    data = (
+        result.data if hasattr(result, "data") and isinstance(result.data, dict) else {}
+    )
+    assert data.get("success", getattr(result, "success", False)) is True
+    assert data.get("definition_file") == "src/worker.go"
+    category_counts = data.get("category_counts") or {}
+    assert category_counts.get("definition", 0) >= 1
+    assert category_counts.get("call", 0) >= 1
+    references = data.get("references") or []
+    assert any(
+        ref.get("file") == "src/worker.go"
+        and "worker.Run()" in ref.get("context", "")
+        for ref in references
+    )
+
+
+@pytest.mark.asyncio
 async def test_java_overloaded_methods_clear_singular_definition_metadata(
     make_project, patch_tier, patch_capabilities
 ):
@@ -600,5 +784,141 @@ public class App {
     )
     assert not any(
         ref.get("file") == "src/demo/App.java" and 'tool("x")' in ref.get("context", "")
+        for ref in references
+    )
+
+
+@pytest.mark.asyncio
+async def test_java_constructor_selector_resolves_exact_overload(
+    make_project, patch_tier, patch_capabilities
+):
+    """[20260311_TEST] Java structured selectors should resolve exact constructor overloads."""
+    import code_scalpel.mcp.tools.context as server
+
+    project = make_project(
+        {
+            "src/demo/Helper.java": """
+package demo;
+
+public class Helper {
+    public Helper(int value) {
+    }
+
+    public Helper(String value) {
+    }
+}
+""",
+            "src/demo/App.java": """
+package demo;
+
+public class App {
+    public void run() {
+        new Helper(1);
+        new Helper("x");
+    }
+}
+""",
+        }
+    )
+
+    patch_tier("pro")
+    patch_capabilities(
+        {
+            "limits": {},
+            "capabilities": [
+                "usage_categorization",
+                "read_write_classification",
+                "import_classification",
+            ],
+        }
+    )
+
+    result = await server.get_symbol_references(
+        "Helper.Helper(int)", project_root=str(project)
+    )
+
+    data = (
+        result.data if hasattr(result, "data") and isinstance(result.data, dict) else {}
+    )
+    assert data.get("success", getattr(result, "success", False)) is True
+    assert data.get("definition_file") == "src/demo/Helper.java"
+    assert data.get("ambiguity_kind") is None
+    references = data.get("references") or []
+    assert any(
+        ref.get("file") == "src/demo/App.java"
+        and "new Helper(1)" in ref.get("context", "")
+        for ref in references
+    )
+    assert not any(
+        ref.get("file") == "src/demo/App.java"
+        and 'new Helper("x")' in ref.get("context", "")
+        for ref in references
+    )
+
+
+@pytest.mark.asyncio
+async def test_java_constructor_selector_colon_form_resolves_exact_overload(
+    make_project, patch_tier, patch_capabilities
+):
+    """[20260311_TEST] Java structured selectors should accept Class:Class(type) constructor keys."""
+    import code_scalpel.mcp.tools.context as server
+
+    project = make_project(
+        {
+            "src/demo/Helper.java": """
+package demo;
+
+public class Helper {
+    public Helper(int value) {
+    }
+
+    public Helper(String value) {
+    }
+}
+""",
+            "src/demo/App.java": """
+package demo;
+
+public class App {
+    public void run() {
+        new Helper(1);
+        new Helper("x");
+    }
+}
+""",
+        }
+    )
+
+    patch_tier("pro")
+    patch_capabilities(
+        {
+            "limits": {},
+            "capabilities": [
+                "usage_categorization",
+                "read_write_classification",
+                "import_classification",
+            ],
+        }
+    )
+
+    result = await server.get_symbol_references(
+        "Helper:Helper(String)", project_root=str(project)
+    )
+
+    data = (
+        result.data if hasattr(result, "data") and isinstance(result.data, dict) else {}
+    )
+    assert data.get("success", getattr(result, "success", False)) is True
+    assert data.get("definition_file") == "src/demo/Helper.java"
+    assert data.get("ambiguity_kind") is None
+    references = data.get("references") or []
+    assert any(
+        ref.get("file") == "src/demo/App.java"
+        and 'new Helper("x")' in ref.get("context", "")
+        for ref in references
+    )
+    assert not any(
+        ref.get("file") == "src/demo/App.java"
+        and "new Helper(1)" in ref.get("context", "")
         for ref in references
     )

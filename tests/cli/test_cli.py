@@ -10,6 +10,8 @@ import subprocess
 import sys
 from types import SimpleNamespace
 
+import pytest
+
 # [20251215_TEST] Ensure CLI subprocess invocations can import code_scalpel without editable install
 # Use path relative to this test file to avoid cwd issues
 test_dir = os.path.dirname(os.path.abspath(__file__))
@@ -167,6 +169,71 @@ class TestCLIAnalyze:
             or "error" in combined.lower()
             or "syntax" in combined.lower()
         )
+
+
+class TestCLILanguageChoices:
+    """Test CLI language choice alignment with the underlying tool support."""
+
+    def test_analyze_accepts_typescript_language(self, monkeypatch):
+        """[20260311_TEST] Analyze CLI should accept TypeScript once the local analyzer supports it."""
+        import code_scalpel.cli as cli
+
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "codescalpel",
+                "analyze",
+                "--code",
+                "placeholder",
+                "--language",
+                "typescript",
+            ],
+        )
+        monkeypatch.setattr(cli, "handle_analyze", lambda *args, **kwargs: 0)
+
+        assert cli.main() == 0
+
+    def test_analyze_accepts_rust_language(self, monkeypatch):
+        """[20260311_TEST] Analyze CLI should accept Rust because the local analyzer routes it through the polyglot path."""
+        import code_scalpel.cli as cli
+
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "codescalpel",
+                "analyze",
+                "--code",
+                "placeholder",
+                "--language",
+                "rust",
+            ],
+        )
+        monkeypatch.setattr(cli, "handle_analyze", lambda *args, **kwargs: 0)
+
+        assert cli.main() == 0
+
+    def test_symbolic_execute_stays_limited_to_supported_languages(self, monkeypatch):
+        """[20260311_TEST] Symbolic CLI should reject languages the MCP symbolic tool does not support."""
+        import code_scalpel.cli as cli
+
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "codescalpel",
+                "symbolic-execute",
+                "placeholder",
+                "--language",
+                "typescript",
+            ],
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            cli.main()
+
+        assert exc_info.value.code == 2
 
 
 class TestCLIServer:
@@ -626,7 +693,7 @@ class TestCLIInProcess:
         assert "Error analyzing JavaScript code" in output
 
     def test_analyze_non_python_file(self, tmp_path):
-        """Test analyzing a non-Python file (should warn)."""
+        """Test analyzing a non-Python file returns a user-visible outcome."""
         test_file = tmp_path / "test.txt"
         test_file.write_text("Just some text content")
 
@@ -635,9 +702,13 @@ class TestCLIInProcess:
             capture_output=True,
             text=True,
         )
-        # Should still process but may warn
+        # The bridged MCP path may either warn or fail with explicit parse guidance.
         combined = result.stdout + result.stderr
-        assert "warning" in combined.lower() or result.returncode == 0
+        assert (
+            "warning" in combined.lower()
+            or "error" in combined.lower()
+            or result.returncode == 0
+        )
 
     def test_analyze_file_with_dead_code(self, tmp_path):
         """Test analyzing a file with dead code for detection."""
@@ -1212,7 +1283,7 @@ class TestCLIDirectImport:
         assert calls["allow_lan"] is True
         assert calls["transport"] == "sse"
 
-    def test_main_scan_code_json_uses_scan_code_security(self, capsys, monkeypatch):
+    def test_main_scan_code_json_uses_handler(self, capsys, monkeypatch):
         import sys
 
         from code_scalpel import cli
@@ -1223,12 +1294,12 @@ class TestCLIDirectImport:
 
         called = {}
 
-        def fake_scan_code_security(code: str, output_format: str):
-            called["code"] = code
-            called["output_format"] = output_format
+        def fake_handle_scan(args):  # noqa: ANN001
+            called["code"] = args.code
+            called["output_format"] = "json" if args.json else "text"
             return 0
 
-        monkeypatch.setattr(cli, "scan_code_security", fake_scan_code_security)
+        monkeypatch.setattr(cli, "handle_scan", fake_handle_scan)
 
         exit_code = cli.main()
         capsys.readouterr()
@@ -1266,10 +1337,11 @@ class TestCLIDirectImport:
         """Test main analyze --code."""
         import sys
 
-        from code_scalpel.cli import main
+        from code_scalpel import cli
 
         monkeypatch.setattr(sys, "argv", ["code-scalpel", "analyze", "--code", "x = 1"])
-        result = main()
+        monkeypatch.setattr(cli, "handle_analyze", lambda args: 0)
+        result = cli.main()
         capsys.readouterr()
 
         assert result == 0

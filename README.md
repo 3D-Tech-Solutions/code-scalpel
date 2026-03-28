@@ -6,7 +6,7 @@
 
 **Result:** $450/month → $22/month. Same quality answers, 95% lower cost, 10x faster responses.
 
-![Free Forever](https://img.shields.io/badge/Free-Forever-brightgreen) ![Setup Time](https://img.shields.io/badge/Setup-2%20Minutes-blue) ![Local Execution](https://img.shields.io/badge/Runs-Locally-orange) ![Core Tools](https://img.shields.io/badge/Core%20Tools-22-purple) ![Languages](https://img.shields.io/badge/Languages-8-blue) [![Governed by Aegis-OS](https://img.shields.io/badge/Governed%20by-Aegis--OS-blueviolet?logo=github)](https://github.com/tescolopio/aegis-os) [![GitHub release](https://img.shields.io/github/v/release/tescolopio/aegis-os)](https://github.com/tescolopio/aegis-os/releases)
+![Free Forever](https://img.shields.io/badge/Free-Forever-brightgreen) ![Setup Time](https://img.shields.io/badge/Setup-2%20Minutes-blue) ![Local Execution](https://img.shields.io/badge/Runs-Locally-orange) ![Core Tools](https://img.shields.io/badge/Core%20Tools-22-purple) ![Languages](https://img.shields.io/badge/Languages-13-blue) [![Governed by Aegis-OS](https://img.shields.io/badge/Governed%20by-Aegis--OS-blueviolet?logo=github)](https://github.com/tescolopio/aegis-os) [![GitHub release](https://img.shields.io/github/v/release/tescolopio/aegis-os)](https://github.com/tescolopio/aegis-os/releases)
 
 > **Enterprise governance for Code Scalpel is now available via [Aegis-OS](https://github.com/tescolopio/aegis-os).** Code Scalpel ships as the default MCP toolkit inside Aegis-OS — one `docker-compose up` gives you a fully governed, policy-enforced agent environment.
 > ```bash
@@ -20,9 +20,10 @@
 
 This patch release refreshes public packaging metadata so PyPI and Marketplace copy match the current 22-core-tool product framing.
 
-## What's New in v2.1.0 — Full Go Support
+## What's New in v2.1.0 — Expanded Language Matrix
 
-Code Scalpel now supports **8 languages** with production-quality parsers.
+> [20260310_DOCS] The source-of-truth tier files currently advertise 13 languages
+> on the tier-configured `analyze_code` and `unified_sink_detect` surfaces.
 
 > [20260306_DOCS] Core parsing, extraction, and analysis surfaces span the full
 > language set. Graph-oriented MCP tools such as `get_call_graph`,
@@ -38,6 +39,11 @@ Code Scalpel now supports **8 languages** with production-quality parsers.
 | **TypeScript** | `.ts`, `.tsx` | Full type analysis, React components |
 | **Java** | `.java` | AST parsing and analysis |
 | **Go** *(new in v2.1)* | `.go` | Functions, methods, structs, interfaces, imports, goroutines |
+| **Kotlin** | `.kt`, `.kts` | Tier-configured analysis and sink detection |
+| **PHP** | `.php` | Tier-configured analysis and sink detection |
+| **Ruby** | `.rb` | Tier-configured analysis and sink detection |
+| **Swift** | `.swift` | Tier-configured analysis and sink detection |
+| **Rust** | `.rs` | Tier-configured analysis and sink detection |
 | **C** *(new in v2.0)* | `.c`, `.h` | Functions, structs, unions, enums, macros, bitfields |
 | **C++** *(new in v2.0)* | `.cpp`, `.hpp`, `.cc`, and more | Classes, templates, namespaces, operator overloading |
 | **C#** *(new in v2.0)* | `.cs` | Classes, records, interfaces, generics, async/await |
@@ -401,7 +407,7 @@ Code Scalpel is NOT a fork or wrapper of the `scalpel` Python library. It's a co
 |---------|--------------|------------------|
 | **Interface** | MCP server (primary) | CLI tool only |
 | **AI Agent Ready** | Yes (designed for agents) | CLI-only |
-| **Tools** | 20 development + 3 system tools | Limited utilities |
+| **Tools** | 22 core tools + `get_capabilities` introspection | Limited utilities |
 | **Security Scanning** | Taint analysis (12 CWEs) | Basic pattern matching |
 | **Symbolic Execution** | Z3-powered (all paths) | Not supported |
 | **Test Generation** | Auto-generate from paths | Not supported |
@@ -414,7 +420,7 @@ Code Scalpel is NOT a fork or wrapper of the `scalpel` Python library. It's a co
 | Feature | Code Scalpel | AST Explorer | Semgrep | Pylint |
 |---------|--------------|--------------|---------|--------|
 | **Primary Use** | MCP server for AI agents | Code visualization | Security patterns | Style linting |
-| **Tool Count** | 20 dev + 3 system tools | Query only | ~1000 rules | Limited |
+| **Tool Count** | 22 core tools + introspection | Query only | ~1000 rules | Limited |
 | **Code Extraction** | ✅ By symbol name, safe | ⚠️ Manual AST inspection | ❌ Not primary | ❌ Not supported |
 | **Security Scan** | ✅ Full taint analysis (12 CWEs) | ❌ No | ⚠️ Pattern-based | ⚠️ Basic only |
 | **Symbolic Execution** | ✅ Z3-powered | ❌ No | ❌ No | ❌ No |
@@ -423,7 +429,7 @@ Code Scalpel is NOT a fork or wrapper of the `scalpel` Python library. It's a co
 | **Cross-file Deps** | ✅ Full tracking | ⚠️ Limited | ⚠️ Limited | ⚠️ Limited |
 | **MCP Server** | ✅ Primary interface | ❌ No | ❌ No | ❌ No |
 | **LLM-Friendly** | ✅ Designed for agents | ⚠️ Limited | ⚠️ Limited | ⚠️ Limited |
-| **Polyglot** | ✅ Python, JS, TS, Java, C, C++, C# | ✅ Multi-language | ✅ Multi-language | ⚠️ Python-only |
+| **Polyglot** | ✅ 13 tier-configured languages | ✅ Multi-language | ✅ Multi-language | ⚠️ Python-only |
 
 ### Code Scalpel vs IDE Extensions
 

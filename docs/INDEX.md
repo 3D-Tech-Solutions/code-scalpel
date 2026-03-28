@@ -2,9 +2,10 @@
 
 > [20260207_DOCS] Added regulated enterprise deployment gameplan reference.
 > [20260224_DOCS] Updated to v2.0.0: C/C++/C# language support, social media marketing guide, polyglot test suite.
+> [20260327_DOCS] Updated to v2.1.2: Go/PHP language support, Oracle error recovery, 22-tool maturity.
 
-**Updated:** February 24, 2026  
-**Version:** 2.0.0
+**Updated:** March 27, 2026  
+**Version:** 2.1.2
 
 ---
 
@@ -29,6 +30,8 @@
 ### 🔧 Oracle Resilience Middleware (v1.3.0)
 - [Quick Start](oracle/ORACLE_RESILIENCE_QUICKSTART.md) - Get started with Oracle
 - [Integration Guide](oracle/ORACLE_INTEGRATION_GUIDE.md) - Complete integration reference
+- [MCP and CLI Tracking Matrix](oracle/ORACLE_MCP_CLI_TRACKING.md) - Live coverage tracker for Oracle usage across public tool boundaries
+- [Testing Guide](oracle/ORACLE_TESTING_GUIDE.md) - What Oracle does and how QA should validate it
 - [Implementation Details](ORACLE_RESILIENCE_IMPLEMENTATION.md) - Technical deep dive
 - [Test Cases](ORACLE_RESILIENCE_TEST_CASES.md) - Test coverage documentation
 - [Comprehensive Analysis](oracle/ORACLE_COMPREHENSIVE_ANALYSIS.md) - Full analysis report
@@ -38,6 +41,7 @@
 - [Docstring Specifications](reference/DOCSTRING_SPECIFICATIONS.md) - MCP tool documentation
 - [Docstring Examples](reference/DOCSTRING_EXAMPLES.md) - Usage examples
 - [Audit Report](reference/AUDIT_REPORT.md) - Tool inventory and status
+- [Tool Language Integration Matrix](tools/TOOL_LANGUAGE_INTEGRATION_MATRIX.md) - Clean 22-tool by 13-language support matrix
 
 ### 🏗️ Architecture
 - [Codebase Exploration](architecture/CODEBASE_EXPLORATION_REPORT.md) - System overview
@@ -48,6 +52,7 @@
 ### 🔒 Security & Compliance
 - [App Security Methodology](app_sec_star_methodology.md) - Security analysis approach
 - [GitHub Secrets](GITHUB_SECRETS.md) - Secret management
+- [Compliance Runtime Guide](compliance/README.md) - Current compliance tier-gating and verification behavior
 - **Enterprise Compliance (NEW in v1.3.0):** ⭐
   - **[📦 Complete Documentation Package](COMPLIANCE_DOCUMENTATION_DELIVERABLES.md)** - All deliverables index
   - [For CTOs](guides/ENTERPRISE_COMPLIANCE_FOR_CTOS.md) - Business value & ROI
@@ -59,6 +64,10 @@
     - [One-Pager](marketing/COMPLIANCE_ONE_PAGER.md) - Sales & demo material
     - [Comparison vs Alternatives](marketing/COMPLIANCE_COMPARISON.md) - Feature & cost comparison
     - [Social Media & Platform Guide](marketing/SOCIAL_MEDIA.md) - Platform-specific copy (HN, Reddit, LinkedIn, Twitter/X, Dev.to, Product Hunt)
+    - [Presentation Library](marketing/presentations/README.md) - Customer, client, investor, and Aegis OS deck blueprints
+    - [Presentation Approval Packet](marketing/presentations/APPROVAL_PACKET.md) - Bundled review set for internal and public positioning materials
+    - [Buyer Tone Variants](marketing/presentations/BUYER_TONE_VARIANTS.md) - Startup versus enterprise narrative tuning
+    - [Technical Specialist Briefing](marketing/presentations/TECHNICAL_SPECIALIST_BRIEFING.md) - Architecture and integration guidance for AST, IR, graph, and symbolic workflows
 
 ### 📦 Release & Deployment
 - [Release Process](RELEASE_PROCESS.md) - How to release
@@ -67,6 +76,7 @@
 - [Pre-Release Walkthrough](PRE_RELEASE_WALKTHROUGH.md) - Step-by-step guide
 - [Deployment Guides](deployment/DEPLOYMENT_INDEX.md) - Platform and infrastructure deployments
 - [Regulated Enterprise Gameplan](deployment/infrastructure/regulated-enterprise-gameplan.md) - Enterprise tier deployment plan
+- [Aegis Runtime Questionnaire](deployment/infrastructure/AEGIS_CODE_SCALPEL_RUNTIME_QUESTIONNAIRE.md) - Verified MCP runtime contract for Aegis adapter handoff
 
 ### 🧪 Testing
 - [Testing Framework](TESTING_FRAMEWORK.md) - Test organization
@@ -80,6 +90,7 @@
 
 ### 📁 Subdirectories
 - `archive/` - Historical documentation
+- `compliance/` - Current compliance runtime behavior and operational guidance
 - `getting_started/` - Onboarding materials
 - `guides/` - How-to guides
 - `marketing/` - Marketing materials and sales collateral

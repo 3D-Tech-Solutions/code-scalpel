@@ -7,7 +7,7 @@ Validates that each tool's language support matches documentation:
 - C/C++/C#: Extraction support (analyze_code, extract_code) — added v2.0.0
 - Go: Extraction support (analyze_code, extract_code) — added v2.0.3 [20260302_FEATURE]
 - Ruby: Full Phase 1+2 support — added v2.1.x [20260304_FEATURE]
-- Rust/PHP: Roadmap/partial support
+- Kotlin/PHP/Ruby/Swift/Rust: analyze_code polyglot support is shipped
 
 Tests verify:
 - Claimed language support actually works
@@ -39,7 +39,11 @@ class TestAnalyzeCodeLanguageSupport:
             "cpp",
             "csharp",
             "go",
+            "kotlin",
+            "php",
             "ruby",
+            "swift",
+            "rust",
         ],
     )
     def test_analyze_code_supported_languages(self, language):
@@ -66,7 +70,7 @@ class TestAnalyzeCodeLanguageSupport:
 
     def test_analyze_code_unsupported_language_error(self):
         """Unsupported languages should produce helpful error."""
-        # Not crash, but indicate: "Go not supported yet (roadmap)"
+        # Not crash, but should list the actual supported polyglot language matrix.
         pass
 
 
@@ -93,7 +97,7 @@ class TestSecurityScanLanguageSupport:
         pass
 
     def test_security_scan_go_rust_not_supported(self):
-        """Go/Rust taint tracking not in v1.0.1."""
+        """Go/Rust taint tracking is still separate from analyze_code polyglot support."""
         pass
 
 
@@ -111,7 +115,11 @@ class TestUnifiedSinkDetectLanguageSupport:
             "cpp",
             "csharp",
             "go",
+            "kotlin",
+            "php",
             "ruby",
+            "swift",
+            "rust",
         ],
     )
     def test_unified_sink_detect_supported(self, language):
@@ -226,8 +234,12 @@ class TestTypeEvaporationLanguageSupport:
         ("analyze_code", "go", "basic"),
         ("extract_code", "go", "single_symbol"),
         ("unified_sink_detect", "go", "supported"),
-        # Rust: Roadmap only
-        ("analyze_code", "rust", "not_supported"),
+        # Kotlin/PHP/Ruby/Swift/Rust: shipped analyze_code polyglot support
+        ("analyze_code", "kotlin", "basic"),
+        ("analyze_code", "php", "basic"),
+        ("analyze_code", "ruby", "basic"),
+        ("analyze_code", "swift", "basic"),
+        ("analyze_code", "rust", "basic"),
         ("security_scan", "rust", "not_supported"),
         # C/C++/C#: Extraction support added in v2.0.0
         ("analyze_code", "c", "basic"),
@@ -237,7 +249,6 @@ class TestTypeEvaporationLanguageSupport:
         ("analyze_code", "csharp", "basic"),
         ("extract_code", "csharp", "single_symbol"),
         # Ruby: Phase 1+2 complete [20260304_FEATURE]
-        ("analyze_code", "ruby", "basic"),
         ("extract_code", "ruby", "single_symbol"),
         ("unified_sink_detect", "ruby", "supported"),
         # PHP: Phase 1+2 complete

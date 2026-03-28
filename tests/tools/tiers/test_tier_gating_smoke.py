@@ -70,6 +70,7 @@ async def test_symbolic_execute_community_truncates_paths(monkeypatch):
         max_paths=None,
         max_depth=None,
         constraint_types=None,
+        language="python",
         tier=None,
         capabilities=None,
     ):
@@ -112,6 +113,39 @@ async def test_symbolic_execute_community_truncates_paths(monkeypatch):
     assert result.paths_explored == 3
     assert result.truncated is True
     assert result.truncation_warning
+
+
+@pytest.mark.asyncio
+async def test_symbolic_execute_typescript_routes_to_helper(monkeypatch):
+    """[20260315_TEST] TypeScript requests should flow through the symbolic helper path."""
+
+    called = False
+
+    def _fake_sync(*args, **kwargs):
+        nonlocal called
+        called = True
+        return SymbolicResult(
+            success=True,
+            total_paths=1,
+            paths_explored=1,
+            truncated=False,
+            paths=[],
+            symbolic_variables=[],
+            constraints=[],
+        )
+
+    monkeypatch.setattr(
+        code_scalpel.mcp.helpers.symbolic_helpers, "_symbolic_execute_sync", _fake_sync
+    )
+
+    result = await execution.symbolic_execute(
+        code="export function run(value: number): number { return value; }",
+        language="typescript",
+    )
+
+    assert result.success is True
+    assert result.error is None
+    assert called is True
 
 
 @pytest.mark.asyncio

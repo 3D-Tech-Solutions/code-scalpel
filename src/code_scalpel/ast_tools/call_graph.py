@@ -102,6 +102,8 @@ class CallGraphBuilder:
         self._java_field_types_by_class: Dict[str, Dict[str, str]] = {}
         self._java_member_selectors_by_class: Dict[str, Dict[str, List[str]]] = {}
         self._java_selector_return_types: Dict[str, str] = {}
+        self._java_interface_extends: Dict[str, tuple[list[str], list[str]]] = {}
+        self._java_sam_interfaces: Dict[str, tuple[list[str], str, list[str], str]] = {}
 
         # [20260307_FEATURE] Generic IR-backed get_call_graph fallback for the broader
         # polyglot normalizer set. This provides local callable nodes and same-file
@@ -114,6 +116,17 @@ class CallGraphBuilder:
             {}
         )
         self._ir_files_by_module_key: Dict[str, Set[str]] = {}
+        self._js_ts_alias_resolver = None
+        try:
+            from code_scalpel.code_parsers.typescript_parsers.alias_resolver import (
+                create_alias_resolver,
+            )
+
+            # [20260315_FEATURE] Reuse the shared TS alias resolver so JS/TS
+            # call-graph edges can follow tsconfig, webpack, or vite path aliases.
+            self._js_ts_alias_resolver = create_alias_resolver(root_path)
+        except Exception:
+            self._js_ts_alias_resolver = None
 
     _GENERIC_IR_EXTENSION_LANGUAGE_MAP: Dict[str, str] = {
         ".c": "c",
@@ -813,6 +826,127 @@ class CallGraphBuilder:
 
         return parser, result
 
+    # [20260309_FEATURE] Index project-local Java single-abstract-method interfaces so generic lambda and method-reference typing is not limited to the built-in JDK functional interfaces.
+    def _collect_java_sam_interfaces(self, parser, root, rel_path: str) -> None:
+        """Collect single-abstract-method interface signatures from a Java AST."""
+
+        def visit(node, prefix: str | None = None) -> None:
+            node_type = getattr(node, "type", "")
+            if node_type == "interface_declaration":
+                name_node = node.child_by_field_name("name")
+                interface_name = parser._get_text(name_node) if name_node else ""
+                if not interface_name:
+                    return
+                qualified_name = (
+                    f"{prefix}.{interface_name}" if prefix else interface_name
+                )
+                type_parameters_node = parser._find_child_by_type(
+                    node, "type_parameters"
+                )
+                type_parameters: list[str] = []
+                if type_parameters_node is not None:
+                    for type_parameter in parser._find_children_by_type(
+                        type_parameters_node, "type_parameter"
+                    ):
+                        param_name = parser._get_text(type_parameter).strip()
+                        if param_name:
+                            type_parameters.append(param_name)
+
+                extends_interfaces: list[str] = []
+                extends_node = parser._find_child_by_type(node, "extends_interfaces")
+                if extends_node is not None:
+                    type_list = parser._find_child_by_type(extends_node, "type_list")
+                    if type_list is not None:
+                        for child in getattr(type_list, "children", []) or []:
+                            if not getattr(child, "is_named", False):
+                                continue
+                            if getattr(child, "type", "") in {
+                                "type_identifier",
+                                "scoped_type_identifier",
+                                "generic_type",
+                            }:
+                                extends_interfaces.append(
+                                    parser._get_text(child).strip()
+                                )
+
+                self._java_interface_extends[f"{rel_path}:{qualified_name}"] = (
+                    type_parameters,
+                    extends_interfaces,
+                )
+
+                body_node = parser._find_child_by_type(node, "interface_body")
+                method_nodes = []
+                if body_node is not None:
+                    method_nodes = [
+                        child
+                        for child in getattr(body_node, "children", []) or []
+                        if getattr(child, "type", "") == "method_declaration"
+                    ]
+
+                if len(method_nodes) == 1:
+                    method_node = method_nodes[0]
+                    method_name_node = method_node.child_by_field_name("name")
+                    method_name = (
+                        parser._get_text(method_name_node).strip()
+                        if method_name_node is not None
+                        else ""
+                    )
+                    return_type_node = method_node.child_by_field_name("type")
+                    return_type = (
+                        parser._get_text(return_type_node).strip()
+                        if return_type_node is not None
+                        else "void"
+                    )
+                    parameter_types: list[str] = []
+                    parameters_node = parser._find_child_by_type(
+                        method_node, "formal_parameters"
+                    )
+                    if parameters_node is not None:
+                        for parameter_node in (
+                            getattr(parameters_node, "children", []) or []
+                        ):
+                            if not getattr(parameter_node, "is_named", False):
+                                continue
+                            if parameter_node.type not in {
+                                "formal_parameter",
+                                "spread_parameter",
+                                "receiver_parameter",
+                            }:
+                                continue
+                            type_node = parameter_node.child_by_field_name("type")
+                            parameter_type = (
+                                parser._get_text(type_node).strip()
+                                if type_node is not None
+                                else "?"
+                            )
+                            parameter_types.append(parameter_type)
+
+                    self._java_sam_interfaces[f"{rel_path}:{qualified_name}"] = (
+                        type_parameters,
+                        method_name,
+                        parameter_types,
+                        return_type,
+                    )
+
+                if body_node is not None:
+                    for child in getattr(body_node, "children", []) or []:
+                        if getattr(child, "is_named", False):
+                            visit(child, qualified_name)
+                return
+
+            nested_prefix = prefix
+            if node_type in {"class_declaration", "record_declaration"}:
+                name_node = node.child_by_field_name("name")
+                owner_name = parser._get_text(name_node) if name_node else ""
+                if owner_name:
+                    nested_prefix = f"{prefix}.{owner_name}" if prefix else owner_name
+
+            for child in getattr(node, "children", []) or []:
+                if getattr(child, "is_named", False):
+                    visit(child, nested_prefix)
+
+        visit(root)
+
     def _normalize_java_selector_type(self, type_name: str | None) -> str:
         """Normalize a Java type name for selector and overload matching."""
         if not type_name:
@@ -861,8 +995,39 @@ class CallGraphBuilder:
         if len(selectors) == 1:
             return selectors[0]
 
+        primitive_box_pairs = {
+            "boolean": "Boolean",
+            "byte": "Byte",
+            "char": "Character",
+            "short": "Short",
+            "int": "Integer",
+            "long": "Long",
+            "float": "Float",
+            "double": "Double",
+        }
+        boxing_aliases = {primitive: primitive for primitive in primitive_box_pairs}
+        boxing_aliases.update(
+            {boxed: primitive for primitive, boxed in primitive_box_pairs.items()}
+        )
+
+        def normalize_for_match(type_name: str) -> str:
+            normalized = self._normalize_java_selector_type(type_name)
+            return boxing_aliases.get(normalized, normalized)
+
+        def selector_argument_types(selector: str) -> list[str] | None:
+            if "(" not in selector or not selector.endswith(")"):
+                return None
+            argument_block = selector.rsplit("(", 1)[1][:-1].strip()
+            if not argument_block:
+                return []
+            return [
+                normalize_for_match(part.strip())
+                for part in argument_block.split(",")
+                if part.strip()
+            ]
+
         normalized_arguments = [
-            self._normalize_java_selector_type(argument_type)
+            normalize_for_match(argument_type)
             for argument_type in (argument_types or [])
         ]
         if normalized_arguments:
@@ -872,6 +1037,14 @@ class CallGraphBuilder:
             ]
             if len(exact_matches) == 1:
                 return exact_matches[0]
+
+            compatible_matches = [
+                selector
+                for selector in selectors
+                if selector_argument_types(selector) == normalized_arguments
+            ]
+            if len(compatible_matches) == 1:
+                return compatible_matches[0]
 
             arity_matches = [
                 selector
@@ -1058,17 +1231,36 @@ class CallGraphBuilder:
             for inner_record in getattr(class_info, "inner_records", []) or []:
                 add_record(inner_record, qualified_class)
 
+            for inner_enum in getattr(class_info, "inner_enums", []) or []:
+                add_enum(inner_enum, qualified_class)
+
         def add_record(record_info, prefix: str | None = None) -> None:
             qualified_record = (
                 f"{prefix}.{record_info.name}" if prefix else record_info.name
             )
             type_names.append(qualified_record)
 
+        def add_interface(interface_info, prefix: str | None = None) -> None:
+            qualified_interface = (
+                f"{prefix}.{interface_info.name}" if prefix else interface_info.name
+            )
+            type_names.append(qualified_interface)
+
+        def add_enum(enum_info, prefix: str | None = None) -> None:
+            qualified_enum = f"{prefix}.{enum_info.name}" if prefix else enum_info.name
+            type_names.append(qualified_enum)
+
         for class_info in getattr(result, "classes", []) or []:
             add_class(class_info)
 
         for record_info in getattr(result, "records", []) or []:
             add_record(record_info)
+
+        for interface_info in getattr(result, "interfaces", []) or []:
+            add_interface(interface_info)
+
+        for enum_info in getattr(result, "enums", []) or []:
+            add_enum(enum_info)
 
         return type_names
 
@@ -1246,9 +1438,11 @@ class CallGraphBuilder:
     # [20260307_FEATURE] Populate Java definitions so get_call_graph can emit canonical Java nodes.
     def _analyze_definitions_java(self, file_path: Path, rel_path: str) -> None:
         """Extract Java class and callable definitions."""
-        _, result = self._load_java_parse_result(file_path)
-        if result is None:
+        parser, result = self._load_java_parse_result(file_path)
+        if parser is None or result is None:
             return
+
+        self._collect_java_sam_interfaces(parser, parser._tree.root_node, rel_path)
 
         package_name = (getattr(result, "package", None) or "").strip()
         self._java_packages[rel_path] = package_name
@@ -1279,6 +1473,8 @@ class CallGraphBuilder:
                 add_class(inner_class, qualified_class)
             for inner_record in getattr(class_info, "inner_records", []) or []:
                 add_record(inner_record, qualified_class)
+            for inner_enum in getattr(class_info, "inner_enums", []) or []:
+                add_enum(inner_enum, qualified_class)
 
         def add_record(record_info, prefix: str | None = None) -> None:
             qualified_record = (
@@ -1286,11 +1482,27 @@ class CallGraphBuilder:
             )
             definitions.add(qualified_record)
 
+        def add_interface(interface_info, prefix: str | None = None) -> None:
+            qualified_interface = (
+                f"{prefix}.{interface_info.name}" if prefix else interface_info.name
+            )
+            definitions.add(qualified_interface)
+
+        def add_enum(enum_info, prefix: str | None = None) -> None:
+            qualified_enum = f"{prefix}.{enum_info.name}" if prefix else enum_info.name
+            definitions.add(qualified_enum)
+
         for class_info in getattr(result, "classes", []) or []:
             add_class(class_info)
 
         for record_info in getattr(result, "records", []) or []:
             add_record(record_info)
+
+        for interface_info in getattr(result, "interfaces", []) or []:
+            add_interface(interface_info)
+
+        for enum_info in getattr(result, "enums", []) or []:
+            add_enum(enum_info)
 
         for (
             owner_name,
@@ -1377,7 +1589,7 @@ class CallGraphBuilder:
                             name_node = parser._find_child_by_type(
                                 declarator, "identifier"
                             )
-                            if name_node is not None:
+                            if name_node is not None and declared_type != "var":
                                 var_types[parser._get_text(name_node)] = declared_type
 
                 for child in getattr(cur, "children", []) or []:
@@ -1386,6 +1598,272 @@ class CallGraphBuilder:
 
             visit(node)
             return var_types
+
+        def split_generic_arguments(argument_block: str) -> list[str]:
+            generic_args: list[str] = []
+            current: list[str] = []
+            depth = 0
+            for char in argument_block:
+                if char == "<":
+                    depth += 1
+                elif char == ">":
+                    depth = max(depth - 1, 0)
+                elif char == "," and depth == 0:
+                    generic_args.append("".join(current).strip())
+                    current = []
+                    continue
+                current.append(char)
+            if current:
+                generic_args.append("".join(current).strip())
+            return generic_args
+
+        def parse_generic_type_signature(type_name: str) -> tuple[str, list[str]]:
+            normalized_type = self._normalize_java_selector_type(type_name)
+            if normalized_type in {"?", "null"}:
+                return normalized_type, []
+
+            generic_start = normalized_type.find("<")
+            generic_end = normalized_type.rfind(">")
+            if generic_start <= 0 or generic_end <= generic_start:
+                return normalized_type, []
+
+            base_type = normalized_type[:generic_start]
+            generic_body = normalized_type[generic_start + 1 : generic_end]
+            return base_type, split_generic_arguments(generic_body)
+
+        def substitute_java_type_parameters(
+            type_name: str,
+            substitutions: dict[str, str],
+        ) -> str:
+            normalized_type = self._normalize_java_selector_type(type_name)
+            if normalized_type in substitutions:
+                return self._normalize_java_selector_type(
+                    substitutions[normalized_type]
+                )
+            if not substitutions:
+                return normalized_type
+            for placeholder, concrete_type in substitutions.items():
+                normalized_type = re.sub(
+                    rf"\b{re.escape(placeholder)}\b",
+                    self._normalize_java_selector_type(concrete_type),
+                    normalized_type,
+                )
+            return normalized_type
+
+        # [20260309_FEATURE] Recover Java functional-interface signatures from declared generics so lambda bodies and method references stay selector-aware in the shared runtime.
+        def infer_functional_interface_signature(
+            functional_type: str,
+            method_name: str | None = None,
+        ) -> tuple[list[str], str]:
+            base_type, generic_args = parse_generic_type_signature(functional_type)
+            if base_type in {"?", "null"}:
+                return [], "?"
+
+            signature_by_type = {
+                "Supplier": ([], 0),
+                "Callable": ([], 0),
+                "Function": ([0], -1),
+                "BiFunction": ([0, 1], -1),
+                "UnaryOperator": ([0], 0),
+                "BinaryOperator": ([0, 0], 0),
+                "Predicate": ([0], "boolean"),
+                "BiPredicate": ([0, 1], "boolean"),
+                "Consumer": ([0], "void"),
+                "BiConsumer": ([0, 1], "void"),
+                "Runnable": ([], "void"),
+            }
+            param_indexes, return_spec = signature_by_type.get(base_type, ([], "?"))
+
+            if base_type not in signature_by_type:
+
+                def resolve_project_sam_signature(
+                    target_file: str,
+                    local_type: str,
+                    concrete_args: list[str],
+                    visited: set[str],
+                ) -> tuple[list[str], str] | None:
+                    interface_key = f"{target_file}:{local_type}"
+                    if interface_key in visited:
+                        return None
+                    visited.add(interface_key)
+
+                    type_parameters, extends_interfaces = (
+                        self._java_interface_extends.get(
+                            interface_key,
+                            ([], []),
+                        )
+                    )
+                    substitutions = {
+                        type_param: generic_arg
+                        for type_param, generic_arg in zip(
+                            type_parameters, concrete_args
+                        )
+                    }
+
+                    sam_signature = self._java_sam_interfaces.get(interface_key)
+                    if sam_signature is not None:
+                        (
+                            _sam_type_parameters,
+                            sam_method_name,
+                            sam_parameter_types,
+                            sam_return_type,
+                        ) = sam_signature
+                        if method_name is not None and sam_method_name != method_name:
+                            return None
+                        return (
+                            [
+                                substitute_java_type_parameters(
+                                    param_type, substitutions
+                                )
+                                for param_type in sam_parameter_types
+                            ],
+                            substitute_java_type_parameters(
+                                sam_return_type, substitutions
+                            ),
+                        )
+
+                    for extends_interface in extends_interfaces:
+                        extends_base, extends_args = parse_generic_type_signature(
+                            extends_interface
+                        )
+                        resolved_file, resolved_fqcn = (
+                            self._resolve_java_type_reference(
+                                target_file,
+                                extends_base,
+                            )
+                        )
+                        resolved_local_type = (
+                            self._java_fqcn_to_local.get(resolved_fqcn)
+                            if resolved_fqcn
+                            else None
+                        )
+                        if not resolved_file or not resolved_local_type:
+                            continue
+                        substituted_args = [
+                            substitute_java_type_parameters(arg, substitutions)
+                            for arg in extends_args
+                        ]
+                        resolved_signature = resolve_project_sam_signature(
+                            resolved_file,
+                            resolved_local_type,
+                            substituted_args,
+                            visited,
+                        )
+                        if resolved_signature is not None:
+                            return resolved_signature
+
+                    return None
+
+                target_file, target_fqcn = self._resolve_java_type_reference(
+                    rel_path,
+                    base_type,
+                )
+                local_type = (
+                    self._java_fqcn_to_local.get(target_fqcn) if target_fqcn else None
+                )
+                if target_file and local_type:
+                    resolved_signature = resolve_project_sam_signature(
+                        target_file,
+                        local_type,
+                        generic_args,
+                        set(),
+                    )
+                    if resolved_signature is not None:
+                        return resolved_signature
+
+            parameter_types: list[str] = []
+            for index in param_indexes:
+                if 0 <= index < len(generic_args):
+                    parameter_types.append(
+                        self._normalize_java_selector_type(generic_args[index])
+                    )
+                else:
+                    parameter_types.append("?")
+
+            if isinstance(return_spec, str):
+                return_type = return_spec
+            elif generic_args:
+                resolved_index = (
+                    return_spec if return_spec >= 0 else len(generic_args) + return_spec
+                )
+                if 0 <= resolved_index < len(generic_args):
+                    return_type = self._normalize_java_selector_type(
+                        generic_args[resolved_index]
+                    )
+                else:
+                    return_type = "?"
+            else:
+                return_type = "?"
+
+            if method_name is not None:
+                expected_method = {
+                    "Supplier": "get",
+                    "Callable": "call",
+                    "Function": "apply",
+                    "BiFunction": "apply",
+                    "UnaryOperator": "apply",
+                    "BinaryOperator": "apply",
+                    "Predicate": "test",
+                    "BiPredicate": "test",
+                    "Consumer": "accept",
+                    "BiConsumer": "accept",
+                    "Runnable": "run",
+                }.get(base_type)
+                if expected_method is not None and method_name != expected_method:
+                    return [], "?"
+
+            return parameter_types, return_type
+
+        def infer_functional_interface_return_type(
+            receiver_type: str,
+            method_name: str,
+        ) -> str:
+            return infer_functional_interface_signature(receiver_type, method_name)[1]
+
+        def get_lambda_parameter_names(node) -> list[str]:
+            named_children = [
+                child
+                for child in (getattr(node, "children", []) or [])
+                if getattr(child, "is_named", False)
+            ]
+            if not named_children:
+                return []
+
+            first_child = named_children[0]
+            if first_child.type in {"formal_parameters", "inferred_parameters"}:
+                parameter_names: list[str] = []
+                for parameter_node in getattr(first_child, "children", []) or []:
+                    if not getattr(parameter_node, "is_named", False):
+                        continue
+                    if parameter_node.type in {
+                        "formal_parameter",
+                        "spread_parameter",
+                        "receiver_parameter",
+                    }:
+                        name_node = parameter_node.child_by_field_name("name")
+                        if name_node is not None:
+                            parameter_names.append(parser._get_text(name_node))
+                    elif parameter_node.type == "identifier":
+                        parameter_names.append(parser._get_text(parameter_node))
+                return parameter_names
+
+            if first_child.type == "identifier":
+                parameter_names: list[str] = []
+                for child in named_children[:-1]:
+                    if getattr(child, "type", "") != "identifier":
+                        break
+                    parameter_names.append(parser._get_text(child))
+                return parameter_names or [parser._get_text(first_child)]
+
+            return []
+
+        def get_enclosing_functional_type(node) -> str | None:
+            parent = getattr(node, "parent", None)
+            while parent is not None:
+                if parent.type == "local_variable_declaration":
+                    return get_declared_type(parent)
+                parent = getattr(parent, "parent", None)
+            return None
 
         # [20260308_FEATURE] Infer Java expression types for casts and chained receivers so overload resolution can use the same shared selector runtime.
         def infer_expression_type(
@@ -1431,6 +1909,40 @@ class CallGraphBuilder:
                     or "?"
                 )
 
+            if node_type == "field_access":
+                object_node = node.child_by_field_name("object")
+                field_node = node.child_by_field_name("field")
+                field_name = parser._get_text(field_node) if field_node else ""
+                receiver_text = (
+                    parser._get_text(object_node).strip() if object_node else ""
+                )
+                if receiver_text in {"this", "super"}:
+                    return self._normalize_java_selector_type(
+                        self._resolve_java_field_type(
+                            rel_path,
+                            current_class,
+                            field_name,
+                        )
+                        or "?"
+                    )
+                if receiver_text in var_types and field_name:
+                    field_owner_type = var_types[receiver_text]
+                    resolved_field_type = self._resolve_java_field_type(
+                        rel_path,
+                        field_owner_type,
+                        field_name,
+                    )
+                    if resolved_field_type:
+                        return self._normalize_java_selector_type(resolved_field_type)
+                return self._normalize_java_selector_type(
+                    self._resolve_java_field_type(
+                        rel_path,
+                        current_class,
+                        field_name,
+                    )
+                    or "?"
+                )
+
             if node_type == "object_creation_expression":
                 type_node = node.child_by_field_name("type")
                 return self._normalize_java_selector_type(
@@ -1455,7 +1967,26 @@ class CallGraphBuilder:
                 resolved_callee = resolve_method_invocation(
                     node, current_class, var_types
                 )
-                return self._java_selector_return_types.get(resolved_callee, "?")
+                return_type = self._java_selector_return_types.get(resolved_callee, "?")
+                if return_type != "?":
+                    return return_type
+
+                object_node = node.child_by_field_name("object")
+                name_node = node.child_by_field_name("name")
+                method_name = parser._get_text(name_node) if name_node else ""
+                if object_node is not None and method_name:
+                    receiver_type = infer_expression_type(
+                        object_node,
+                        current_class,
+                        var_types,
+                    )
+                    functional_return_type = infer_functional_interface_return_type(
+                        receiver_type,
+                        method_name,
+                    )
+                    if functional_return_type != "?":
+                        return functional_return_type
+                return "?"
 
             return "?"
 
@@ -1475,6 +2006,51 @@ class CallGraphBuilder:
                 )
 
             return inferred_types
+
+        def update_var_types_from_node(
+            node,
+            current_class: str,
+            var_types: dict[str, str],
+        ) -> None:
+            if node.type == "local_variable_declaration":
+                declared_type = get_declared_type(node)
+                for declarator in parser._find_children_by_type(
+                    node, "variable_declarator"
+                ):
+                    name_node = declarator.child_by_field_name("name")
+                    value_node = declarator.child_by_field_name("value")
+                    if name_node is None:
+                        continue
+                    var_name = parser._get_text(name_node)
+                    if declared_type and declared_type != "var":
+                        var_types[var_name] = declared_type
+                        continue
+                    if value_node is not None:
+                        inferred_type = infer_expression_type(
+                            value_node,
+                            current_class,
+                            var_types,
+                        )
+                        if inferred_type not in {"?", "null"}:
+                            var_types[var_name] = inferred_type
+                return
+
+            if node.type == "assignment_expression":
+                left_node = node.child_by_field_name("left")
+                right_node = node.child_by_field_name("right")
+                if (
+                    left_node is None
+                    or right_node is None
+                    or left_node.type != "identifier"
+                ):
+                    return
+                inferred_type = infer_expression_type(
+                    right_node,
+                    current_class,
+                    var_types,
+                )
+                if inferred_type not in {"?", "null"}:
+                    var_types[parser._get_text(left_node)] = inferred_type
 
         selector_by_line: Dict[tuple[str, int, bool], str] = {}
         for (
@@ -1723,12 +2299,126 @@ class CallGraphBuilder:
                 argument_types,
             )
 
+        def resolve_constructor_invocation(
+            node,
+            current_class: str,
+            var_types: dict[str, str],
+        ) -> str:
+            invocation_text = parser._get_text(node).strip()
+            argument_types = infer_argument_types(node, current_class, var_types)
+
+            if invocation_text.startswith("this"):
+                selector = self._select_java_selector(
+                    self._get_java_selectors_for_member(
+                        rel_path,
+                        current_class,
+                        current_class.split(".")[-1],
+                    ),
+                    argument_types,
+                )
+                if selector:
+                    return f"{rel_path}:{selector}"
+                return invocation_text
+
+            if invocation_text.startswith("super") and advanced_resolution:
+                package_name = self._java_packages.get(rel_path, "")
+                current_fqcn = (
+                    f"{package_name}.{current_class}" if package_name else current_class
+                )
+                superclass_ref = self._java_superclass_refs.get(current_fqcn)
+                if superclass_ref:
+                    target_file, target_fqcn = self._resolve_java_type_reference(
+                        rel_path,
+                        superclass_ref,
+                    )
+                    local_type = (
+                        self._java_fqcn_to_local.get(target_fqcn)
+                        if target_fqcn
+                        else None
+                    )
+                    if target_file and local_type:
+                        selector = self._select_java_selector(
+                            self._get_java_selectors_for_member(
+                                target_file,
+                                local_type,
+                                local_type.split(".")[-1],
+                            ),
+                            argument_types,
+                        )
+                        if selector:
+                            return f"{target_file}:{selector}"
+
+            return invocation_text
+
+        # [20260309_FEATURE] Resolve simple Java method references so this::method and Type::method contribute concrete graph edges.
+        def resolve_method_reference(
+            node,
+            current_class: str,
+            var_types: dict[str, str],
+            expected_argument_types: list[str] | None = None,
+        ) -> str:
+            node_text = parser._get_text(node).strip()
+            if "::" not in node_text:
+                return parser._get_text(node).strip()
+            receiver_text, member_name = [
+                part.strip() for part in node_text.split("::", 1)
+            ]
+
+            if not receiver_text or not member_name:
+                return parser._get_text(node).strip()
+
+            if member_name == "new":
+                constructor_target = self._resolve_java_member_on_type(
+                    rel_path,
+                    receiver_text,
+                    receiver_text.split(".")[-1],
+                    expected_argument_types or [],
+                )
+                if constructor_target:
+                    return constructor_target
+                return resolve_callee(
+                    receiver_text,
+                    current_class,
+                    var_types,
+                    expected_argument_types or [],
+                )
+
+            if receiver_text in {"this", "super"}:
+                return resolve_callee(
+                    f"{receiver_text}.{member_name}",
+                    current_class,
+                    var_types,
+                    expected_argument_types or [],
+                )
+
+            receiver_type = self._normalize_java_selector_type(
+                var_types.get(receiver_text) or receiver_text
+            )
+            if advanced_resolution and receiver_type not in {"?", "null"}:
+                inferred = self._resolve_java_member_on_type(
+                    rel_path,
+                    receiver_type,
+                    member_name,
+                    expected_argument_types or [],
+                )
+                if inferred:
+                    return inferred
+
+            return resolve_callee(
+                f"{receiver_text}.{member_name}",
+                current_class,
+                var_types,
+                expected_argument_types or [],
+            )
+
         def collect_calls(
             node,
             current_class: str,
             calls: list[str],
             var_types: dict[str, str],
         ) -> None:
+            update_var_types_from_node(node, current_class, var_types)
+
             if node.type == "method_invocation":
                 resolved_callee = resolve_method_invocation(
                     node,
@@ -1749,6 +2439,49 @@ class CallGraphBuilder:
                             infer_argument_types(node, current_class, var_types),
                         )
                     )
+            elif node.type == "explicit_constructor_invocation":
+                resolved_callee = resolve_constructor_invocation(
+                    node,
+                    current_class,
+                    var_types,
+                )
+                if resolved_callee:
+                    calls.append(resolved_callee)
+            elif node.type == "lambda_expression":
+                functional_type = get_enclosing_functional_type(node)
+                lambda_parameter_types, _lambda_return_type = (
+                    infer_functional_interface_signature(functional_type or "?")
+                )
+                lambda_var_types = dict(var_types)
+                for parameter_name, parameter_type in zip(
+                    get_lambda_parameter_names(node),
+                    lambda_parameter_types,
+                ):
+                    if parameter_type not in {"?", "null"}:
+                        lambda_var_types[parameter_name] = parameter_type
+                named_children = [
+                    child
+                    for child in (getattr(node, "children", []) or [])
+                    if getattr(child, "is_named", False)
+                ]
+                if named_children:
+                    body_node = named_children[-1]
+                    collect_calls(body_node, current_class, calls, lambda_var_types)
+                return
+            elif node.type == "method_reference":
+                functional_type = get_enclosing_functional_type(node)
+                expected_argument_types, _return_type = (
+                    infer_functional_interface_signature(functional_type or "?")
+                )
+                resolved_callee = resolve_method_reference(
+                    node,
+                    current_class,
+                    var_types,
+                    expected_argument_types,
+                )
+                if resolved_callee:
+                    calls.append(resolved_callee)
+                return
 
             for child in getattr(node, "children", []) or []:
                 if getattr(child, "is_named", False):
@@ -1761,12 +2494,9 @@ class CallGraphBuilder:
                 return
 
             qualified_type = f"{prefix}.{type_name}" if prefix else type_name
-            body_type = (
-                "record_body"
-                if type_node.type == "record_declaration"
-                else "class_body"
-            )
-            body_node = parser._find_child_by_type(type_node, body_type)
+            body_node = parser._find_child_by_type(type_node, "class_body")
+            if body_node is None and type_node.type == "record_declaration":
+                body_node = parser._find_child_by_type(type_node, "record_body")
             if body_node is None:
                 return
 
@@ -1989,7 +2719,23 @@ class CallGraphBuilder:
 
     def _resolve_js_module_path(self, from_file: str, module_spec: str) -> str | None:
         """Resolve a relative JS/TS module specifier to a project-relative file path."""
-        if not module_spec or not module_spec.startswith("."):
+        if not module_spec:
+            return None
+
+        if not module_spec.startswith("."):
+            if self._js_ts_alias_resolver is None:
+                return None
+            try:
+                resolved_file = self._js_ts_alias_resolver.resolve_to_file(module_spec)
+            except Exception:
+                resolved_file = None
+            if resolved_file is None:
+                return None
+            try:
+                if resolved_file.exists() and resolved_file.is_file():
+                    return str(resolved_file.relative_to(self.root_path)).replace("\\", "/")
+            except Exception:
+                return None
             return None
 
         base_dir = (self.root_path / from_file).parent

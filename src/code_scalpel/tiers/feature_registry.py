@@ -137,7 +137,7 @@ DEFAULT_FEATURES: Dict[str, Feature] = {
     "cross_file_security_scan": Feature(
         name="cross_file_security_scan",
         tier="community",
-        description="Cross-module taint tracking",
+        description="Cross-module taint tracking for Python plus a bounded Java IR subset",
         category="security",
     ),
     "verify_policy_integrity": Feature(

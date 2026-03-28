@@ -162,9 +162,9 @@ class TestExtractWithCustomPatternFunctionCall:
         )
 
         assert result.success is True
-        # Should find get_user which calls fetch_data
         match_names = [m.symbol_name for m in result.matches]
-        assert "get_user" in match_names or len(result.matches) > 0
+        # [20260310_TEST] Lock direct-call pattern matching to the actual caller symbol.
+        assert match_names == ["get_user"]
         assert "display" not in match_names
 
     def test_function_call_pattern_method_call(self, tmp_path: Path):
@@ -218,7 +218,8 @@ class TestExtractWithCustomPatternFunctionCall:
 
         assert result.success is True
         match_names = [m.symbol_name for m in result.matches]
-        assert "process" in match_names or len(result.matches) > 0
+        # [20260310_TEST] Repeated calls should still resolve to the containing function once.
+        assert match_names == ["process"]
 
 
 class TestExtractWithCustomPatternImport:
@@ -359,15 +360,15 @@ class TestExtractWithCustomPatternMatchProperties:
         )
 
         assert result.success is True
-        assert len(result.matches) > 0
-
+        # [20260310_TEST] Verify the concrete PatternMatch payload emitted for a simple regex hit.
+        assert len(result.matches) == 1
         match = result.matches[0]
-        assert hasattr(match, "symbol_name")
-        assert hasattr(match, "symbol_type")
-        assert hasattr(match, "file_path")
-        assert hasattr(match, "line_number")
-        assert hasattr(match, "code")
-        assert hasattr(match, "match_reason")
+        assert match.symbol_name == "calculate_sum"
+        assert match.symbol_type == "function"
+        assert match.file_path == "test.py"
+        assert match.line_number == 1
+        assert match.code == "def calculate_sum(a, b):\n    return a + b"
+        assert match.match_reason == "Regex pattern 'calculate' matched"
 
     def test_pattern_match_symbol_type(self, tmp_path: Path):
         """Test that symbol_type is correctly set."""
@@ -403,10 +404,10 @@ class TestExtractWithCustomPatternMatchProperties:
         )
 
         assert result.success is True
-        assert len(result.matches) > 0
+        assert len(result.matches) == 1
         match = result.matches[0]
-        assert match.match_reason is not None
-        assert len(match.match_reason) > 0
+        assert match.symbol_name == "test_pattern"
+        assert match.match_reason == "Regex pattern 'test' matched"
 
 
 class TestExtractWithCustomPatternEdgeCases:

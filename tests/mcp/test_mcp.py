@@ -5,11 +5,60 @@ All MCP tool functions are async and return Pydantic models.
 """
 
 import pytest
+from pydantic import BaseModel, Field
 
 from code_scalpel.mcp.contract import ToolError
 
 # Mark entire module as async
 pytestmark = pytest.mark.asyncio
+
+
+class _FakeCallGraphResult(BaseModel):
+    success: bool = True
+    nodes: list[dict] = Field(default_factory=list)
+    edges: list[dict] = Field(default_factory=list)
+
+
+class _FakeGraphNeighborhoodResult(BaseModel):
+    success: bool = True
+    center_node: dict = Field(default_factory=dict)
+    nodes: list[dict] = Field(default_factory=list)
+    edges: list[dict] = Field(default_factory=list)
+
+
+class _FakeProjectMapResult(BaseModel):
+    success: bool = True
+    total_files: int = 1
+    total_lines: int = 5
+    modules: list[dict] = Field(default_factory=list)
+    dependencies: list[dict] = Field(default_factory=list)
+    complexity_hotspots: list[dict] = Field(default_factory=list)
+    mermaid: str = "graph TD"
+
+
+class _FakeCrossFileDependenciesResult(BaseModel):
+    success: bool = True
+    target_symbol: str = "helper"
+    extracted_symbols: list[dict] = Field(default_factory=list)
+    dependency_graph: dict = Field(default_factory=dict)
+    combined_code: str = ""
+    confidence_scores: dict = Field(default_factory=dict)
+    mermaid: str = "graph TD"
+    truncated: bool = False
+
+
+class _FakeCrossFileSecurityResult(BaseModel):
+    success: bool = True
+    vulnerability_count: int = 0
+    files_analyzed: int = 1
+    has_vulnerabilities: bool = False
+    risk_level: str = "low"
+    vulnerabilities: list[dict] = Field(default_factory=list)
+    taint_flows: list[dict] = Field(default_factory=list)
+    taint_sources: list[str] = Field(default_factory=list)
+    dangerous_sinks: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    mermaid: str = "graph TD"
 
 
 def get_error_message(error) -> str:
@@ -140,6 +189,7 @@ async def async_func():
         # For error cases, check the envelope's error field
         assert result.error is not None
         assert "not found" in result.error.error.lower()
+        assert result.error.error_code == "correction_needed"
 
         # Check that Oracle suggestions are provided in error_details
         assert result.error.error_details is not None
@@ -152,9 +202,113 @@ async def async_func():
         assert isinstance(oracle["confidence"], (int, float))
         assert 0 <= oracle["confidence"] <= 1
 
+    async def test_analyze_uses_shared_path_resolver_for_malformed_windows_path(
+        self, tmp_path, monkeypatch
+    ):
+        """Malformed '/K:/...' paths should be recovered through shared path resolution."""
+        from code_scalpel.mcp.server import analyze_code
+
+        real_file = tmp_path / "legacy_processor.py"
+        real_file.write_text("def normalize_me():\n    return 1\n")
+
+        requested_path = "/K:/backup/Develop/code-scalpel-ninja-warrior/legacy_processor.py"
+
+        monkeypatch.setattr(
+            "code_scalpel.mcp.tools.analyze.resolve_path",
+            lambda path, project_root=None: str(real_file),
+        )
+
+        result = await analyze_code(file_path=requested_path, language="python")
+
+        assert result.error is None
+        assert result.success is True
+        assert "normalize_me" in result.functions
+
+    async def test_analyze_returns_correction_needed_for_unresolvable_windows_path(
+        self, monkeypatch
+    ):
+        """Unresolvable '/K:/...' paths should not degrade to internal_error."""
+        from code_scalpel.mcp.server import analyze_code
+
+        requested_path = "/K:/backup/Develop/code-scalpel-ninja-warrior/legacy_processor.py.bak"
+        resolver_error = FileNotFoundError(
+            "Cannot access file: /K:/backup/Develop/code-scalpel-ninja-warrior/legacy_processor.py.bak (not found)\n\n"
+            "Suggestion:\n"
+            "Windows path detected but file not accessible.\n"
+            "If running in WSL, the path should be accessible at:\n\n"
+            "  /mnt/k/backup/Develop/code-scalpel-ninja-warrior/legacy_processor.py.bak"
+        )
+
+        monkeypatch.setattr(
+            "code_scalpel.mcp.tools.analyze.resolve_path",
+            lambda path, project_root=None: (_ for _ in ()).throw(resolver_error),
+        )
+
+        result = await analyze_code(file_path=requested_path, language="python")
+
+        assert result.error is not None
+        assert result.error.error_code == "correction_needed"
+        assert "/mnt/k/backup/Develop/code-scalpel-ninja-warrior/legacy_processor.py.bak" in result.error.error
+        assert result.error.error_details is not None
+        assert result.error.error_details["hint"] == str(resolver_error)
+
 
 class TestSecurityScanTool:
     """Tests for the security_scan tool."""
+
+    async def test_scan_uses_shared_path_resolver_for_malformed_windows_path(
+        self, tmp_path, monkeypatch
+    ):
+        """Malformed '/K:/...' paths should resolve before scanning."""
+        from code_scalpel.mcp.server import security_scan
+
+        real_file = tmp_path / "vuln.py"
+        real_file.write_text(
+            "import os\n"
+            "def run(request):\n"
+            "    os.system(request.args.get('cmd'))\n",
+            encoding="utf-8",
+        )
+
+        monkeypatch.setattr(
+            "code_scalpel.mcp.tools.security.resolve_path",
+            lambda path, project_root=None: str(real_file),
+        )
+
+        result = await security_scan(
+            file_path="/K:/backup/Develop/code-scalpel-ninja-warrior/vuln.py"
+        )
+
+        assert result.error is None
+        assert result.success is True
+        assert result.vulnerability_count >= 1
+
+    async def test_scan_returns_correction_needed_for_unresolvable_windows_path(
+        self, monkeypatch
+    ):
+        """Unresolvable '/K:/...' paths should return correction_needed."""
+        from code_scalpel.mcp.server import security_scan
+
+        resolver_error = FileNotFoundError(
+            "Cannot access file: /K:/backup/Develop/code-scalpel-ninja-warrior/vuln.py (not found)\n\n"
+            "Suggestion:\n"
+            "Windows path detected but file not accessible.\n"
+            "If running in WSL, the path should be accessible at:\n\n"
+            "  /mnt/k/backup/Develop/code-scalpel-ninja-warrior/vuln.py"
+        )
+
+        monkeypatch.setattr(
+            "code_scalpel.mcp.tools.security.resolve_path",
+            lambda path, project_root=None: (_ for _ in ()).throw(resolver_error),
+        )
+
+        result = await security_scan(
+            file_path="/K:/backup/Develop/code-scalpel-ninja-warrior/vuln.py"
+        )
+
+        assert result.error is not None
+        assert result.error.error_code == "correction_needed"
+        assert "/mnt/k/backup/Develop/code-scalpel-ninja-warrior/vuln.py" in result.error.error
 
     async def test_scan_clean_code(self):
         """Test scanning clean code with no vulnerabilities."""
@@ -386,6 +540,356 @@ def with_loop(n):
         result = await symbolic_execute(code)
         assert result.success is True
 
+    async def test_symbolic_java_language_slice(self):
+        """[20260309_TEST] Test symbolic execution through the public Java tool path."""
+        from code_scalpel.mcp.server import symbolic_execute
+
+        code = """
+class Demo {
+    int classify(int x) {
+        if (x > 0) {
+            return 1;
+        }
+        return 0;
+    }
+}
+"""
+        result = await symbolic_execute(code, language="java")
+        assert result.success is True
+        assert result.paths_explored >= 2
+        assert "x" in result.symbolic_variables
+        assert any(
+            "x" in constraint and ("<" in constraint or ">" in constraint)
+            for constraint in result.constraints
+        )
+        assert any(
+            "x" in condition
+            for path in result.paths
+            for condition in path.conditions
+        )
+
+
+class TestPathResolutionParityAcrossTools:
+    """Regression tests for malformed Windows/WSL path handling across MCP tools."""
+
+    async def test_get_call_graph_resolves_malformed_windows_project_root(
+        self, tmp_path, monkeypatch
+    ):
+        """get_call_graph should normalize malformed '/K:/...' project roots."""
+        from code_scalpel.mcp.server import get_call_graph
+
+        expected_root = str(tmp_path)
+
+        monkeypatch.setattr(
+            "code_scalpel.mcp.tools.graph.resolve_path",
+            lambda path, project_root=None: expected_root,
+        )
+
+        def fake_sync(project_root, *args, **kwargs):
+            assert project_root == expected_root
+            return _FakeCallGraphResult(nodes=[{"id": "main"}], edges=[])
+
+        monkeypatch.setattr(
+            "code_scalpel.mcp.tools.graph._get_call_graph_sync",
+            fake_sync,
+        )
+
+        result = await get_call_graph(project_root="/K:/repo/sample")
+
+        assert result.success is True
+        assert len(result.nodes) == 1
+
+    async def test_get_call_graph_returns_correction_needed_for_unresolvable_windows_project_root(
+        self, monkeypatch
+    ):
+        """get_call_graph should return correction_needed for unresolvable '/K:/...' roots."""
+        from code_scalpel.mcp.server import get_call_graph
+
+        resolver_error = FileNotFoundError(
+            "Cannot access file: /K:/repo/sample (not found)\n\nSuggestion:\n  /mnt/k/repo/sample"
+        )
+
+        monkeypatch.setattr(
+            "code_scalpel.mcp.tools.graph.resolve_path",
+            lambda path, project_root=None: (_ for _ in ()).throw(resolver_error),
+        )
+
+        result = await get_call_graph(project_root="/K:/repo/sample")
+
+        assert result.error is not None
+        assert result.error.error_code == "correction_needed"
+
+    async def test_get_graph_neighborhood_resolves_malformed_windows_project_root(
+        self, tmp_path, monkeypatch
+    ):
+        """get_graph_neighborhood should normalize malformed '/K:/...' project roots."""
+        from code_scalpel.mcp.server import get_graph_neighborhood
+
+        expected_root = str(tmp_path)
+
+        monkeypatch.setattr(
+            "code_scalpel.mcp.tools.graph.resolve_path",
+            lambda path, project_root=None: expected_root,
+        )
+
+        def fake_sync(center_node_id, k, max_nodes, direction, min_confidence, project_root, query):
+            assert project_root == expected_root
+            return _FakeGraphNeighborhoodResult(
+                center_node={"id": center_node_id},
+                nodes=[{"id": center_node_id}],
+                edges=[],
+            )
+
+        monkeypatch.setattr(
+            "code_scalpel.mcp.tools.graph._get_graph_neighborhood_sync",
+            fake_sync,
+        )
+
+        result = await get_graph_neighborhood(
+            center_node_id="python::app.main::function::main",
+            project_root="/K:/repo/sample",
+        )
+
+        assert result.success is True
+        assert result.center_node["id"] == "python::app.main::function::main"
+
+    async def test_get_graph_neighborhood_returns_correction_needed_for_unresolvable_windows_project_root(
+        self, monkeypatch
+    ):
+        """get_graph_neighborhood should return correction_needed for bad '/K:/...' roots."""
+        from code_scalpel.mcp.server import get_graph_neighborhood
+
+        resolver_error = FileNotFoundError(
+            "Cannot access file: /K:/repo/sample (not found)\n\nSuggestion:\n  /mnt/k/repo/sample"
+        )
+
+        monkeypatch.setattr(
+            "code_scalpel.mcp.tools.graph.resolve_path",
+            lambda path, project_root=None: (_ for _ in ()).throw(resolver_error),
+        )
+
+        result = await get_graph_neighborhood(
+            center_node_id="python::app.main::function::main",
+            project_root="/K:/repo/sample",
+        )
+
+        assert result.error is not None
+        assert result.error.error_code == "correction_needed"
+
+    async def test_get_project_map_resolves_malformed_windows_project_root(
+        self, tmp_path, monkeypatch
+    ):
+        """get_project_map should normalize malformed '/K:/...' project roots."""
+        from code_scalpel.mcp.server import get_project_map
+
+        expected_root = str(tmp_path)
+
+        monkeypatch.setattr(
+            "code_scalpel.mcp.tools.graph.resolve_path",
+            lambda path, project_root=None: expected_root,
+        )
+
+        def fake_sync(project_root, *args, **kwargs):
+            assert project_root == expected_root
+            return _FakeProjectMapResult(total_files=2, total_lines=10)
+
+        monkeypatch.setattr(
+            "code_scalpel.mcp.tools.graph._get_project_map_sync",
+            fake_sync,
+        )
+
+        result = await get_project_map(project_root="/K:/repo/sample")
+
+        assert result.success is True
+        assert result.total_files == 2
+
+    async def test_get_project_map_returns_correction_needed_for_unresolvable_windows_project_root(
+        self, monkeypatch
+    ):
+        """get_project_map should return correction_needed for bad '/K:/...' roots."""
+        from code_scalpel.mcp.server import get_project_map
+
+        resolver_error = FileNotFoundError(
+            "Cannot access file: /K:/repo/sample (not found)\n\nSuggestion:\n  /mnt/k/repo/sample"
+        )
+
+        monkeypatch.setattr(
+            "code_scalpel.mcp.tools.graph.resolve_path",
+            lambda path, project_root=None: (_ for _ in ()).throw(resolver_error),
+        )
+
+        result = await get_project_map(project_root="/K:/repo/sample")
+
+        assert result.error is not None
+        assert result.error.error_code == "correction_needed"
+
+    async def test_get_cross_file_dependencies_resolves_malformed_windows_paths(
+        self, tmp_path, monkeypatch
+    ):
+        """get_cross_file_dependencies should normalize malformed file and root inputs."""
+        from code_scalpel.mcp.server import get_cross_file_dependencies
+
+        expected_root = str(tmp_path)
+        expected_file = str(tmp_path / "service.py")
+
+        def fake_resolve(path, project_root=None):
+            if path.endswith("service.py"):
+                return expected_file
+            return expected_root
+
+        monkeypatch.setattr(
+            "code_scalpel.mcp.tools.graph.resolve_path",
+            fake_resolve,
+        )
+
+        def fake_sync(target_file, target_symbol, project_root, *args, **kwargs):
+            assert target_file == expected_file
+            assert project_root == expected_root
+            return _FakeCrossFileDependenciesResult(target_symbol=target_symbol)
+
+        monkeypatch.setattr(
+            "code_scalpel.mcp.tools.graph._get_cross_file_dependencies_sync",
+            fake_sync,
+        )
+
+        result = await get_cross_file_dependencies(
+            target_file="/K:/repo/sample/service.py",
+            target_symbol="helper",
+            project_root="/K:/repo/sample",
+        )
+
+        assert result.success is True
+        assert result.target_symbol == "helper"
+
+    async def test_get_cross_file_dependencies_returns_correction_needed_for_unresolvable_windows_paths(
+        self, monkeypatch
+    ):
+        """get_cross_file_dependencies should return correction_needed for bad '/K:/...' paths."""
+        from code_scalpel.mcp.server import get_cross_file_dependencies
+
+        resolver_error = FileNotFoundError(
+            "Cannot access file: /K:/repo/sample/service.py (not found)\n\nSuggestion:\n  /mnt/k/repo/sample/service.py"
+        )
+
+        monkeypatch.setattr(
+            "code_scalpel.mcp.tools.graph.resolve_path",
+            lambda path, project_root=None: (_ for _ in ()).throw(resolver_error),
+        )
+
+        result = await get_cross_file_dependencies(
+            target_file="/K:/repo/sample/service.py",
+            target_symbol="helper",
+            project_root="/K:/repo/sample",
+        )
+
+        assert result.error is not None
+        assert result.error.error_code == "correction_needed"
+
+    async def test_cross_file_security_scan_resolves_malformed_windows_project_root(
+        self, tmp_path, monkeypatch
+    ):
+        """cross_file_security_scan should normalize malformed '/K:/...' project roots."""
+        from code_scalpel.mcp.server import cross_file_security_scan
+
+        expected_root = str(tmp_path)
+
+        monkeypatch.setattr(
+            "code_scalpel.mcp.tools.graph.resolve_path",
+            lambda path, project_root=None: expected_root,
+        )
+
+        def fake_sync(project_root, *args, **kwargs):
+            assert project_root == expected_root
+            return _FakeCrossFileSecurityResult()
+
+        monkeypatch.setattr(
+            "code_scalpel.mcp.tools.graph._cross_file_security_scan_sync",
+            fake_sync,
+        )
+
+        result = await cross_file_security_scan(project_root="/K:/repo/sample")
+
+        assert result.success is True
+        assert result.vulnerability_count == 0
+
+    async def test_cross_file_security_scan_returns_correction_needed_for_unresolvable_windows_project_root(
+        self, monkeypatch
+    ):
+        """cross_file_security_scan should return correction_needed for bad '/K:/...' roots."""
+        from code_scalpel.mcp.server import cross_file_security_scan
+
+        resolver_error = FileNotFoundError(
+            "Cannot access file: /K:/repo/sample (not found)\n\nSuggestion:\n  /mnt/k/repo/sample"
+        )
+
+        monkeypatch.setattr(
+            "code_scalpel.mcp.tools.graph.resolve_path",
+            lambda path, project_root=None: (_ for _ in ()).throw(resolver_error),
+        )
+
+        result = await cross_file_security_scan(project_root="/K:/repo/sample")
+
+        assert result.error is not None
+        assert result.error.error_code == "correction_needed"
+
+    async def test_generate_unit_tests_resolves_malformed_windows_file_path(
+        self, tmp_path, monkeypatch
+    ):
+        """generate_unit_tests should normalize malformed '/K:/...' file paths."""
+        from code_scalpel.mcp.server import generate_unit_tests
+
+        expected_file = str(tmp_path / "service.py")
+
+        monkeypatch.setattr(
+            "code_scalpel.mcp.tools.symbolic.resolve_path",
+            lambda path, project_root=None: expected_file,
+        )
+
+        def fake_generate(*args):
+            assert args[1] == expected_file
+            return {
+                "success": True,
+                "function_name": "helper",
+                "test_count": 1,
+                "total_test_cases": 1,
+                "framework_used": "pytest",
+                "data_driven_enabled": False,
+                "bug_reproduction_enabled": False,
+                "test_cases": [{"name": "test_helper"}],
+                "warnings": [],
+                "coverage_estimate": 75.0,
+            }
+
+        monkeypatch.setattr(
+            "code_scalpel.mcp.tools.symbolic.sym_helpers._generate_tests_sync",
+            fake_generate,
+        )
+
+        result = await generate_unit_tests(file_path="/K:/repo/sample/service.py")
+
+        assert result.error is None
+        assert result.success is True
+        assert result.function_name == "helper"
+
+    async def test_generate_unit_tests_returns_correction_needed_for_unresolvable_windows_file_path(
+        self, monkeypatch
+    ):
+        """generate_unit_tests should return correction_needed for bad '/K:/...' file paths."""
+        from code_scalpel.mcp.server import generate_unit_tests
+
+        resolver_error = FileNotFoundError(
+            "Cannot access file: /K:/repo/sample/service.py (not found)\n\nSuggestion:\n  /mnt/k/repo/sample/service.py"
+        )
+
+        monkeypatch.setattr(
+            "code_scalpel.mcp.tools.symbolic.resolve_path",
+            lambda path, project_root=None: (_ for _ in ()).throw(resolver_error),
+        )
+
+        result = await generate_unit_tests(file_path="/K:/repo/sample/service.py")
+
+        assert result.error is not None
+        assert result.error.error_code == "correction_needed"
 
 class TestMCPIntegration:
     """Integration tests for MCP server."""

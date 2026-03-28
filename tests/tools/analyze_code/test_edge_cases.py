@@ -437,8 +437,11 @@ const multiply = (x, y) => {
 
         result = _analyze_code_sync(code=code, language="javascript")
 
-        # Arrow function extraction depends on implementation
-        assert result.functions is not None
+        # [20260309_TEST] Verify JavaScript extraction returns concrete symbols and metrics.
+        assert result.success
+        assert result.language_detected == "javascript"
+        assert set(result.functions) >= {"add", "multiply"}
+        assert result.complexity == 1
 
     def test_class_expressions(self):
         """Class expressions should be handled."""
@@ -456,7 +459,17 @@ class MyClass {
 
         result = _analyze_code_sync(code=code, language="javascript")
 
-        assert "MyClass" in result.classes or len(result.classes) >= 0
+        # [20260309_TEST] Verify class extraction includes concrete methods.
+        assert result.success
+        assert result.language_detected == "javascript"
+        assert "MyClass" in result.classes
+        cls = next(
+            class_info
+            for class_info in result.class_details
+            if class_info.name == "MyClass"
+        )
+        assert set(cls.methods) >= {"constructor", "greet"}
+        assert result.complexity == 1
 
 
 class TestJavaEdgeCases:
@@ -474,9 +487,12 @@ public class Outer {
 
         result = _analyze_code_sync(code=code, language="java")
 
-        assert (
-            "Outer" in result.classes
-        )  # Java inner class extraction depends on parser
+        # [20260309_TEST] Verify Java extraction returns concrete symbols and metrics.
+        assert result.success
+        assert result.language_detected == "java"
+        assert result.classes == ["Outer"]
+        assert result.functions == []
+        assert result.complexity == 1
 
     def test_java_generics(self):
         """Java generics should not break extraction."""
@@ -489,5 +505,9 @@ public class Container<T> {
 
         result = _analyze_code_sync(code=code, language="java")
 
+        # [20260309_TEST] Verify Java generic parsing returns concrete symbols and metrics.
+        assert result.success
+        assert result.language_detected == "java"
         assert "Container" in result.classes
         assert set(result.functions) >= {"add", "get"}
+        assert result.complexity >= 1

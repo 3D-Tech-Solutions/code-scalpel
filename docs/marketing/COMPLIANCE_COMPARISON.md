@@ -2,6 +2,8 @@
 
 **Last Updated:** February 24, 2026
 
+> [20260310_DOCS] Runtime-aligned note: built-in HIPAA, SOC2, GDPR, and PCI-DSS checks and compliance report generation are Enterprise-tier features. Community and Pro surface explicit `upgrade_required` errors for those requests.
+
 ---
 
 ## Feature Comparison Matrix
@@ -14,7 +16,7 @@
 | **PCI-DSS Detection** | ✅ Automated | ⚠️ Manual only | ❌ Not supported | ✅ Manual review |
 | **Specific Rule IDs** | ✅ HIPAA001, SOC2001, etc. | ❌ Generic findings | ❌ Generic warnings | ⚠️ Manual categorization |
 | **Line-Level Detection** | ✅ Exact line numbers | ⚠️ File-level only | ✅ Line numbers | ⚠️ Varies |
-| **PDF Reports** | ✅ Auto-generated | ⚠️ Manual creation | ❌ Not supported | ✅ Manual reports |
+| **PDF Reports** | ✅ Auto-generated (Enterprise) | ⚠️ Manual creation | ❌ Not supported | ✅ Manual reports |
 | **CI/CD Integration** | ✅ Native | ❌ Not applicable | ⚠️ Limited | ❌ Not applicable |
 | **Cost (annual)** | **$1,188** | **$50K-150K** | **Free-$500** | **$50K-200K** |
 | **Time to Results** | **Seconds** | **Weeks** | **Minutes** | **Weeks** |
@@ -98,7 +100,7 @@
 | **CWE Mapping** | ✅ CWE-532, etc. | ⚠️ Some rules | ⚠️ Some rules | ⚠️ Some rules |
 | **Severity Levels** | ✅ CRITICAL/ERROR/WARNING | ✅ | ✅ | ✅ |
 
-**Key Difference:** Generic linters find coding style issues. Code Scalpel finds **regulatory compliance violations** with specific standard references.
+**Key Difference:** Generic linters find coding style issues. Code Scalpel Enterprise finds **regulatory compliance violations** with specific built-in standard references.
 
 ---
 

@@ -4,11 +4,12 @@
 
 The `verify_policy_integrity` MCP tool provides cryptographic verification of policy files to prevent unauthorized modifications. This is essential for tamper-resistant governance in multi-agent environments.
 
-**Security Model: FAIL CLOSED**
-- Missing manifest → DENY ALL operations
-- Invalid signature → DENY ALL operations  
-- Hash mismatch → DENY ALL operations
-- Any error → DENY ALL operations
+> [20260310_DOCS] The live MCP tool currently defaults to `manifest_source="file"` and accepts `file`, `git`, or `env`. Community tier performs parse-only validation; fail-closed cryptographic enforcement applies to Pro and Enterprise.
+
+**Security Model: Tier-Aware Verification**
+- Community: validate that policy files exist and parse as YAML/JSON
+- Pro: fail closed on signature or hash verification errors
+- Enterprise: same cryptographic fail-closed behavior plus audit logging
 
 ## Tier-Based Features
 
@@ -18,6 +19,8 @@ The `verify_policy_integrity` MCP tool provides cryptographic verification of po
 - Checks for file existence
 - Validates YAML/JSON syntax
 - No cryptographic verification
+
+**Important:** Community tier does not provide tamper-resistant guarantees. It is a sanity check, not a cryptographic control.
 
 **Use Case:** Development and testing environments
 
@@ -79,12 +82,12 @@ from code_scalpel.mcp import verify_policy_integrity
 # Verify policies
 result = await verify_policy_integrity(
     policy_dir=".code-scalpel",
-    manifest_source="git",  # or "env" or "file"
+  manifest_source="git",  # or "env" or "file"
 )
 
 if not result.success:
     print(f"SECURITY: {result.error}")
-    # Fail closed - deny all operations
+  # Pro/Enterprise: fail closed on verification failure
     sys.exit(1)
 else:
     print(f"✓ Verified {result.files_verified} policy files")
@@ -131,7 +134,7 @@ result = await verify_policy_integrity(
 - Set `SCALPEL_POLICY_MANIFEST` with JSON manifest
 - Typically injected by CI/CD system
 
-#### File (Development)
+#### File (Default / Development)
 Loads manifest from local file. Less secure but convenient for development.
 
 ```python

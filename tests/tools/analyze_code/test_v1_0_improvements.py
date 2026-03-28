@@ -84,7 +84,10 @@ fn main() {
         result = _analyze_code_sync(code=code, language="java")
 
         assert result.success is True
-        assert len(result.functions) > 0 or len(result.classes) > 0
+        # [20260309_TEST] Verify Java extraction returns concrete symbols and metrics.
+        assert "Test" in result.classes
+        assert "hello" in result.functions
+        assert result.complexity >= 1
 
 
 class TestOutputMetadata:
@@ -105,6 +108,10 @@ class TestOutputMetadata:
 
         assert result.success is True
         assert result.language_detected == "javascript"
+        # [20260309_TEST] The current tree-sitter walk also surfaces an anonymous function node.
+        assert result.functions.count("calculate") == 1
+        assert "<anonymous>" in result.functions
+        assert result.complexity == 1
 
     def test_typescript_analysis_populates_language_detected(self):
         """TypeScript analysis should populate language_detected field."""
@@ -113,6 +120,10 @@ class TestOutputMetadata:
 
         assert result.success is True
         assert result.language_detected == "typescript"
+        # [20260309_TEST] The current tree-sitter walk also surfaces an anonymous function node.
+        assert result.functions.count("calculate") == 1
+        assert "<anonymous>" in result.functions
+        assert result.complexity == 1
 
     def test_java_analysis_populates_language_detected(self):
         """Java analysis should populate language_detected field."""
@@ -123,6 +134,9 @@ class TestOutputMetadata:
 
         assert result.success is True
         assert result.language_detected == "java"
+        assert "Calculator" in result.classes
+        assert "calculate" in result.functions
+        assert result.complexity >= 1
 
     def test_analysis_populates_tier_applied(self):
         """Analysis should populate tier_applied field."""

@@ -259,6 +259,182 @@ def mega_complex(a, b, c, d, e):
         result = _get_project_map_sync(str(simple_project), True, 10, False)
         assert "graph TD" in result.mermaid
 
+    def test_sync_go_project_map_resolves_local_import_relationships(self, tmp_path):
+        """[20260311_TEST] Go project-map relationships should resolve package imports via go.mod and package directories."""
+        pytest.importorskip("tree_sitter_go")
+
+        (tmp_path / "go.mod").write_text("module example.com/demo\n", encoding="utf-8")
+        helper_dir = tmp_path / "helper"
+        helper_dir.mkdir()
+        (helper_dir / "helper.go").write_text(
+            "package helper\n\nfunc Tool() int {\n    return 1\n}\n",
+            encoding="utf-8",
+        )
+        cmd_dir = tmp_path / "cmd" / "app"
+        cmd_dir.mkdir(parents=True)
+        (cmd_dir / "main.go").write_text(
+            "package main\n\n"
+            'import "example.com/demo/helper"\n\n'
+            "func main() {\n"
+            "    helper.Tool()\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        result = _get_project_map_sync(
+            str(tmp_path),
+            True,
+            10,
+            False,
+            tier="pro",
+            capabilities={
+                "capabilities": {
+                    "module_relationship_visualization",
+                    "import_dependency_diagram",
+                }
+            },
+        )
+
+        assert result.error is None
+        assert result.module_relationships is not None
+        assert {
+            "source": "cmd/app/main.go",
+            "target": "helper/helper.go",
+            "type": "import",
+        } in result.module_relationships
+        assert result.dependency_diagram is not None
+
+    def test_sync_java_project_map_resolves_same_package_relationships(self, tmp_path):
+        """[20260315_TEST] Java project-map relationships should resolve same-package type references without explicit imports."""
+        demo_dir = tmp_path / "demo"
+        demo_dir.mkdir()
+        (demo_dir / "Helper.java").write_text(
+            "package demo;\n\n"
+            "public class Helper {\n"
+            "    public static int tool() {\n"
+            "        return 1;\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        (demo_dir / "App.java").write_text(
+            "package demo;\n\n"
+            "public class App {\n"
+            "    public static void main(String[] args) {\n"
+            "        Helper.tool();\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        result = _get_project_map_sync(
+            str(tmp_path),
+            True,
+            10,
+            False,
+            tier="pro",
+            capabilities={
+                "capabilities": {
+                    "module_relationship_visualization",
+                    "import_dependency_diagram",
+                }
+            },
+        )
+
+        assert result.error is None
+        assert result.module_relationships is not None
+        assert {
+            "source": "demo/App.java",
+            "target": "demo/Helper.java",
+            "type": "import",
+        } in result.module_relationships
+
+    def test_sync_java_project_map_tracks_maven_multimodule_inventory(self, tmp_path):
+        """[20260315_TEST] Java project-map should inventory Maven multi-module layouts and preserve module-level relationships."""
+        (tmp_path / "pom.xml").write_text(
+            "<project>\n"
+            "  <modelVersion>4.0.0</modelVersion>\n"
+            "  <groupId>demo</groupId>\n"
+            "  <artifactId>root</artifactId>\n"
+            "  <version>1.0.0</version>\n"
+            "  <packaging>pom</packaging>\n"
+            "  <modules>\n"
+            "    <module>shared</module>\n"
+            "    <module>app</module>\n"
+            "  </modules>\n"
+            "</project>\n",
+            encoding="utf-8",
+        )
+
+        shared_java = tmp_path / "shared" / "src" / "main" / "java" / "demo" / "shared"
+        app_java = tmp_path / "app" / "src" / "main" / "java" / "demo" / "app"
+        shared_java.mkdir(parents=True)
+        app_java.mkdir(parents=True)
+
+        (tmp_path / "shared" / "pom.xml").write_text(
+            "<project>\n"
+            "  <modelVersion>4.0.0</modelVersion>\n"
+            "  <parent><groupId>demo</groupId><artifactId>root</artifactId><version>1.0.0</version></parent>\n"
+            "  <artifactId>shared</artifactId>\n"
+            "</project>\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "app" / "pom.xml").write_text(
+            "<project>\n"
+            "  <modelVersion>4.0.0</modelVersion>\n"
+            "  <parent><groupId>demo</groupId><artifactId>root</artifactId><version>1.0.0</version></parent>\n"
+            "  <artifactId>app</artifactId>\n"
+            "</project>\n",
+            encoding="utf-8",
+        )
+
+        (shared_java / "SharedHelper.java").write_text(
+            "package demo.shared;\n\n"
+            "public class SharedHelper {\n"
+            "    public static int tool() {\n"
+            "        return 1;\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        (app_java / "App.java").write_text(
+            "package demo.app;\n\n"
+            "import demo.shared.SharedHelper;\n\n"
+            "public class App {\n"
+            "    public static void main(String[] args) {\n"
+            "        SharedHelper.tool();\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        result = _get_project_map_sync(
+            str(tmp_path),
+            True,
+            10,
+            False,
+            tier="pro",
+            capabilities={
+                "capabilities": {
+                    "module_relationship_visualization",
+                    "import_dependency_diagram",
+                }
+            },
+        )
+
+        assert result.error is None
+        module_paths = {module.path for module in result.modules}
+        assert {
+            "shared/src/main/java/demo/shared/SharedHelper.java",
+            "app/src/main/java/demo/app/App.java",
+        }.issubset(module_paths)
+        assert result.module_relationships is not None
+        assert {
+            "source": "app/src/main/java/demo/app/App.java",
+            "target": "shared/src/main/java/demo/shared/SharedHelper.java",
+            "type": "import",
+        } in result.module_relationships
+
     def test_sync_nonexistent_path(self):
         """Test sync function handles nonexistent path."""
         result = _get_project_map_sync("/nonexistent/path", True, 10, False)
@@ -685,6 +861,169 @@ class TestLanguageBreakdown:
         result = await get_project_map(project_root=str(tmp_path))
 
         assert result.languages.get("java", 0) == 2
+
+    @pytest.mark.asyncio
+    async def test_go_project(self, tmp_path):
+        """[20260311_TEST] Test language breakdown detects Go files."""
+        pytest.importorskip("tree_sitter_go")
+
+        (tmp_path / "main.go").write_text("package main\n\nfunc main() {}\n")
+        (tmp_path / "worker.go").write_text("package main\n\ntype Worker struct{}\n")
+
+        result = await get_project_map(project_root=str(tmp_path))
+
+        assert result.languages.get("go", 0) == 2
+
+    @pytest.mark.asyncio
+    async def test_go_project_map_inventories_functions_types_and_methods(
+        self, tmp_path
+    ):
+        """[20260311_TEST] Go project-map scanning should surface functions, receiver methods, imports, and entry points."""
+        pytest.importorskip("tree_sitter_go")
+
+        helper_dir = tmp_path / "helper"
+        helper_dir.mkdir()
+        (helper_dir / "helper.go").write_text(
+            "package helper\n\n"
+            "type Worker struct{}\n\n"
+            "func (w Worker) Run() {}\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "main.go").write_text(
+            "package main\n\n"
+            'import "helper"\n\n'
+            "func main() {\n"
+            "    helper.Worker{}.Run()\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        result = await get_project_map(project_root=str(tmp_path))
+
+        modules = {module.path: module for module in result.modules}
+        main_module = modules.get("main.go")
+        helper_module = modules.get("helper/helper.go")
+        assert main_module is not None
+        assert helper_module is not None
+        assert "main" in main_module.functions
+        assert "Worker" in helper_module.classes
+        assert "Worker.Run" in helper_module.functions
+        assert "helper" in main_module.imports
+        assert any(
+            entry_point.endswith("main.go:main") for entry_point in result.entry_points
+        )
+
+    @pytest.mark.asyncio
+    async def test_typescript_project_map_tracks_barrel_modules_and_imports(
+        self, tmp_path
+    ):
+        """[20260314_TEST] TypeScript project-map scanning should keep barrel modules and local imports visible."""
+        src = tmp_path / "src"
+        api = src / "api"
+        api.mkdir(parents=True)
+
+        (api / "index.ts").write_text(
+            "export function fetchUser(name: string): string {\n"
+            "    return name\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        (src / "main.ts").write_text(
+            'import { fetchUser } from "./api"\n\n'
+            "export function run(): string {\n"
+            '    return fetchUser("demo")\n'
+            "}\n",
+            encoding="utf-8",
+        )
+
+        result = await get_project_map(project_root=str(tmp_path))
+
+        assert result.languages.get("typescript") == 2
+        modules = {module.path: module for module in result.modules}
+        assert "src/main.ts" in modules
+        assert "src/api/index.ts" in modules
+        assert "run" in modules["src/main.ts"].functions
+        assert "fetchUser" in modules["src/api/index.ts"].functions
+        assert "./api" in modules["src/main.ts"].imports
+        assert any(
+            entry_point.endswith("src/main.ts:run") for entry_point in result.entry_points
+        )
+
+    @pytest.mark.asyncio
+    async def test_java_project_map_inventories_records_interfaces_and_enums(
+        self, tmp_path
+    ):
+        """[20260309_TEST] Java project-map scanning should surface record, interface, and enum types plus record methods."""
+        demo = tmp_path / "demo"
+        demo.mkdir()
+        (demo / "Contract.java").write_text(
+            "package demo;\n\n" "public interface Contract {}\n",
+            encoding="utf-8",
+        )
+        (demo / "Mode.java").write_text(
+            "package demo;\n\n" "public enum Mode { READY }\n",
+            encoding="utf-8",
+        )
+        (demo / "Worker.java").write_text(
+            "package demo;\n\n"
+            "public record Worker(String value) implements Contract {\n"
+            "    public static void main(String[] args) {\n"
+            "    }\n\n"
+            "    public void run() {\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        result = await get_project_map(project_root=str(tmp_path))
+
+        modules = {module.path: module for module in result.modules}
+        worker_module = modules.get("demo/Worker.java")
+        assert worker_module is not None
+        assert "Worker" in worker_module.classes
+        assert "Contract" in modules["demo/Contract.java"].classes
+        assert "Mode" in modules["demo/Mode.java"].classes
+        assert "Worker.main" in worker_module.functions
+        assert "Worker.run" in worker_module.functions
+        assert any(
+            entry_point.endswith("Worker.main") for entry_point in result.entry_points
+        )
+
+    @pytest.mark.asyncio
+    async def test_java_project_map_tracks_logical_packages(self, tmp_path):
+        """[20260314_TEST] Java project-map should expose declared package hierarchy for navigation."""
+        app_dir = tmp_path / "demo"
+        util_dir = app_dir / "util"
+        util_dir.mkdir(parents=True)
+
+        (util_dir / "Helper.java").write_text(
+            "package demo.util;\n\n"
+            "public class Helper {\n"
+            "    public static int tool() {\n"
+            "        return 1;\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        (app_dir / "App.java").write_text(
+            "package demo;\n\n"
+            "import demo.util.Helper;\n\n"
+            "public class App {\n"
+            "    public static void main(String[] args) {\n"
+            "        Helper.tool();\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        result = await get_project_map(project_root=str(tmp_path))
+
+        package_map = {package.path: package for package in result.packages}
+        assert "demo" in package_map
+        assert "demo/util" in package_map
+        assert "demo/App.java" in package_map["demo"].modules
+        assert "demo/util/Helper.java" in package_map["demo/util"].modules
+        assert "util" in package_map["demo"].subpackages
 
     @pytest.mark.asyncio
     async def test_markdown_documentation(self, tmp_path):

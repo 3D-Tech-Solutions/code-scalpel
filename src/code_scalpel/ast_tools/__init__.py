@@ -68,6 +68,11 @@ except ImportError:
     ImportGraphResult = None
 
 try:
+    from .java_import_resolver import JavaImportResolver
+except ImportError:
+    JavaImportResolver = None
+
+try:
     from .cross_file_extractor import (
         CrossFileExtractor,
         ExtractedSymbol,
@@ -124,6 +129,7 @@ __all__ = [
     "SymbolDefinition",
     "CircularImport",
     "ImportGraphResult",
+    "JavaImportResolver",
     # v1.5.1 - Cross-file extraction
     "CrossFileExtractor",
     "ExtractedSymbol",

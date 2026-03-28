@@ -653,6 +653,26 @@ public class Test {
         result = analyzer.analyze(code, language="java")
         assert result is not None
 
+    def test_analyze_typescript_exported_function(self):
+        """[20260315_TEST] TypeScript exported functions should analyze through the IR path."""
+        from code_scalpel.symbolic_execution_tools.engine import SymbolicAnalyzer
+
+        analyzer = SymbolicAnalyzer(enable_cache=False)
+        code = """
+export function classify(x: number): number {
+    if (x > 0) {
+        return 1;
+    }
+    return 0;
+}
+"""
+        result = analyzer.analyze(code, language="typescript")
+
+        assert result is not None
+        assert result.total_paths >= 2
+        assert result.feasible_count >= 1
+        assert any(path.constraints for path in result.paths)
+
     def test_analyze_unsupported_language(self):
         """Test analyzing with unsupported language raises ValueError."""
         import pytest

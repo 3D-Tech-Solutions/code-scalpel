@@ -136,21 +136,29 @@ pip install -e ".[dev]"
 For team-shared servers or remote access:
 
 ```bash
-# Start HTTP server (localhost only)
-code-scalpel mcp --http --port 8593
+# [20260310_DOCS] Use the verified MCP streamable-http transport and /mcp endpoint.
+# Start MCP HTTP transport (localhost only)
+code-scalpel mcp --transport streamable-http --host 127.0.0.1 --port 8593
 
-# Allow LAN access for team use
-code-scalpel mcp --http --port 8593 --allow-lan
+# Bind to all interfaces for team use behind a trusted network boundary
+code-scalpel mcp --transport streamable-http --host 0.0.0.0 --port 8593
 
 # With specific project root
-code-scalpel mcp --http --port 8593 --root /path/to/project
+code-scalpel mcp --transport streamable-http --host 127.0.0.1 --port 8593 --root /path/to/project
 ```
 
-**Health Check Endpoint** (port 8594):
+**Verified MCP Endpoint**:
 ```bash
-curl http://localhost:8594/health
-# {"status": "healthy", "version": "3.0.0", "tools": 18}
+curl -i http://localhost:8593/mcp \
+  -H "Accept: application/json, text/event-stream"
+# Expected without session initialization: HTTP 406 or another MCP negotiation response
 ```
+
+Current MCP runtime guidance:
+
+- The verified network endpoint is `/mcp` on the configured server port.
+- There is no native `/health` endpoint on the MCP runtime contract.
+- For container liveness, prefer a TCP port check or an initialized MCP probe managed by your platform.
 
 ### Docker Deployment (Production/CI)
 
@@ -162,11 +170,10 @@ services:
     image: ghcr.io/3D-Tech-Solutions/code-scalpel:3.0.0
     ports:
       - "8593:8593"
-      - "8594:8594"
     volumes:
       - ./:/project:ro
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8594/health"]
+      test: ["CMD", "python", "-c", "import socket; s = socket.create_connection(('127.0.0.1', 8593), 2); s.close()"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -188,16 +195,25 @@ jobs:
           - 8593:8593
     steps:
       - uses: actions/checkout@v4
-      - name: Wait for server
+      - name: Wait for MCP port
         run: |
           for i in {1..30}; do
-            curl -s http://localhost:8594/health && break
+            python - <<'PY'
+import socket
+try:
+    s = socket.create_connection(("127.0.0.1", 8593), 2)
+    s.close()
+except OSError:
+    raise SystemExit(1)
+PY
+            if [ $? -eq 0 ]; then break; fi
             sleep 1
           done
-      - name: Run security scan
+      - name: Run MCP security scan
         run: |
           curl -X POST http://localhost:8593/mcp \
             -H "Content-Type: application/json" \
+            -H "Accept: application/json, text/event-stream" \
             -d '{"method": "tools/call", "params": {"name": "security_scan", "arguments": {"file_path": "src/"}}}'
 ```
 
@@ -239,7 +255,7 @@ code-scalpel scan app.py
 code-scalpel analyze src/ --json
 
 # Start MCP server manually
-code-scalpel mcp --http --port 8593
+code-scalpel mcp --transport streamable-http --host 127.0.0.1 --port 8593
 ```
 
 ### Advanced: Python API (Programmatic Use)
@@ -339,9 +355,9 @@ uvx codescalpel --help
 3. Validate JSON syntax: `cat config.json | python -m json.tool`
 4. Check Claude logs: Help → Show Logs
 
-### Docker Health Check Failing
+### Docker MCP Listener Check Failing
 
-**Symptom:** Container exits or health check fails
+**Symptom:** Container exits or liveness check fails
 
 **Solutions:**
 ```bash
@@ -351,8 +367,13 @@ docker logs code-scalpel
 # Verify port mapping
 docker ps
 
-# Test health manually
-curl -v http://localhost:8594/health
+# Test MCP listener reachability manually
+python - <<'PY'
+import socket
+s = socket.create_connection(("127.0.0.1", 8593), 2)
+s.close()
+print("MCP listener reachable on 127.0.0.1:8593")
+PY
 ```
 
 ### Analysis Timeout

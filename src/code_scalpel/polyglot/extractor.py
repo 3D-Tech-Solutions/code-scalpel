@@ -43,6 +43,7 @@ class Language(Enum):
     CPP = "cpp"  # [20260224_FEATURE] C++ language support
     CSHARP = "csharp"  # [20260224_FEATURE] C# language support
     GO = "go"  # [20260302_FEATURE] Go language support
+    KOTLIN = "kotlin"  # [20260313_BUGFIX] Sync backward-compat polyglot enum
     PHP = "php"  # [20260303_FEATURE] PHP language support
     RUBY = "ruby"  # [20260304_FEATURE] Ruby language support
     SWIFT = "swift"  # [20260304_FEATURE] Swift language support
@@ -80,6 +81,9 @@ EXTENSION_MAP: dict[str, Language] = {
     ".cs": Language.CSHARP,
     # [20260302_FEATURE] Go extension
     ".go": Language.GO,
+    # [20260313_BUGFIX] Kotlin extensions were missing from the backward-compat extractor.
+    ".kt": Language.KOTLIN,
+    ".kts": Language.KOTLIN,
     # [20260303_FEATURE] PHP language support
     ".php": Language.PHP,
     ".php3": Language.PHP,
@@ -179,6 +183,24 @@ def detect_language(file_path: str | None, code: str | None = None) -> Language:
             for kw in ["package main", "func ", "import (", "fmt.Println", "fmt.Printf"]
         ):
             return Language.GO
+
+        # [20260313_BUGFIX] Kotlin detection was missing from the backward-compat path.
+        if any(
+            kw in code
+            for kw in [
+                "fun ",
+                "val ",
+                "var ",
+                "data class ",
+                "object ",
+                "companion object",
+            ]
+        ):
+            return Language.KOTLIN
+
+        # [20260313_BUGFIX] PHP detection needs the unique opening tag before generic heuristics.
+        if "<?php" in code or "<?=" in code:
+            return Language.PHP
 
         # [20260305_FEATURE] Rust indicators — fn + let/use are unambiguous Rust signals.
         # Check BEFORE Go (Go uses 'func ', not 'fn ').
@@ -352,6 +374,8 @@ class PolyglotExtractor:
             self._parse_csharp()  # [20260224_FEATURE]
         elif self.language == Language.GO:
             self._parse_go()  # [20260302_FEATURE]
+        elif self.language == Language.KOTLIN:
+            self._parse_kotlin()  # [20260313_BUGFIX]
         elif self.language == Language.PHP:  # [20260303_FEATURE]
             self._parse_php()
         elif self.language == Language.RUBY:  # [20260304_FEATURE]
@@ -488,6 +512,18 @@ class PolyglotExtractor:
         from code_scalpel.ir.normalizers.go_normalizer import GoNormalizer
 
         normalizer = GoNormalizer()
+        self._ir_module = normalizer.normalize(self.code)
+
+    def _parse_kotlin(self) -> None:
+        """
+        Parse Kotlin code using tree-sitter-kotlin.
+
+        [20260313_BUGFIX] Keep the backward-compat extractor aligned with the
+        canonical code_parsers extractor for Kotlin analysis.
+        """
+        from code_scalpel.ir.normalizers.kotlin_normalizer import KotlinNormalizer
+
+        normalizer = KotlinNormalizer()
         self._ir_module = normalizer.normalize(self.code)
 
     def _parse_php(self) -> None:

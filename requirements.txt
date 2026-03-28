@@ -15,6 +15,7 @@ pyyaml
 # anthropic
 # openai
 antlr4-python3-runtime
+tomli; python_version < '3.11'  # [20260311_BUGFIX] Python 3.10 runtime needs tomli to match pyproject TOML parsing support
 toml
 plotly
 matplotlib
@@ -24,12 +25,22 @@ tree-sitter
 tree-sitter-java
 tree-sitter-javascript  # [20251218_BUGFIX] Add missing JavaScript tree-sitter binding
 tree-sitter-typescript  # [20251218_BUGFIX] Add missing TypeScript tree-sitter binding
+tree-sitter-c  # [20260311_BUGFIX] Keep Docker/manual installs aligned with pyproject C runtime dependency
+tree-sitter-cpp  # [20260311_BUGFIX] Keep Docker/manual installs aligned with pyproject C++ runtime dependency
+tree-sitter-c-sharp  # [20260311_BUGFIX] Keep Docker/manual installs aligned with pyproject C# runtime dependency
+tree-sitter-go  # [20260311_BUGFIX] Keep Docker/manual installs aligned with pyproject Go runtime dependency
 tree-sitter-kotlin  # [20260306_BUGFIX] Kotlin normalizer/adapter require tree_sitter_kotlin
+tree-sitter-ruby  # [20260311_BUGFIX] Keep Docker/manual installs aligned with pyproject Ruby runtime dependency
+tree-sitter-php  # [20260314_BUGFIX] Keep Docker/manual installs aligned with analyze_code PHP support
+tree-sitter-swift  # [20260314_BUGFIX] Keep Docker/manual installs aligned with analyze_code Swift support
+tree-sitter-rust  # [20260314_BUGFIX] Keep Docker/manual installs aligned with analyze_code Rust support
 mcp>=1.23.0
 pydantic>=2.11.0  # [20251230_BUGFIX] Required by mcp>=1.25.0
 pydantic-settings>=2.5.2  # [20251230_BUGFIX] Required by mcp>=1.25.0
 urllib3>=2.6.0
 uvicorn
+fastapi>=0.100.0  # [20260327_FEATURE] Dashboard telemetry service
+websockets>=11.0  # [20260327_FEATURE] WebSocket support for live telemetry streaming
 # Optional: web/REST adapter (code-scalpel[web])
 # flask>=2.0.0  # [20251218_BUGFIX] Add missing Flask dependency from pyproject.toml
 pytest-asyncio==0.21.1  # [20260116_BUGFIX] Fixed pytest 9.0.2 incompatibility (0.23.3 has 'Package' obj error)

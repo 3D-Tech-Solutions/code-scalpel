@@ -253,7 +253,9 @@ def store_payment_method(card_number, cvv):
 
 **What It Does:** Define organization-specific coding standards
 
-**Example Custom Rule:**
+> [20260310_DOCS] The built-in HIPAA, SOC2, GDPR, and PCI-DSS compliance corpus ships with Code Scalpel under `src/code_scalpel/policy_engine/code_policy_check/`. Optional organization overlays can still live in `.code-scalpel/governance.yaml`, but that file is not the sole runtime source for the standard compliance rules.
+
+**Example Organization Overlay:**
 ```yaml
 # .code-scalpel/governance.yaml
 custom_rules:
@@ -468,7 +470,7 @@ Vote on upcoming features: [GitHub Discussions](https://github.com/code-scalpel/
 **A:** Yes. Use different licenses: Community in dev, Pro in staging, Enterprise in production.
 
 ### Q: Are compliance rules customizable?
-**A:** Yes (Enterprise tier). Edit `.code-scalpel/governance.yaml` to customize HIPAA, SOC2, GDPR, PCI-DSS rules.
+**A:** Yes, with an important distinction. Built-in HIPAA, SOC2, GDPR, and PCI-DSS detection ships in Code Scalpel itself. Enterprise teams can layer organization-specific compliance overlays and custom rules through policy configuration such as `.code-scalpel/governance.yaml`, but that file does not replace the built-in standards by itself.
 
 ### Q: How accurate is compliance detection?
 **A:** 95%+ detection rate for known violation patterns. False positive rate < 5% based on test suite verification.

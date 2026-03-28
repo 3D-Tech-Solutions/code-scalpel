@@ -56,9 +56,6 @@ async def test_typescript_dom_xss(tmp_path):
     )
 
 
-@pytest.mark.skip(
-    reason="TypeScript SQL injection pattern not yet supported - requires TS-specific template literal parser"
-)
 async def test_typescript_sql_injection(tmp_path):
     """TypeScript SQL injection via template strings."""
     ts_code = textwrap.dedent("""
@@ -81,9 +78,6 @@ async def test_typescript_sql_injection(tmp_path):
     )
 
 
-@pytest.mark.skip(
-    reason="TypeScript command injection via template literals not yet supported - requires TS parser enhancement"
-)
 async def test_typescript_command_injection(tmp_path):
     """TypeScript command injection via child_process."""
     ts_code = textwrap.dedent("""

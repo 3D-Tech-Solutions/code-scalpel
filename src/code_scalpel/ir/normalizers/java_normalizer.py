@@ -20,9 +20,12 @@ from tree_sitter import Language, Parser
 
 from ..nodes import (  # [20251214_FEATURE] Add location tracking for polyglot extraction; [20251215_FEATURE] v2.0.0 - Additional nodes for complete Java support
     IRAssign,
+    IRAugAssign,
+    IRAttribute,
     IRBinaryOp,
     IRCall,
     IRClassDef,
+    IRCompare,
     IRConstant,
     IRFor,
     IRFunctionDef,
@@ -35,11 +38,18 @@ from ..nodes import (  # [20251214_FEATURE] Add location tracking for polyglot e
     IRRaise,
     IRReturn,
     IRSwitch,
+    IRTernary,
     IRTry,
+    IRUnaryOp,
     IRWhile,
     SourceLocation,
 )
-from ..operators import BinaryOperator
+from ..operators import (
+    AugAssignOperator,
+    BinaryOperator,
+    CompareOperator,
+    UnaryOperator,
+)
 from .base import BaseNormalizer
 from .tree_sitter_visitor import TreeSitterVisitor
 
@@ -407,11 +417,21 @@ class JavaVisitor(TreeSitterVisitor):
         [20251215_FEATURE] Field declarations become IRAssign statements.
         """
         assignments = []
+        declared_type_node = node.child_by_field_name("type")
+        declared_type = (
+            self.get_text(declared_type_node) if declared_type_node else None
+        )
 
         for child in node.children:
             if child.type == "variable_declarator":
                 assign = self._norm_expr(child)
                 if isinstance(assign, IRAssign):  # [20251220_BUGFIX] Type check
+                    if declared_type and declared_type != "var":
+                        # [20260310_FEATURE] Preserve Java field declared types for downstream field-backed call resolution.
+                        assign._metadata["declared_type"] = declared_type
+                        for target in assign.targets:
+                            if isinstance(target, IRName):
+                                target._metadata["declared_type"] = declared_type
                     assignments.append(assign)
 
         return assignments  # [20251220_BUGFIX] Always return list, never None
@@ -494,13 +514,30 @@ class JavaVisitor(TreeSitterVisitor):
         int x = 5;
         int x, y = 10;
         """
+        declared_type_node = node.child_by_field_name("type")
+        declared_type = (
+            self.get_text(declared_type_node) if declared_type_node else None
+        )
         # This node contains type and declarators
         # We want to return a list of assignments/declarations
         declarators = []
 
         for child in node.children:
             if child.type == "variable_declarator":
-                declarators.append(self.visit(child))
+                declarator = self.visit(child)
+                if isinstance(declarator, IRAssign):
+                    # [20260310_BUGFIX] Preserve local-declaration provenance even when the Java declaration uses `var`.
+                    declarator._metadata["local_declaration"] = True
+                    for target in declarator.targets:
+                        if isinstance(target, IRName):
+                            target._metadata["local_declaration"] = True
+                    if declared_type and declared_type != "var":
+                        # [20260309_FEATURE] Preserve Java local declared types for downstream instance-call resolution.
+                        declarator._metadata["declared_type"] = declared_type
+                        for target in declarator.targets:
+                            if isinstance(target, IRName):
+                                target._metadata["declared_type"] = declared_type
+                declarators.append(declarator)
 
         # If single declarator, return it. If multiple, return list?
         # IRBlock expects statements.
@@ -529,10 +566,34 @@ class JavaVisitor(TreeSitterVisitor):
                 return self.visit(child)
         return None
 
-    def visit_assignment_expression(self, node: Any) -> IRAssign:
-        """x = y"""
+    def visit_assignment_expression(self, node: Any) -> Any:
+        """[20260309_FEATURE] Normalize Java assignment and augmented assignment expressions."""
         left = node.child_by_field_name("left")
         right = node.child_by_field_name("right")
+        operator_node = node.child_by_field_name("operator")
+
+        operator_text = self.get_text(operator_node) if operator_node else ""
+        if not operator_text:
+            for child in node.children:
+                if not child.is_named:
+                    text = self.get_text(child).strip()
+                    if text in {"=", "+=", "-=", "*=", "/=", "%="}:
+                        operator_text = text
+                        break
+
+        if operator_text in {"+=", "-=", "*=", "/=", "%="}:
+            op_map = {
+                "+=": AugAssignOperator.ADD,
+                "-=": AugAssignOperator.SUB,
+                "*=": AugAssignOperator.MUL,
+                "/=": AugAssignOperator.DIV,
+                "%=": AugAssignOperator.MOD,
+            }
+            return IRAugAssign(
+                target=cast(Any, self._norm_expr(left)),
+                op=op_map[operator_text],
+                value=cast(Any, self._norm_expr(right)),
+            )
 
         return IRAssign(
             targets=[cast(Any, self._norm_expr(left))],
@@ -546,9 +607,13 @@ class JavaVisitor(TreeSitterVisitor):
         args_node = node.child_by_field_name("arguments")
 
         func_name = self.get_text(name_node)
+        receiver_expr = None
+        receiver_text = None
         if object_node:
+            receiver_expr = self._norm_expr(object_node)
+            receiver_text = self.get_text(object_node)
             # method call on object
-            obj_text = self.get_text(object_node)
+            obj_text = receiver_text
             # We might represent this as a specialized IR node or just a name "obj.method"
             # For now, let's use IRName with the full dotted path if simple
             func_name = f"{obj_text}.{func_name}"
@@ -559,13 +624,30 @@ class JavaVisitor(TreeSitterVisitor):
                 if child.is_named:
                     args.append(self.visit(child))
 
-        return IRCall(func=IRName(id=func_name), args=args, kwargs={})
+        call = IRCall(func=IRName(id=func_name), args=args, kwargs={})
+        if receiver_expr is not None:
+            # [20260310_FEATURE] Preserve structured Java receiver expressions so
+            # downstream analyzers can avoid re-parsing flattened owner strings.
+            call._metadata["java_receiver_expr"] = receiver_expr
+            call._metadata["java_receiver_text"] = receiver_text
+        return call
 
     def visit_if_statement(self, node: Any) -> IRIf:
         """if (cond) { ... } else { ... }"""
         condition_node = node.child_by_field_name("condition")
         consequence_node = node.child_by_field_name("consequence")
         alternative_node = node.child_by_field_name("alternative")
+
+        # [20260309_BUGFIX] Some tree-sitter Java builds do not expose the expected
+        # field names on if statements consistently. Fall back to named-child order
+        # so IRIf.test survives for downstream symbolic branch extraction.
+        named_children = [child for child in node.children if child.is_named]
+        if condition_node is None and named_children:
+            condition_node = named_children[0]
+        if consequence_node is None and len(named_children) >= 2:
+            consequence_node = named_children[1]
+        if alternative_node is None and len(named_children) >= 3:
+            alternative_node = named_children[2]
 
         condition = (
             self._norm_expr(condition_node) if condition_node else None
@@ -587,10 +669,21 @@ class JavaVisitor(TreeSitterVisitor):
 
     def visit_while_statement(self, node: Any) -> IRWhile:
         """while (cond) { ... }"""
+        condition_node = node.child_by_field_name("condition")
+        body_node = node.child_by_field_name("body")
+
+        # [20260309_BUGFIX] Match the if-statement fallback so Java loop
+        # conditions remain available even when field names are omitted.
+        named_children = [child for child in node.children if child.is_named]
+        if condition_node is None and named_children:
+            condition_node = named_children[0]
+        if body_node is None and len(named_children) >= 2:
+            body_node = named_children[1]
+
         condition = self._norm_expr(
-            node.child_by_field_name("condition")
+            condition_node
         )  # [20251220_BUGFIX] Normalize condition
-        body = self.visit(node.child_by_field_name("body"))
+        body = self.visit(body_node)
 
         def to_list(n):
             if isinstance(n, list):
@@ -612,7 +705,7 @@ class JavaVisitor(TreeSitterVisitor):
 
         return IRReturn(value=cast(Any, expr))  # [20251220_BUGFIX] Cast expression
 
-    def visit_binary_expression(self, node: Any) -> IRBinaryOp:
+    def visit_binary_expression(self, node: Any) -> Any:
         """a + b"""
         left = self._norm_expr(
             node.child_by_field_name("left")
@@ -634,16 +727,105 @@ class JavaVisitor(TreeSitterVisitor):
             "/": BinaryOperator.DIV,
             "%": BinaryOperator.MOD,
         }
-        op = op_map.get(
-            operator_text, BinaryOperator.ADD
-        )  # Default to ADD if unknown for now
+
+        compare_map = {
+            "==": CompareOperator.EQ,
+            "!=": CompareOperator.NE,
+            "<": CompareOperator.LT,
+            "<=": CompareOperator.LE,
+            ">": CompareOperator.GT,
+            ">=": CompareOperator.GE,
+        }
+        if operator_text in compare_map:
+            return IRCompare(
+                left=cast(Any, left),
+                ops=[compare_map[operator_text]],
+                comparators=[cast(Any, right)],
+            )
+
+        op = op_map.get(operator_text, BinaryOperator.ADD)
 
         return IRBinaryOp(
             left=cast(Any, left), op=op, right=cast(Any, right)
         )  # [20251220_BUGFIX] Cast operands
 
+    def visit_parenthesized_expression(self, node: Any) -> Any:
+        """(expr) -> expr.
+
+        [20260309_BUGFIX] Preserve wrapped Java branch conditions so IRIf/IRWhile
+        receive the inner expression instead of a generic None fallback.
+        """
+        for child in node.children:
+            if child.is_named:
+                return self._norm_expr(child)
+        return IRConstant(value=None)
+
+    def visit_ternary_expression(self, node: Any) -> IRTernary:
+        """condition ? when_true : when_false.
+
+        [20260309_FEATURE] Preserve Java ternary expressions in IR so downstream
+        symbolic/test-generation flows can enumerate and evaluate them.
+        """
+        named_children = [child for child in node.children if child.is_named]
+        test = self._norm_expr(named_children[0]) if len(named_children) >= 1 else None
+        body = self._norm_expr(named_children[1]) if len(named_children) >= 2 else None
+        orelse = (
+            self._norm_expr(named_children[2]) if len(named_children) >= 3 else None
+        )
+        return IRTernary(
+            test=cast(Any, test), body=cast(Any, body), orelse=cast(Any, orelse)
+        )
+
+    def visit_unary_expression(self, node: Any) -> IRUnaryOp:
+        """[20260309_FEATURE] Preserve Java unary expressions like `-2` and `!flag`."""
+        operator_node = node.child_by_field_name("operator")
+        operand_node = node.child_by_field_name("operand")
+
+        named_children = [child for child in node.children if child.is_named]
+        if operand_node is None and named_children:
+            operand_node = named_children[-1]
+
+        operator_text = self.get_text(operator_node) if operator_node else ""
+        if not operator_text:
+            for child in node.children:
+                if not child.is_named:
+                    text = self.get_text(child).strip()
+                    if text in {"-", "+", "!", "~"}:
+                        operator_text = text
+                        break
+
+        op_map = {
+            "-": UnaryOperator.NEG,
+            "+": UnaryOperator.POS,
+            "!": UnaryOperator.NOT,
+            "~": UnaryOperator.INVERT,
+        }
+        return IRUnaryOp(
+            op=op_map.get(operator_text, UnaryOperator.NEG),
+            operand=cast(Any, self._norm_expr(operand_node) if operand_node else None),
+        )
+
     def visit_identifier(self, node: Any) -> IRName:
         return IRName(id=self.get_text(node))
+
+    def visit_this(self, node: Any) -> IRName:
+        """[20260309_FEATURE] Preserve Java `this` references for field-access normalization."""
+        return IRName(id="this")
+
+    def visit_field_access(self, node: Any) -> IRAttribute:
+        """[20260309_FEATURE] Normalize Java field access like `this.value` to IRAttribute."""
+        object_node = node.child_by_field_name("object")
+        field_node = node.child_by_field_name("field")
+
+        named_children = [child for child in node.children if child.is_named]
+        if object_node is None and named_children:
+            object_node = named_children[0]
+        if field_node is None and len(named_children) >= 2:
+            field_node = named_children[1]
+
+        value = self._norm_expr(object_node) if object_node else IRName(id="this")
+        attr = self.get_text(field_node) if field_node else ""
+        return IRAttribute(value=cast(Any, value), attr=attr)
 
     def visit_decimal_integer_literal(self, node: Any) -> IRConstant:
         return IRConstant(value=int(self.get_text(node)))

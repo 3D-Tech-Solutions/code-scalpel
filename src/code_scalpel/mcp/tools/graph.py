@@ -6,7 +6,12 @@ import asyncio
 from typing import Any
 
 from code_scalpel.mcp.models.graph import GraphNeighborhoodResult
-from code_scalpel.mcp.contract import ToolResponseEnvelope, envelop_tool_function
+from code_scalpel.mcp.contract import (
+    ToolError,
+    ToolResponseEnvelope,
+    envelop_tool_function,
+    make_envelope,
+)
 from code_scalpel.mcp.oracle_middleware import (
     with_oracle_resilience,
     PathStrategy,
@@ -23,6 +28,7 @@ from code_scalpel.mcp.helpers.graph_helpers import (
     _get_graph_neighborhood_sync,
     _get_project_map_sync,
 )
+from code_scalpel.mcp.path_resolver import resolve_path
 from code_scalpel.mcp.protocol import mcp
 from code_scalpel import __version__ as _pkg_version
 from code_scalpel.mcp.protocol import _get_current_tier as _tier_getter
@@ -92,6 +98,41 @@ async def _get_call_graph_tool(
         - tier_applied (str): Tier used for analysis
         - duration_ms (int): Analysis duration in milliseconds
     """
+    # [20260311_BUGFIX] Return guided invalid_argument responses for malformed
+    # graph-shape inputs instead of relying on helper/result-model fallbacks.
+    if depth < 1:
+        return make_envelope(
+            data=None,
+            tool_id="get_call_graph",
+            tool_version=_pkg_version,
+            tier=_get_current_tier(),
+            duration_ms=0,
+            error=ToolError(
+                error="Parameter 'depth' must be >= 1.",
+                error_code="invalid_argument",
+                error_details={"depth": depth},
+            ),
+        )
+    if (paths_from is None) != (paths_to is None):
+        return make_envelope(
+            data=None,
+            tool_id="get_call_graph",
+            tool_version=_pkg_version,
+            tier=_get_current_tier(),
+            duration_ms=0,
+            error=ToolError(
+                error="Provide both 'paths_from' and 'paths_to' together for path queries.",
+                error_code="invalid_argument",
+                error_details={"paths_from": paths_from, "paths_to": paths_to},
+            ),
+        )
+    # [20260311_BUGFIX] Normalize project_root before helper dispatch so malformed
+    # Windows/WSL drive paths return correction-aware errors instead of generic failures.
+    if project_root is not None:
+        from code_scalpel.mcp.helpers.session import _get_project_root
+
+        project_root = resolve_path(project_root, str(_get_project_root()))
+
     if ctx:
         await ctx.report_progress(0, 100, "Building call graph...")
 
@@ -230,50 +271,147 @@ async def _get_graph_neighborhood_tool(
     node_id_pattern = r"^(?P<language>[a-z]+)::(?P<module>[^:]+)::(?P<kind>function|class|method)::(?P<name>.+)$"
     match = re.match(node_id_pattern, center_node_id)
     if not match:
-        # Raise ValidationError to trigger oracle suggestions
-        from code_scalpel.mcp.validators.core import ValidationError
-
-        raise ValidationError(
-            f"Invalid node ID format: '{center_node_id}'. "
-            "Expected format: language::module::type::name (e.g., python::app.routes::function::handle_request)"
+        return make_envelope(
+            data=None,
+            tool_id="get_graph_neighborhood",
+            tool_version=_pkg_version,
+            tier=_get_current_tier(),
+            duration_ms=0,
+            error=ToolError(
+                error=(
+                    f"Invalid node ID format: '{center_node_id}'. "
+                    "Expected format: language::module::type::name "
+                    "(e.g., python::app.routes::function::handle_request)"
+                ),
+                error_code="correction_needed",
+                error_details={
+                    "hint": (
+                        "Use node IDs in the form language::module::type::name, "
+                        "for example python::app.routes::function::handle_request."
+                    )
+                },
+            ),
         )
 
     language = match.group("language")
     kind = match.group("kind")
 
     if (
-        (kind == "function" and language not in {"python", "javascript", "typescript"})
-        or (kind == "method" and language not in {"javascript", "typescript", "java"})
+        (kind == "function" and language not in {"python", "javascript", "typescript", "go"})
+        or (kind == "method" and language not in {"javascript", "typescript", "java", "go"})
         or kind == "class"
     ):
-        from code_scalpel.mcp.validators.core import ValidationError
-
-        raise ValidationError(
-            "get_graph_neighborhood currently supports local Python function nodes plus local JavaScript/TypeScript function and method nodes and local Java method nodes only. "
-            f"Received '{center_node_id}'. Use a canonical Python node ID such as "
-            "python::app.routes::function::handle_request, a canonical JS/TS function node ID such as "
-            "typescript::src/api/client::function::fetchUsers, or a JS/TS method node ID such as "
-            "typescript::src/services/user_service::method::UserService:fetchUsers, or a Java method node ID such as "
-            "java::demo/App::method::App:main."
+        return make_envelope(
+            data=None,
+            tool_id="get_graph_neighborhood",
+            tool_version=_pkg_version,
+            tier=_get_current_tier(),
+            duration_ms=0,
+            error=ToolError(
+                error=(
+                    "get_graph_neighborhood currently supports local Python function nodes plus "
+                    "local JavaScript/TypeScript function and method nodes, local Java method nodes, "
+                    "and local Go function/method nodes only. "
+                    f"Received '{center_node_id}'. Use a Java method-node ID such as "
+                    "java::demo/App::method::App:main when targeting Java."
+                ),
+                error_code="correction_needed",
+                error_details={
+                    "hint": (
+                        "Use a canonical supported node ID such as "
+                        "python::app.routes::function::handle_request, "
+                        "typescript::src/api/client::function::fetchUsers, "
+                        "java::demo/App::method::App:main, or go::cmd/main::function::main."
+                    )
+                },
+            ),
         )
 
-    # Pre-validation: Check parameter ranges
+    # [20260311_BUGFIX] Return guided invalid_argument responses for malformed
+    # neighborhood-shape inputs instead of collapsing them to generic failures.
     try:
         k = int(k)
         max_nodes = int(max_nodes)
     except (ValueError, TypeError):
-        raise ValueError(
-            "Invalid parameters: 'k' and 'max_nodes' must be valid integers"
+        return make_envelope(
+            data=None,
+            tool_id="get_graph_neighborhood",
+            tool_version=_pkg_version,
+            tier=_get_current_tier(),
+            duration_ms=0,
+            error=ToolError(
+                error="Invalid parameters: 'k' and 'max_nodes' must be valid integers.",
+                error_code="invalid_argument",
+                error_details={"k": k, "max_nodes": max_nodes},
+            ),
         )
 
     if k < 1:
-        raise ValueError("Parameter 'k' must be >= 1")
-    if max_nodes < 1:
-        raise ValueError("Parameter 'max_nodes' must be >= 1")
-    if direction not in ["outgoing", "incoming", "both"]:
-        raise ValueError(
-            f"Parameter 'direction' must be 'outgoing', 'incoming', or 'both', got '{direction}'"
+        return make_envelope(
+            data=None,
+            tool_id="get_graph_neighborhood",
+            tool_version=_pkg_version,
+            tier=_get_current_tier(),
+            duration_ms=0,
+            error=ToolError(
+                error="Parameter 'k' must be >= 1.",
+                error_code="invalid_argument",
+                error_details={"k": k},
+            ),
         )
+    if max_nodes < 1:
+        return make_envelope(
+            data=None,
+            tool_id="get_graph_neighborhood",
+            tool_version=_pkg_version,
+            tier=_get_current_tier(),
+            duration_ms=0,
+            error=ToolError(
+                error="Parameter 'max_nodes' must be >= 1.",
+                error_code="invalid_argument",
+                error_details={"max_nodes": max_nodes},
+            ),
+        )
+    if direction not in ["outgoing", "incoming", "both"]:
+        return make_envelope(
+            data=None,
+            tool_id="get_graph_neighborhood",
+            tool_version=_pkg_version,
+            tier=_get_current_tier(),
+            duration_ms=0,
+            error=ToolError(
+                error=(
+                    "Parameter 'direction' must be 'outgoing', 'incoming', or 'both', "
+                    f"got '{direction}'."
+                ),
+                error_code="invalid_argument",
+                error_details={"direction": direction},
+            ),
+        )
+
+    # [20260311_BUGFIX] Normalize project_root before helper dispatch so malformed
+    # Windows/WSL drive paths return correction-aware errors instead of generic failures.
+    if project_root is not None:
+        from code_scalpel.mcp.helpers.session import _get_project_root
+
+        try:
+            project_root = resolve_path(project_root, str(_get_project_root()))
+        except FileNotFoundError as exc:
+            # [20260311_BUGFIX] This tool still uses a legacy result model under
+            # pytest direct calls, so return correction_needed here instead of
+            # letting the legacy contract collapse the path issue to a plain error.
+            return make_envelope(
+                data=None,
+                tool_id="get_graph_neighborhood",
+                tool_version=_pkg_version,
+                tier=_get_current_tier(),
+                duration_ms=0,
+                error=ToolError(
+                    error=str(exc),
+                    error_code="correction_needed",
+                    error_details={"hint": str(exc)},
+                ),
+            )
 
     return await asyncio.to_thread(
         _get_graph_neighborhood_sync,
@@ -315,10 +453,12 @@ async def _get_project_map_tool(
 ) -> Any:
     """Generate a comprehensive map of the project structure.
 
-    [20260308_DOCS] This surface remains Python-first overall, but now includes
-    an initial local JS/TS slice plus a narrow Java slice for module discovery.
-    Pro and Enterprise can also derive Java file relationships from explicit
-    imports and static imports through the shared project-map relationship path.
+    [20260314_DOCS] This surface remains Python-first overall, but now includes
+    initial local JS/TS slices plus bounded-useful Java and Go slices for
+    module discovery. Pro and Enterprise can also derive Java file
+    relationships from explicit imports, wildcard package imports, and
+    same-package type references through the shared project-map relationship
+    path.
 
     **Tier Behavior:**
     - Community: Up to 500 files, 100 modules, basic detail level
@@ -355,6 +495,41 @@ async def _get_project_map_tool(
         - tier_applied (str): Tier used for analysis
         - duration_ms (int): Analysis duration in milliseconds
     """
+    # [20260311_BUGFIX] Return guided invalid_argument responses for malformed
+    # project-map shape inputs instead of relying on helper/result-model fallbacks.
+    if complexity_threshold < 1:
+        return make_envelope(
+            data=None,
+            tool_id="get_project_map",
+            tool_version=_pkg_version,
+            tier=_get_current_tier(),
+            duration_ms=0,
+            error=ToolError(
+                error="Parameter 'complexity_threshold' must be >= 1.",
+                error_code="invalid_argument",
+                error_details={"complexity_threshold": complexity_threshold},
+            ),
+        )
+    if not 0.0 <= min_isolation_score <= 1.0:
+        return make_envelope(
+            data=None,
+            tool_id="get_project_map",
+            tool_version=_pkg_version,
+            tier=_get_current_tier(),
+            duration_ms=0,
+            error=ToolError(
+                error="Parameter 'min_isolation_score' must be between 0.0 and 1.0.",
+                error_code="invalid_argument",
+                error_details={"min_isolation_score": min_isolation_score},
+            ),
+        )
+    # [20260311_BUGFIX] Normalize project_root before helper dispatch so malformed
+    # Windows/WSL drive paths return correction-aware errors instead of generic failures.
+    if project_root is not None:
+        from code_scalpel.mcp.helpers.session import _get_project_root
+
+        project_root = resolve_path(project_root, str(_get_project_root()))
+
     if ctx:
         await ctx.report_progress(0, 100, "Scanning project structure...")
 
@@ -443,7 +618,7 @@ async def _get_project_map_tool(
 
 
 get_project_map = mcp.tool(
-    description="Produce a high-level project structure map with package hierarchy and complexity hotspots."
+    description="Produce a high-level project structure map with package hierarchy and complexity hotspots, with current runtime-backed slices for Python, JS/TS, Java, and Go."
 )(
     with_oracle_resilience(tool_id="get_project_map", strategy=PathStrategy)(
         envelop_tool_function(
@@ -513,6 +688,84 @@ async def _get_cross_file_dependencies_tool(
         - error (str): Error message if analysis failed
         - duration_ms (int): Analysis duration in milliseconds
     """
+    from code_scalpel.mcp.helpers.session import _get_project_root
+
+    # [20260311_BUGFIX] Return guided invalid_argument responses for malformed
+    # dependency-request shapes instead of relying on helper/result-model fallbacks.
+    if not target_symbol.strip():
+        return make_envelope(
+            data=None,
+            tool_id="get_cross_file_dependencies",
+            tool_version=_pkg_version,
+            tier=_get_current_tier(),
+            duration_ms=0,
+            error=ToolError(
+                error="Parameter 'target_symbol' cannot be empty.",
+                error_code="invalid_argument",
+                error_details={"target_symbol": target_symbol},
+            ),
+        )
+    if max_depth < 1:
+        return make_envelope(
+            data=None,
+            tool_id="get_cross_file_dependencies",
+            tool_version=_pkg_version,
+            tier=_get_current_tier(),
+            duration_ms=0,
+            error=ToolError(
+                error="Parameter 'max_depth' must be >= 1.",
+                error_code="invalid_argument",
+                error_details={"max_depth": max_depth},
+            ),
+        )
+    if not 0.0 <= confidence_decay_factor <= 1.0:
+        return make_envelope(
+            data=None,
+            tool_id="get_cross_file_dependencies",
+            tool_version=_pkg_version,
+            tier=_get_current_tier(),
+            duration_ms=0,
+            error=ToolError(
+                error="Parameter 'confidence_decay_factor' must be between 0.0 and 1.0.",
+                error_code="invalid_argument",
+                error_details={"confidence_decay_factor": confidence_decay_factor},
+            ),
+        )
+    if max_files is not None and max_files < 1:
+        return make_envelope(
+            data=None,
+            tool_id="get_cross_file_dependencies",
+            tool_version=_pkg_version,
+            tier=_get_current_tier(),
+            duration_ms=0,
+            error=ToolError(
+                error="Parameter 'max_files' must be >= 1 when provided.",
+                error_code="invalid_argument",
+                error_details={"max_files": max_files},
+            ),
+        )
+    if timeout_seconds is not None and timeout_seconds <= 0:
+        return make_envelope(
+            data=None,
+            tool_id="get_cross_file_dependencies",
+            tool_version=_pkg_version,
+            tier=_get_current_tier(),
+            duration_ms=0,
+            error=ToolError(
+                error="Parameter 'timeout_seconds' must be > 0 when provided.",
+                error_code="invalid_argument",
+                error_details={"timeout_seconds": timeout_seconds},
+            ),
+        )
+
+    # [20260311_BUGFIX] Normalize file/root inputs before helper dispatch so malformed
+    # Windows/WSL drive paths return correction-aware errors instead of generic failures.
+    base_root = str(_get_project_root())
+    if project_root is not None:
+        project_root = resolve_path(project_root, base_root)
+        base_root = project_root
+    target_file = resolve_path(target_file, base_root)
+
     tier = _get_current_tier()
     caps = get_tool_capabilities("get_cross_file_dependencies", tier) or {}
     limits = caps.get("limits", {}) or {}
@@ -584,13 +837,17 @@ async def _cross_file_security_scan_tool(
     before reaching a dangerous sink. This catches security issues that single-file
     analysis would miss.
 
+    [20260315_DOCS] The current non-Python public slice includes bounded
+    JavaScript and TypeScript same-project import tracking in addition to the
+    bounded Java IR-based path.
+
     **Tier Behavior:**
-    - Community: Basic cross-file scan with single-module taint tracking (max 50 modules, depth 5)
-    - Pro: All Community + advanced taint tracking with framework-aware analysis (unlimited modules and depth)
+    - Community: Basic cross-file scan with Python analysis plus bounded JavaScript, TypeScript, and Java cross-file tracking (max 50 modules, depth 5)
+    - Pro: All Community + deeper project coverage with framework-aware analysis where available (unlimited modules and depth)
     - Enterprise: All Pro + project-wide scan with custom rules and global flows (unlimited modules/depth)
 
     **Tier Capabilities:**
-    - Community: basic_cross_file_scan, single_module_taint_tracking, source_to_sink_tracing (max_modules=50, max_depth=5)
+    - Community: basic_cross_file_scan, single_module_taint_tracking, source_to_sink_tracing, bounded_js_ts_ir_flows, bounded_java_ir_flows (max_modules=50, max_depth=5)
     - Pro: All Community + advanced_taint_tracking, framework_aware_taint, dependency_injection_resolution (max_modules=unlimited, max_depth=unlimited)
     - Enterprise: All Pro + project_wide_scan, custom_taint_rules, global_taint_flow, microservice_boundary_crossing (max_modules=unlimited, max_depth=unlimited)
 
@@ -621,6 +878,7 @@ async def _cross_file_security_scan_tool(
         - taint_flows (list[TaintFlowModel]): Data flow paths
         - taint_sources (list[str]): Functions with taint sources
         - dangerous_sinks (list[str]): Functions with dangerous sinks
+        - warnings (list[str]): Non-fatal warnings about unsupported or skipped analysis paths
         - framework_contexts (dict): Framework detection (Pro+)
         - dependency_chains (list[dict]): Inter-file chains (Pro+)
         - confidence_scores (dict): Confidence per flow (Pro+)
@@ -633,6 +891,67 @@ async def _cross_file_security_scan_tool(
         - tier_applied (str): Tier used for analysis
         - duration_ms (int): Analysis duration in milliseconds
     """
+    # [20260311_BUGFIX] Return guided invalid_argument responses for malformed
+    # cross-file security scan shapes instead of relying on helper/result-model fallbacks.
+    if max_depth < 1:
+        return make_envelope(
+            data=None,
+            tool_id="cross_file_security_scan",
+            tool_version=_pkg_version,
+            tier=_get_current_tier(),
+            duration_ms=0,
+            error=ToolError(
+                error="Parameter 'max_depth' must be >= 1.",
+                error_code="invalid_argument",
+                error_details={"max_depth": max_depth},
+            ),
+        )
+    if timeout_seconds is not None and timeout_seconds <= 0:
+        return make_envelope(
+            data=None,
+            tool_id="cross_file_security_scan",
+            tool_version=_pkg_version,
+            tier=_get_current_tier(),
+            duration_ms=0,
+            error=ToolError(
+                error="Parameter 'timeout_seconds' must be > 0 when provided.",
+                error_code="invalid_argument",
+                error_details={"timeout_seconds": timeout_seconds},
+            ),
+        )
+    if max_modules is not None and max_modules < 1:
+        return make_envelope(
+            data=None,
+            tool_id="cross_file_security_scan",
+            tool_version=_pkg_version,
+            tier=_get_current_tier(),
+            duration_ms=0,
+            error=ToolError(
+                error="Parameter 'max_modules' must be >= 1 when provided.",
+                error_code="invalid_argument",
+                error_details={"max_modules": max_modules},
+            ),
+        )
+    if not 0.0 <= confidence_threshold <= 1.0:
+        return make_envelope(
+            data=None,
+            tool_id="cross_file_security_scan",
+            tool_version=_pkg_version,
+            tier=_get_current_tier(),
+            duration_ms=0,
+            error=ToolError(
+                error="Parameter 'confidence_threshold' must be between 0.0 and 1.0.",
+                error_code="invalid_argument",
+                error_details={"confidence_threshold": confidence_threshold},
+            ),
+        )
+    # [20260311_BUGFIX] Normalize project_root before helper dispatch so malformed
+    # Windows/WSL drive paths return correction-aware errors instead of generic failures.
+    if project_root is not None:
+        from code_scalpel.mcp.helpers.session import _get_project_root
+
+        project_root = resolve_path(project_root, str(_get_project_root()))
+
     if ctx:
         await ctx.report_progress(
             progress=0, total=100, message="Starting cross-file security scan..."

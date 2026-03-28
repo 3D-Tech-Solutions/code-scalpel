@@ -1,3 +1,4 @@
+import json
 import os
 import socket
 import subprocess
@@ -129,6 +130,20 @@ def _pythonpath_env(repo_root: Path) -> dict[str, str]:
     # Explicit CODE_SCALPEL_LICENSE_PATH (when set by tests) is still honored.
     env.setdefault("CODE_SCALPEL_DISABLE_LICENSE_DISCOVERY", "1")
     return env
+
+
+def _tool_json(result: mcp_types.CallToolResult) -> dict:
+    """[20260310_TEST] Parse JSON tool envelopes returned over MCP transports."""
+    assert result.content, "Tool returned empty content"
+    first = result.content[0]
+    assert hasattr(first, "text"), f"Unexpected content type: {type(first)!r}"
+
+    try:
+        return json.loads(first.text)
+    except json.JSONDecodeError as exc:
+        raise AssertionError(
+            "Tool content is not valid JSON; first 200 chars: " + repr(first.text[:200])
+        ) from exc
 
 
 def _make_tiny_project(tmp_path: Path) -> tuple[Path, str]:
@@ -575,6 +590,112 @@ async def test_mcp_http_transports_tier_tool_contract(
                         tool_names = {t.name for t in tools.tools}
                         assert tool_names == EXPECTED_ALL_TOOLS
 
+        finally:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:  # pragma: no cover
+                proc.kill()
+                proc.wait(timeout=5)
+
+
+@pytest.mark.parametrize(
+    "transport,endpoint_path",
+    [
+        ("streamable-http", "/mcp"),
+        ("sse", "/sse"),
+    ],
+)
+async def test_mcp_http_transports_surface_upgrade_required_for_compliance_requests(
+    tmp_path: Path,
+    transport: str,
+    endpoint_path: str,
+):
+    """[20260310_TEST] Lower tiers must return upgrade_required over MCP transports."""
+    with anyio.fail_after(180):
+        repo_root = Path(__file__).resolve().parents[2]
+        env = _pythonpath_env(repo_root)
+        env["CODE_SCALPEL_TIER"] = "community"
+
+        project_root, _target_file = _make_tiny_project(tmp_path)
+        sample_file = project_root / "sample.py"
+        sample_file.write_text("x = 1\n", encoding="utf-8")
+        ports = _get_free_port_pair(host="127.0.0.1")
+
+        log_path = tmp_path / f"server_{transport}_community_upgrade.log"
+        with log_path.open("w", encoding="utf-8") as log_file:
+            proc = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-m",
+                    "code_scalpel.mcp.server",
+                    "--transport",
+                    transport,
+                    "--host",
+                    "127.0.0.1",
+                    "--port",
+                    str(ports.mcp_port),
+                    "--root",
+                    str(project_root),
+                ],
+                cwd=str(repo_root),
+                env=env,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+
+        try:
+            if proc.poll() is not None:
+                raise RuntimeError(f"Server exited early (code={proc.returncode})")
+            _wait_for_tcp("127.0.0.1", ports.mcp_port, timeout_s=20.0)
+
+            health_url = f"http://127.0.0.1:{ports.health_port}/health"
+            response = httpx.get(health_url, timeout=2.0)
+            response.raise_for_status()
+            assert response.json().get("status") == "healthy"
+
+            base_url = f"http://127.0.0.1:{ports.mcp_port}{endpoint_path}"
+
+            if transport == "streamable-http":
+                async with streamable_http_client(base_url) as (
+                    read_stream,
+                    write_stream,
+                    _get_session_id,
+                ):
+                    async with ClientSession(read_stream, write_stream) as session:
+                        await session.initialize()
+                        result = await session.call_tool(
+                            "code_policy_check",
+                            arguments={
+                                "paths": [str(sample_file)],
+                                "compliance_standards": ["HIPAA"],
+                            },
+                            read_timeout_seconds=timedelta(seconds=30),
+                        )
+            else:
+                async with sse_client(base_url) as (read, write):
+                    async with ClientSession(read, write) as session:
+                        await session.initialize()
+                        result = await session.call_tool(
+                            "code_policy_check",
+                            arguments={
+                                "paths": [str(sample_file)],
+                                "compliance_standards": ["HIPAA"],
+                            },
+                            read_timeout_seconds=timedelta(seconds=30),
+                        )
+
+            assert result.isError is False
+            envelope = _tool_json(result)
+
+            error = envelope.get("error") or {}
+            assert error.get("error_code") == "upgrade_required"
+
+            data = envelope.get("data") or {}
+            assert data.get("success") is False
+            assert data.get("tier_applied") == "community"
+            assert "Enterprise tier" in data.get("error", "")
         finally:
             proc.terminate()
             try:

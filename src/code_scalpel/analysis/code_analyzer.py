@@ -77,6 +77,15 @@ class AnalysisLanguage(Enum):
     JAVASCRIPT = "javascript"
     TYPESCRIPT = "typescript"
     JAVA = "java"
+    C = "c"  # [20260313_BUGFIX] Keep CodeAnalyzer aligned with MCP polyglot support.
+    CPP = "cpp"
+    CSHARP = "csharp"
+    GO = "go"
+    KOTLIN = "kotlin"
+    PHP = "php"
+    RUBY = "ruby"
+    SWIFT = "swift"
+    RUST = "rust"
     AUTO = "auto"  # Auto-detect from file extension or content
 
 
@@ -315,14 +324,19 @@ class CodeAnalyzer:
         self,
         code: str,
         filepath: Optional[str],
-        language: AnalysisLanguage,
+        language: AnalysisLanguage | str,
     ) -> str:
         """
         Detect the programming language of the code.
 
         [20251221_FEATURE] Uses code_parsers language detection when available.
         """
-        if language != AnalysisLanguage.AUTO:
+        # [20260313_BUGFIX] Accept string hints as well as AnalysisLanguage enums.
+        if isinstance(language, str):
+            normalized_language = language.strip().lower()
+            if normalized_language and normalized_language != AnalysisLanguage.AUTO.value:
+                return normalized_language
+        elif language != AnalysisLanguage.AUTO:
             return language.value
 
         # Use code_parsers detection if available
@@ -345,6 +359,20 @@ class CodeAnalyzer:
                 ".ts": "typescript",
                 ".tsx": "typescript",
                 ".java": "java",
+                ".c": "c",
+                ".h": "c",
+                ".cpp": "cpp",
+                ".cc": "cpp",
+                ".cxx": "cpp",
+                ".hpp": "cpp",
+                ".cs": "csharp",
+                ".go": "go",
+                ".kt": "kotlin",
+                ".kts": "kotlin",
+                ".php": "php",
+                ".rb": "ruby",
+                ".swift": "swift",
+                ".rs": "rust",
             }
             if ext in ext_map:
                 return ext_map[ext]
@@ -425,7 +453,14 @@ class CodeAnalyzer:
                     "javascript": "JAVASCRIPT",
                     "typescript": "TYPESCRIPT",
                     "java": "JAVA",
+                    "c": "C",
+                    "cpp": "CPP",
+                    "csharp": "CSHARP",
                     "go": "GO",
+                    "kotlin": "KOTLIN",
+                    "php": "PHP",
+                    "ruby": "RUBY",
+                    "swift": "SWIFT",
                     "rust": "RUST",
                 }
 

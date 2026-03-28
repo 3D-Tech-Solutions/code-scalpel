@@ -32,16 +32,17 @@ def calculate_total(items):
         )
 
         assert result.success is True
-        # Verify metadata fields exist and have correct types
-        assert hasattr(result, "tier_applied")
-        assert hasattr(result, "language_detected")
-        assert hasattr(result, "cross_file_deps_enabled")
-        assert hasattr(result, "max_depth_applied")
-
-        # Verify values are reasonable
+        # [20260309_TEST] Verify concrete metadata and normalized Python extraction output.
         assert result.tier_applied in ("community", "pro", "enterprise")
         assert result.language_detected == "python"
         assert isinstance(result.cross_file_deps_enabled, bool)
+        assert result.max_depth_applied is None
+        assert result.line_start == 2
+        assert result.line_end == 3
+        assert (
+            result.target_code
+            == "def calculate_total(items):\n    return sum((item.price for item in items))"
+        )
         # max_depth_applied can be int or None (None means unlimited)
         assert result.max_depth_applied is None or isinstance(
             result.max_depth_applied, int
@@ -63,8 +64,15 @@ function calculateTotal(items) {
         )
 
         assert result.success is True
+        # [20260309_TEST] Lock wrapper-level JS output to the current emitted slice and bounds.
         assert result.language_detected == "javascript"
         assert result.tier_applied in ("community", "pro", "enterprise")
+        assert result.line_start == 2
+        assert result.line_end == 4
+        assert (
+            result.target_code
+            == "function calculateTotal(items) {\n    return items.reduce((sum, item) => sum + item.price, 0);\n}"
+        )
         # Cross-file deps not yet supported for non-Python
         assert result.cross_file_deps_enabled is False
 
@@ -84,8 +92,16 @@ function greet(name: string): string {
         )
 
         assert result.success is True
+        # [20260309_TEST] Lock wrapper-level TS output to the current emitted slice and bounds.
         assert result.language_detected == "typescript"
         assert result.tier_applied in ("community", "pro", "enterprise")
+        assert result.line_start == 2
+        assert result.line_end == 4
+        assert (
+            result.target_code
+            == "function greet(name: string): string {\n    return `Hello, ${name}!`;\n}"
+        )
+        assert result.cross_file_deps_enabled is False
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -180,10 +196,9 @@ def existing_function():
 
         # Should fail but still have metadata
         assert result.success is False
-        assert hasattr(result, "tier_applied")
-        assert hasattr(result, "language_detected")
         # Defaults should be present
         assert result.tier_applied in ("community", "pro", "enterprise")
+        assert result.language_detected is None
 
 
 class TestMetadataFieldTypes:

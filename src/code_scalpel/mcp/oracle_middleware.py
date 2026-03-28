@@ -34,6 +34,38 @@ logger = logging.getLogger(__name__)
 F = TypeVar("F", bound=Callable[..., Any])
 
 
+def _extract_path_from_kwargs(kwargs: dict[str, Any]) -> str | None:
+    """Return the most relevant path-like argument from a tool call.
+
+    [20260311_BUGFIX] Oracle path recovery must work for tools that use
+    project_root, root_path, target_file, report_path, or path lists rather
+    than only a single file_path parameter.
+    """
+    candidate_keys = (
+        "file_path",
+        "project_root",
+        "root_path",
+        "target_file",
+        "path",
+        "report_path",
+        "policy_dir",
+        "frontend_file_path",
+        "backend_file_path",
+    )
+    for key in candidate_keys:
+        value = kwargs.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+
+    raw_paths = kwargs.get("paths")
+    if isinstance(raw_paths, list):
+        for value in raw_paths:
+            if isinstance(value, str) and value.strip():
+                return value
+
+    return None
+
+
 class RecoveryStrategy:
     """Base class for oracle recovery strategies."""
 
@@ -633,7 +665,7 @@ def with_oracle_resilience(
 
                 # Build context from kwargs for strategy
                 context = {
-                    "file_path": kwargs.get("file_path"),
+                    "file_path": _extract_path_from_kwargs(kwargs),
                     "code": kwargs.get("code"),
                     "symbol_name": kwargs.get("target_name"),
                     "new_name": kwargs.get("new_name"),
@@ -679,7 +711,7 @@ def with_oracle_resilience(
                 logger.debug(f"  Error: {fnf}")
 
                 # Extract file path from context or error message
-                file_path = kwargs.get("file_path")
+                file_path = _extract_path_from_kwargs(kwargs)
                 if not file_path:
                     # Try to extract from error message
                     error_str = str(fnf)
@@ -874,7 +906,7 @@ def _enhance_data_error(
 
     # Build context for strategy
     context = {
-        "file_path": kwargs.get("file_path"),
+        "file_path": _extract_path_from_kwargs(kwargs),
         "code": kwargs.get("code"),
         "symbol_name": kwargs.get("target_name") or kwargs.get("symbol_name"),
     }

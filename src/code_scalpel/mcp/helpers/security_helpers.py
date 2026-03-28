@@ -127,6 +127,124 @@ def _get_sink_detector() -> UnifiedSinkDetector:
     return _SINK_DETECTOR
 
 
+# [20260315_FEATURE] Add bounded JS/TS template-literal security patterns so
+# security_scan matches the documented non-Python usefulness slice.
+def _collect_js_typescript_pattern_vulnerabilities(
+    code: str,
+    language: str,
+) -> tuple[list[VulnerabilityInfo], list[str]]:
+    """Collect bounded JavaScript/TypeScript security findings from source text."""
+    normalized_language = (language or "").lower()
+    if normalized_language not in {"javascript", "typescript"}:
+        return [], []
+
+    vulnerabilities: list[VulnerabilityInfo] = []
+    taint_sources: list[str] = []
+    seen: set[tuple[str, str, int | None]] = set()
+    lines = code.splitlines()
+    sql_template_variables: dict[str, int] = {}
+
+    def _add_vulnerability(
+        vuln_type: str,
+        cwe: str,
+        line: int | None,
+        description: str,
+        severity: str = "high",
+    ) -> None:
+        key = (vuln_type, cwe, line)
+        if key in seen:
+            return
+        seen.add(key)
+        vulnerabilities.append(
+            VulnerabilityInfo(
+                type=vuln_type,
+                cwe=cwe,
+                severity=severity,
+                line=line,
+                description=description,
+            )
+        )
+
+    for source_pattern in (
+        "process.env",
+        "req.body",
+        "req.query",
+        "req.params",
+        "request.query",
+        "window.location",
+        "document.location",
+    ):
+        if source_pattern in code and source_pattern not in taint_sources:
+            taint_sources.append(source_pattern)
+
+    for line_number, line in enumerate(lines, 1):
+        if any(
+            marker in line
+            for marker in (
+                "innerHTML",
+                "document.write",
+                "insertAdjacentHTML",
+                "dangerouslySetInnerHTML",
+            )
+        ):
+            _add_vulnerability(
+                "XSS",
+                "CWE-79",
+                line_number,
+                "Detected direct HTML injection sink in JavaScript/TypeScript code.",
+                severity="medium",
+            )
+
+        if re.search(
+            r"\b(?:exec|execSync|execFile|execFileSync|spawn|spawnSync)\s*\(\s*`[^`]*\$\{[^`]+\}[^`]*`",
+            line,
+        ):
+            _add_vulnerability(
+                "Command Injection",
+                "CWE-78",
+                line_number,
+                "Template literal command execution with interpolated input detected.",
+            )
+
+        sql_template_match = re.search(
+            r"\b(?:const|let|var)\s+(\w+)\s*=\s*`[^`]*\$\{[^`]+\}[^`]*`",
+            line,
+        )
+        if sql_template_match and re.search(
+            r"(?i)\b(select|insert|update|delete)\b",
+            line,
+        ):
+            sql_template_variables[sql_template_match.group(1)] = line_number
+
+        if re.search(
+            r"\b(?:\w+\.)?(?:query|execute)\s*\(\s*`[^`]*\$\{[^`]+\}[^`]*`",
+            line,
+        ) and re.search(r"(?i)\b(select|insert|update|delete)\b", line):
+            _add_vulnerability(
+                "SQL Injection",
+                "CWE-89",
+                line_number,
+                "Inline SQL template literal with interpolated input detected.",
+            )
+
+    for line_number, line in enumerate(lines, 1):
+        query_call_match = re.search(
+            r"\b(?:\w+\.)?(?:query|execute)\s*\(\s*(\w+)\s*\)",
+            line,
+        )
+        if query_call_match:
+            variable_name = query_call_match.group(1)
+            if variable_name in sql_template_variables:
+                _add_vulnerability(
+                    "SQL Injection",
+                    "CWE-89",
+                    line_number,
+                    "Database query execution uses a template literal with interpolated input.",
+                )
+
+    return vulnerabilities, taint_sources
+
+
 def validate_path_security(path: Path, project_root: Path | None = None) -> Path:
     """Validate path is within allowed roots and return resolved path.
 
@@ -2005,6 +2123,25 @@ def _security_scan_sync(
                         )
                 except ImportError:
                     pass
+
+            pattern_vulnerabilities, pattern_taint_sources = (
+                _collect_js_typescript_pattern_vulnerabilities(
+                    code,
+                    detected_language,
+                )
+            )
+            existing_keys = {
+                (vulnerability.type, vulnerability.cwe, vulnerability.line)
+                for vulnerability in vulnerabilities
+            }
+            for vulnerability in pattern_vulnerabilities:
+                key = (vulnerability.type, vulnerability.cwe, vulnerability.line)
+                if key not in existing_keys:
+                    vulnerabilities.append(vulnerability)
+                    existing_keys.add(key)
+            for source in pattern_taint_sources:
+                if source not in taint_sources:
+                    taint_sources.append(source)
         else:
             analyzer = SecurityAnalyzer()
             result = analyzer.analyze(code).to_dict()

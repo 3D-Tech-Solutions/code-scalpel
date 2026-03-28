@@ -108,6 +108,10 @@ _SYMBOL_REFERENCE_JAVA_SUFFIXES = {
     ".java",
 }
 
+_SYMBOL_REFERENCE_GO_SUFFIXES = {
+    ".go",
+}
+
 
 # [20260308_FEATURE] Lightweight C# file-context fallback when tree-sitter-c-sharp
 # is unavailable. This keeps get_file_context useful for .cs files in default
@@ -372,6 +376,9 @@ def _scan_js_ts_symbol_references(
     """Best-effort JS/TS symbol reference scan.
 
     [20260307_FEATURE] Initial local JS/TS parity slice for get_symbol_references.
+    [20260315_FEATURE] Track named-import local aliases so TypeScript and
+    JavaScript call sites like ``import { helper as localHelper }`` are counted
+    against the exported symbol's reference set.
     Uses parser-backed definitions/imports when available, then supplements with
     line-based call/reference detection to keep the contract narrow and stable.
     """
@@ -382,6 +389,7 @@ def _scan_js_ts_symbol_references(
     references: list[SymbolReference] = []
     category_counts: dict[str, int] = {}
     definition_line: int | None = None
+    local_symbol_names: set[str] = {symbol_name}
 
     def _append_reference(
         line_no: int,
@@ -418,6 +426,20 @@ def _scan_js_ts_symbol_references(
     def _column_for_line(line_no: int) -> int:
         return lines[line_no - 1].find(symbol_name) if 0 < line_no <= len(lines) else 0
 
+    def _column_for_terms(line_no: int, terms: set[str]) -> int:
+        if not 0 < line_no <= len(lines):
+            return 0
+        line = lines[line_no - 1]
+        best_column: int | None = None
+        for term in sorted(terms, key=len, reverse=True):
+            match = re.search(rf"\b{re.escape(term)}\b", line)
+            if match is None:
+                continue
+            column = match.start()
+            if best_column is None or column < best_column:
+                best_column = column
+        return best_column if best_column is not None else _column_for_line(line_no)
+
     # Parser-backed discovery for definitions/imports where available.
     try:
         from code_scalpel.code_parsers.javascript_parsers.javascript_parsers_treesitter import (
@@ -449,16 +471,38 @@ def _scan_js_ts_symbol_references(
                         for imported, alias in getattr(imp, "named_imports", [])
                     ),
                 ]
+                for imported, alias in getattr(imp, "named_imports", []):
+                    if imported == symbol_name:
+                        local_symbol_names.add(alias or imported)
                 if any(import_matches):
                     line_no = getattr(imp, "line", 0)
                     if line_no:
                         _append_reference(
                             line_no,
-                            _column_for_line(line_no),
+                            _column_for_terms(line_no, local_symbol_names),
                             "import",
                         )
         except Exception:
             pass
+
+    named_import_alias_pattern = re.compile(r"\bimport\s*{([^}]+)}\s*from\b")
+    for line in lines:
+        alias_match = named_import_alias_pattern.search(line)
+        if alias_match is None:
+            continue
+        for raw_part in alias_match.group(1).split(","):
+            part = raw_part.strip()
+            if not part:
+                continue
+            imported_name, separator, local_name = part.partition(" as ")
+            imported_name = imported_name.strip()
+            local_name = local_name.strip()
+            if imported_name == symbol_name:
+                local_symbol_names.add(local_name or imported_name)
+
+    escaped_local_symbols = "|".join(
+        sorted((re.escape(name) for name in local_symbol_names), key=len, reverse=True)
+    )
 
     definition_patterns = [
         re.compile(rf"\bfunction\s+{escaped_symbol}\b"),
@@ -469,8 +513,10 @@ def _scan_js_ts_symbol_references(
         re.compile(rf"\benum\s+{escaped_symbol}\b"),
     ]
     import_pattern = re.compile(rf"\b(?:import|export)\b.*\b{escaped_symbol}\b")
-    call_pattern = re.compile(rf"(?:\b{escaped_symbol}\s*\(|\.{escaped_symbol}\s*\()")
-    name_pattern = re.compile(rf"\b{escaped_symbol}\b")
+    call_pattern = re.compile(
+        rf"(?:\b(?:{escaped_local_symbols})\s*\(|\.(?:{escaped_local_symbols})\s*\()"
+    )
+    name_pattern = re.compile(rf"\b(?:{escaped_local_symbols})\b")
     complexity_pattern = re.compile(
         r"\b(if|for|while|switch|catch|function|class)\b|=>"
     )
@@ -485,7 +531,7 @@ def _scan_js_ts_symbol_references(
             continue
 
         if import_pattern.search(line):
-            column = _column_for_line(line_no)
+            column = _column_for_terms(line_no, local_symbol_names)
             if column >= 0:
                 _append_reference(line_no, column, "import")
 
@@ -496,12 +542,181 @@ def _scan_js_ts_symbol_references(
             continue
 
         if call_pattern.search(line):
-            column = _column_for_line(line_no)
+            column = _column_for_terms(line_no, local_symbol_names)
             if column >= 0:
                 _append_reference(line_no, column, "call")
             continue
 
         if name_pattern.search(line):
+            column = _column_for_terms(line_no, local_symbol_names)
+            if column >= 0:
+                _append_reference(line_no, column, "reference")
+
+    return references, definition_line, category_counts, complexity_score
+
+
+def _scan_go_symbol_references(
+    file_path: Path,
+    root: Path,
+    symbol_name: str,
+    enable_categorization: bool,
+    enable_impact_analysis: bool,
+    is_test_file: bool,
+    owners: list[str] | None,
+    seen: set[tuple[str, int, int]],
+) -> tuple[list[SymbolReference], int | None, dict[str, int], int | None]:
+    """Best-effort Go symbol reference scan.
+
+    [20260311_FEATURE] Narrow local Go parity slice for get_symbol_references.
+    Uses GoNormalizer-backed definitions/import metadata when available, then
+    supplements with lightweight line matching for calls and plain references.
+    """
+    rel_path = str(file_path.relative_to(root))
+    code = file_path.read_text(encoding="utf-8")
+    lines = code.splitlines()
+    references: list[SymbolReference] = []
+    category_counts: dict[str, int] = {}
+    definition_line: int | None = None
+    normalized_symbol = symbol_name.strip()
+    target_symbol = normalized_symbol.rsplit(".", 1)[-1]
+    target_receiver = (
+        normalized_symbol.rsplit(".", 1)[0] if "." in normalized_symbol else None
+    )
+    escaped_symbol = re.escape(target_symbol)
+    complexity_pattern = re.compile(r"\b(if|for|switch|select|case|go|defer)\b|&&|\|\|")
+
+    def _append_reference(
+        line_no: int,
+        column: int,
+        ref_type: str,
+        *,
+        is_definition: bool = False,
+    ) -> None:
+        nonlocal definition_line
+        if line_no <= 0 or line_no > len(lines):
+            return
+        safe_column = max(0, column)
+        loc_key = (rel_path, line_no, safe_column)
+        if loc_key in seen:
+            return
+        seen.add(loc_key)
+        if is_definition and definition_line is None:
+            definition_line = line_no
+        if enable_categorization:
+            category_counts[ref_type] = category_counts.get(ref_type, 0) + 1
+        references.append(
+            SymbolReference(
+                file=rel_path,
+                line=line_no,
+                column=safe_column,
+                context=lines[line_no - 1].strip(),
+                is_definition=is_definition,
+                reference_type=ref_type if enable_categorization else None,
+                is_test_file=is_test_file,
+                owners=owners,
+            )
+        )
+
+    def _column_for_line(line_no: int) -> int:
+        return (
+            lines[line_no - 1].find(target_symbol)
+            if 0 < line_no <= len(lines)
+            else 0
+        )
+
+    def _normalize_go_receiver(raw_receiver: Any) -> str | None:
+        if not isinstance(raw_receiver, str):
+            return None
+        normalized = raw_receiver.strip().strip("()")
+        if not normalized:
+            return None
+        parts = [part for part in normalized.replace("*", " ").split() if part]
+        if not parts:
+            return None
+        return parts[-1]
+
+    try:
+        from code_scalpel.ir.nodes import IRClassDef, IRFunctionDef, IRImport
+        from code_scalpel.ir.normalizers.go_normalizer import GoNormalizer
+    except Exception:
+        IRClassDef = None  # type: ignore[assignment]
+        IRFunctionDef = None  # type: ignore[assignment]
+        IRImport = None  # type: ignore[assignment]
+        GoNormalizer = None  # type: ignore[assignment]
+
+    if GoNormalizer is not None and IRFunctionDef is not None and IRClassDef is not None:
+        try:
+            module = GoNormalizer().normalize(code)
+            for node in module.body:
+                if isinstance(node, IRFunctionDef):
+                    receiver_name = _normalize_go_receiver(
+                        getattr(node, "_metadata", {}).get("receiver")
+                    )
+                    symbol_matches = node.name == target_symbol
+                    receiver_matches = (
+                        target_receiver is None or receiver_name == target_receiver
+                    )
+                    if symbol_matches and receiver_matches and node.loc is not None:
+                        _append_reference(
+                            node.loc.line,
+                            _column_for_line(node.loc.line),
+                            "definition",
+                            is_definition=True,
+                        )
+                elif isinstance(node, IRClassDef):
+                    if node.name == target_symbol and node.loc is not None:
+                        _append_reference(
+                            node.loc.line,
+                            _column_for_line(node.loc.line),
+                            "definition",
+                            is_definition=True,
+                        )
+                elif (
+                    IRImport is not None
+                    and isinstance(node, IRImport)
+                    and node.loc is not None
+                ):
+                    import_module_name = (node.module or "").strip()
+                    import_alias = (node.alias or "").strip()
+                    import_base = import_module_name.rsplit("/", 1)[-1]
+                    if normalized_symbol in {
+                        import_alias,
+                        import_base,
+                        import_module_name,
+                    }:
+                        _append_reference(
+                            node.loc.line,
+                            _column_for_line(node.loc.line),
+                            "import",
+                        )
+        except Exception:
+            pass
+
+    call_pattern = re.compile(rf"(?:\b{escaped_symbol}\s*\(|\.{escaped_symbol}\s*\()")
+    reference_pattern = re.compile(rf"\b{escaped_symbol}\b")
+
+    complexity_score = None
+    if enable_impact_analysis:
+        complexity_score = sum(len(complexity_pattern.findall(line)) for line in lines)
+
+    for line_no, line in enumerate(lines, start=1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith(("//", "/*", "*", "*/")):
+            continue
+
+        if stripped.startswith("import ") and reference_pattern.search(line):
+            column = _column_for_line(line_no)
+            if column >= 0:
+                _append_reference(line_no, column, "import")
+            continue
+
+        if call_pattern.search(line):
+            column = _column_for_line(line_no)
+            if column >= 0:
+                _append_reference(line_no, column, "call")
+            continue
+
+        if reference_pattern.search(line):
             column = _column_for_line(line_no)
             if column >= 0:
                 _append_reference(line_no, column, "reference")
@@ -518,6 +733,8 @@ def _scan_java_symbol_references(
     is_test_file: bool,
     owners: list[str] | None,
     seen: set[tuple[str, int, int]],
+    java_import_resolver: object | None = None,
+    java_static_symbol_cache: dict[str, bool] | None = None,
 ) -> tuple[
     list[SymbolReference],
     int | None,
@@ -532,6 +749,8 @@ def _scan_java_symbol_references(
     conservative line-based import, call, and reference detection.
     """
     # [20260309_FEATURE] Accept structured Java selectors for exact overload lookups in get_symbol_references.
+    # [20260315_FEATURE] Resolve project-local static wildcard imports via the
+    # shared Java import graph so member imports count as bounded-useful Java references.
     rel_path = str(file_path.relative_to(root))
     code = file_path.read_text(encoding="utf-8")
     lines = code.splitlines()
@@ -542,9 +761,78 @@ def _scan_java_symbol_references(
         tuple[str, int, str], SymbolDisambiguationCandidate
     ] = {}
 
+    # [20260311_BUGFIX] Split Java selector and call arguments without breaking
+    # on nested calls, generics, array literals, or string literals.
+    def _split_java_arguments(argument_block: str) -> list[str]:
+        parts: list[str] = []
+        current: list[str] = []
+        paren_depth = 0
+        angle_depth = 0
+        bracket_depth = 0
+        brace_depth = 0
+        in_string: str | None = None
+        escape_next = False
+
+        for char in argument_block:
+            current.append(char)
+            if in_string is not None:
+                if escape_next:
+                    escape_next = False
+                elif char == "\\":
+                    escape_next = True
+                elif char == in_string:
+                    in_string = None
+                continue
+
+            if char in {'"', "'"}:
+                in_string = char
+                continue
+            if char == "(":
+                paren_depth += 1
+                continue
+            if char == ")":
+                paren_depth = max(0, paren_depth - 1)
+                continue
+            if char == "<":
+                angle_depth += 1
+                continue
+            if char == ">":
+                angle_depth = max(0, angle_depth - 1)
+                continue
+            if char == "[":
+                bracket_depth += 1
+                continue
+            if char == "]":
+                bracket_depth = max(0, bracket_depth - 1)
+                continue
+            if char == "{":
+                brace_depth += 1
+                continue
+            if char == "}":
+                brace_depth = max(0, brace_depth - 1)
+                continue
+            if (
+                char == ","
+                and paren_depth == 0
+                and angle_depth == 0
+                and bracket_depth == 0
+                and brace_depth == 0
+            ):
+                current.pop()
+                token = "".join(current).strip()
+                if token:
+                    parts.append(token)
+                current = []
+
+        tail = "".join(current).strip()
+        if tail:
+            parts.append(tail)
+        return parts
+
     def _normalize_java_type_name(type_name: str | None) -> str:
         normalized = re.sub(r"\s+", "", type_name or "?")
         normalized = normalized.replace("...", "[]")
+        normalized = re.sub(r"<.*>", "", normalized)
         normalized = re.sub(
             r"([A-Za-z_$][\w$]*\.)+([A-Za-z_$][\w$]*(?:\[\])*)",
             r"\2",
@@ -574,7 +862,7 @@ def _scan_java_symbol_references(
         if arg_block.strip():
             parameter_types = [
                 _normalize_java_type_name(part)
-                for part in arg_block.split(",")
+                for part in _split_java_arguments(arg_block)
                 if part.strip()
             ]
 
@@ -607,9 +895,31 @@ def _scan_java_symbol_references(
             token = argument.strip()
             if not token:
                 return "?"
-            if re.fullmatch(r"[+-]?\d+", token):
+            cast_match = re.match(
+                r"^\((?P<type>[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*(?:<[^>]+>)?(?:\[\])*)\)",
+                token,
+            )
+            if cast_match:
+                return _normalize_java_type_name(cast_match.group("type"))
+            object_creation_match = re.match(
+                r"^new\s+(?P<type>[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*(?:<[^>]+>)?(?:\[\])*)",
+                token,
+            )
+            if object_creation_match:
+                return _normalize_java_type_name(object_creation_match.group("type"))
+            if re.fullmatch(r"[+-]?(?:0[xX][0-9a-fA-F_]+|0[bB][01_]+|\d[\d_]*)[lL]", token):
+                return "long"
+            if re.fullmatch(r"[+-]?(?:0[xX][0-9a-fA-F_]+|0[bB][01_]+|\d[\d_]*)", token):
                 return "int"
-            if re.fullmatch(r"[+-]?\d+\.\d+", token):
+            if re.fullmatch(
+                r"[+-]?(?:\d[\d_]*\.\d[\d_]*|\d[\d_]*|\.\d[\d_]*)(?:[eE][+-]?\d+)?[fF]",
+                token,
+            ):
+                return "float"
+            if re.fullmatch(
+                r"[+-]?(?:\d[\d_]*\.\d[\d_]*|\d[\d_]*|\.\d[\d_]*)(?:[eE][+-]?\d+)?[dD]?",
+                token,
+            ):
                 return "double"
             if re.fullmatch(r'"(?:\\.|[^"\\])*"', token):
                 return "String"
@@ -619,6 +929,8 @@ def _scan_java_symbol_references(
                 return "boolean"
             if token == "null":
                 return "null"
+            if token.endswith(".class"):
+                return "Class"
             return "?"
 
         for match in pattern.finditer(line):
@@ -628,7 +940,7 @@ def _scan_java_symbol_references(
             else:
                 inferred_types = [
                     _infer_argument_type(part)
-                    for part in arg_block.split(",")
+                    for part in _split_java_arguments(arg_block)
                     if part.strip()
                 ]
             if inferred_types == structured_selector["parameter_types"]:
@@ -671,6 +983,65 @@ def _scan_java_symbol_references(
         return (
             lines[line_no - 1].find(lookup_symbol) if 0 < line_no <= len(lines) else 0
         )
+
+    def _import_column_for_line(line_no: int) -> int:
+        column = _column_for_line(line_no)
+        if column >= 0:
+            return column
+        if 0 < line_no <= len(lines):
+            return max(lines[line_no - 1].find("import"), 0)
+        return 0
+
+    def _module_exposes_static_symbol(module_name: str) -> bool:
+        if java_import_resolver is None:
+            return False
+        cache_key = f"{module_name}:{lookup_symbol}"
+        if java_static_symbol_cache is not None and cache_key in java_static_symbol_cache:
+            return java_static_symbol_cache[cache_key]
+
+        owner_file = getattr(java_import_resolver, "module_to_file", {}).get(module_name)
+        if not owner_file:
+            if java_static_symbol_cache is not None:
+                java_static_symbol_cache[cache_key] = False
+            return False
+
+        exposes_symbol = False
+        try:
+            from code_scalpel.code_parsers.java_parsers.java_parser_treesitter import (
+                JavaParser,
+            )
+
+            parsed_owner = JavaParser().parse_detailed(
+                Path(owner_file).read_text(encoding="utf-8")
+            )
+            containers = [
+                *getattr(parsed_owner, "classes", []),
+                *getattr(parsed_owner, "records", []),
+                *getattr(parsed_owner, "interfaces", []),
+            ]
+            for container in containers:
+                for method in getattr(container, "methods", []) or []:
+                    if method.name == symbol_name and "static" in getattr(
+                        method, "modifiers", []
+                    ):
+                        exposes_symbol = True
+                        break
+                if exposes_symbol:
+                    break
+        except Exception:
+            owner_code = Path(owner_file).read_text(encoding="utf-8")
+            static_method_pattern = re.compile(
+                rf"\bstatic\b[^\n;]*\b{escaped_symbol}\s*\("
+            )
+            exposes_symbol = bool(static_method_pattern.search(owner_code))
+
+        if java_static_symbol_cache is not None:
+            java_static_symbol_cache[cache_key] = exposes_symbol
+        return exposes_symbol
+
+    static_wildcard_import_pattern = re.compile(
+        r"^\s*import\s+static\s+([A-Za-z_][\w.]*)\.\*\s*;"
+    )
 
     def _add_candidate(
         *,
@@ -824,6 +1195,7 @@ def _scan_java_symbol_references(
         re.compile(
             rf"\b(?:public|protected|private|static|final|abstract|synchronized|native|default|strictfp|\s)+[A-Za-z_$][\w<>\[\].,?\s]*\b{escaped_symbol}\s*\("
         ),
+        re.compile(rf"^\s*(?:public|protected|private)\s+{escaped_symbol}\s*\("),
     ]
     import_pattern = re.compile(rf"\bimport\b.*\b{escaped_symbol}\b")
     call_pattern = re.compile(rf"(?:\b{escaped_symbol}\s*\(|\.{escaped_symbol}\s*\()")
@@ -841,10 +1213,15 @@ def _scan_java_symbol_references(
         if not stripped or stripped.startswith(("//", "/*", "*", "*/")):
             continue
 
+        static_wildcard_match = static_wildcard_import_pattern.match(line)
+        if static_wildcard_match and _module_exposes_static_symbol(
+            static_wildcard_match.group(1)
+        ):
+            _append_reference(line_no, _import_column_for_line(line_no), "import")
+            continue
+
         if import_pattern.search(line):
-            column = _column_for_line(line_no)
-            if column >= 0:
-                _append_reference(line_no, column, "import")
+            _append_reference(line_no, _import_column_for_line(line_no), "import")
 
         if structured_selector is None and any(
             pattern.search(line) for pattern in definition_patterns
@@ -3161,8 +3538,8 @@ def _get_symbol_references_sync(
         candidate_files: list[Path] = []
         scope_norm = (scope_prefix or "").strip().lstrip("/")
 
-        # [20260308_FEATURE] Initial JS/TS/Java parity slice for symbol references.
-        # Keep Python as the primary path, but include narrow local JS/TS/Java source files.
+        # [20260311_FEATURE] Extend local parity slices to Go for symbol references.
+        # Keep Python as the primary path, but include narrow local JS/TS/Java/Go source files.
         for py_file in root.rglob("*"):
             if not py_file.is_file():
                 continue
@@ -3170,6 +3547,7 @@ def _get_symbol_references_sync(
                 {".py"}
                 | _SYMBOL_REFERENCE_JS_TS_SUFFIXES
                 | _SYMBOL_REFERENCE_JAVA_SUFFIXES
+                | _SYMBOL_REFERENCE_GO_SUFFIXES
             ):
                 continue
             # Skip common non-source directories
@@ -3209,6 +3587,22 @@ def _get_symbol_references_sync(
         category_counts: dict[str, int] = {}
         owner_counts: dict[str, int] = {}
         warnings: list[str] = []
+        java_import_resolver = None
+        java_static_symbol_cache: dict[str, bool] = {}
+
+        if any(
+            candidate.suffix.lower() in _SYMBOL_REFERENCE_JAVA_SUFFIXES
+            for candidate in candidate_files
+        ):
+            try:
+                from code_scalpel.ast_tools.java_import_resolver import (
+                    JavaImportResolver,
+                )
+
+                java_import_resolver = JavaImportResolver(root)
+                java_import_resolver.build()
+            except Exception:
+                java_import_resolver = None
 
         for py_file in candidate_files:
             suffix = py_file.suffix.lower()
@@ -3286,6 +3680,8 @@ def _get_symbol_references_sync(
                         is_test_file,
                         owners,
                         seen,
+                        java_import_resolver,
+                        java_static_symbol_cache,
                     )
 
                     for candidate in java_candidates:
@@ -3323,6 +3719,54 @@ def _get_symbol_references_sync(
                                     owner_counts[owner] = owner_counts.get(owner, 0) + 1
 
                     references.extend(java_refs)
+                    if max_references is not None and len(references) >= max_references:
+                        references = references[:max_references]
+                        break
+                    continue
+
+                if suffix in _SYMBOL_REFERENCE_GO_SUFFIXES:
+                    rel_path = str(py_file.relative_to(root))
+                    is_test_file = _is_test_path(rel_path)
+
+                    owners = None
+                    if enable_codeowners or enable_impact_analysis:
+                        owners, _owner_confidence = _match_owners(
+                            codeowners_rules, rel_path, default_owners
+                        )
+
+                    go_refs, go_definition_line, go_category_counts, go_complexity = (
+                        _scan_go_symbol_references(
+                            py_file,
+                            root,
+                            symbol_name,
+                            enable_categorization,
+                            enable_impact_analysis,
+                            is_test_file,
+                            owners,
+                            seen,
+                        )
+                    )
+
+                    if go_definition_line is not None and definition_file is None:
+                        definition_file = rel_path
+                        definition_line = go_definition_line
+
+                    if enable_impact_analysis and go_complexity is not None:
+                        file_complexity[rel_path] = go_complexity
+
+                    if enable_categorization:
+                        for ref_type, count in go_category_counts.items():
+                            category_counts[ref_type] = (
+                                category_counts.get(ref_type, 0) + count
+                            )
+
+                    if owners:
+                        for ref in go_refs:
+                            if ref.owners:
+                                for owner in ref.owners:
+                                    owner_counts[owner] = owner_counts.get(owner, 0) + 1
+
+                    references.extend(go_refs)
                     if max_references is not None and len(references) >= max_references:
                         references = references[:max_references]
                         break

@@ -21,12 +21,31 @@ from ..ir.nodes import IRFunctionDef, IRModule
 from ..ir.normalizers.java_normalizer import JavaNormalizer
 from ..ir.normalizers.javascript_normalizer import JavaScriptNormalizer
 from ..ir.normalizers.python_normalizer import PythonNormalizer
+from ..ir.normalizers.typescript_normalizer import TypeScriptNormalizer
 from .constraint_solver import ConstraintSolver, SolverStatus
 from .ir_interpreter import IRSymbolicInterpreter
 from .state_manager import SymbolicState
 from .type_inference import InferredType, TypeInferenceEngine
 
 logger = logging.getLogger(__name__)
+
+
+def _find_first_callable_node(nodes: list[Any]) -> Optional[IRFunctionDef]:
+    """[20260315_FEATURE] Walk nested/exported IR to find the first callable body."""
+    from ..ir.nodes import IRClassDef, IRExport
+
+    for node in nodes:
+        if isinstance(node, IRFunctionDef):
+            return node
+        if isinstance(node, IRExport) and node.declaration is not None:
+            nested = _find_first_callable_node([node.declaration])
+            if nested is not None:
+                return nested
+        if isinstance(node, IRClassDef):
+            nested = _find_first_callable_node(node.body)
+            if nested is not None:
+                return nested
+    return None
 
 
 # Note: The symbolic engine has type limitations
@@ -227,7 +246,7 @@ class SymbolicAnalyzer:
             "max_loop_iterations": self.max_loop_iterations,
             "solver_timeout": self.solver_timeout,
             # [20251214_FEATURE] Cache-bust when model schema changes (friendly names)
-            "model_schema": "friendly_names_v20251214",
+            "model_schema": "friendly_names_v20260315_typescript_ir_paths",
         }
 
     def analyze(self, code: str, language: str = "python") -> AnalysisResult:
@@ -239,7 +258,7 @@ class SymbolicAnalyzer:
 
         Args:
             code: Source code string
-            language: Source language ("python", "javascript", or "java")
+            language: Source language ("python", "javascript", "typescript", or "java")
 
         Returns:
             AnalysisResult with all explored paths and their models
@@ -282,17 +301,23 @@ class SymbolicAnalyzer:
         )
 
         # Step 1: Type inference (Python only for now)
+        normalized_language = language.lower()
+        if normalized_language == "ts":
+            normalized_language = "typescript"
+
         inferred_types = {}
-        if language == "python":
+        if normalized_language == "python":
             inferred_types = self._type_engine.infer(code)
 
         # Step 2: Normalize to IR and execute symbolically
         try:
-            if language == "python":
+            if normalized_language == "python":
                 ir_module = PythonNormalizer().normalize(code)
-            elif language == "javascript":
+            elif normalized_language == "javascript":
                 ir_module = JavaScriptNormalizer().normalize(code)
-            elif language == "java":
+            elif normalized_language == "typescript":
+                ir_module = TypeScriptNormalizer().normalize(code)
+            elif normalized_language == "java":
                 ir_module = JavaNormalizer().normalize(code)
             else:
                 raise ValueError(f"Unsupported language: {language}")
@@ -301,11 +326,7 @@ class SymbolicAnalyzer:
 
         # Step 2.5: Check for function definition to execute
         # [20260114_FIX] Scan for FunctionDef even if preceded by imports
-        func_def = None
-        for node in ir_module.body:
-            if isinstance(node, IRFunctionDef):
-                func_def = node
-                break
+        func_def = _find_first_callable_node(ir_module.body)
 
         # If found, extract and execute function body with symbolic parameters
         if func_def:

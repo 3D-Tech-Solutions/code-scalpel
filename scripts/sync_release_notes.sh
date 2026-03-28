@@ -17,7 +17,8 @@ CHECK_MODE=false
 [[ "${1:-}" == "--check" ]] && CHECK_MODE=true
 
 CHANGELOG="$PROJECT_ROOT/CHANGELOG.md"
-RELEASES_DIR="$PROJECT_ROOT/website/docs/releases"
+PYPROJECT="$PROJECT_ROOT/pyproject.toml"
+RELEASES_DIR="$PROJECT_ROOT/docs/website/docs/releases"
 MKDOCS="$PROJECT_ROOT/website/mkdocs.yml"
 WEB_CHANGELOG="$RELEASES_DIR/changelog.md"
 
@@ -29,6 +30,7 @@ NC='\033[0m'
 MISSING=0
 NAV_MISSING=0
 FOUND=0
+CURRENT_MISSING=0
 
 echo "🔍 Release Notes Sync Check"
 echo "==========================="
@@ -82,14 +84,38 @@ else
     MISSING=$((MISSING + 1))
 fi
 
+# --- 4: current local package version ---
+echo ""
+echo "🏷️  Current local package version:"
+CURRENT_VER=$(sed -n 's/^version = "\([^"]*\)"/\1/p' "$PYPROJECT" | head -1)
+if [ -n "$CURRENT_VER" ]; then
+    if [ -f "$RELEASES_DIR/v${CURRENT_VER}.md" ]; then
+        echo -e "  ${GREEN}✓${NC} release page exists for v${CURRENT_VER}"
+    else
+        echo -e "  ${RED}✗${NC} release page missing for v${CURRENT_VER}"
+        CURRENT_MISSING=$((CURRENT_MISSING + 1))
+    fi
+
+    if grep -q "v${CURRENT_VER}.md" "$MKDOCS"; then
+        echo -e "  ${GREEN}✓${NC} mkdocs nav includes v${CURRENT_VER}"
+    else
+        echo -e "  ${YELLOW}⚠${NC} mkdocs nav missing v${CURRENT_VER}"
+        NAV_MISSING=$((NAV_MISSING + 1))
+    fi
+else
+    echo -e "  ${RED}✗${NC} could not determine version from pyproject.toml"
+    CURRENT_MISSING=$((CURRENT_MISSING + 1))
+fi
+
 # --- summary ---
 echo ""
 echo "================================="
-TOTAL=$((MISSING + NAV_MISSING))
+TOTAL=$((MISSING + NAV_MISSING + CURRENT_MISSING))
 if [ $TOTAL -eq 0 ]; then
     echo -e "${GREEN}✓ All release notes in sync.${NC} ($FOUND versions)"
 else
     echo -e "  Pages:    ${GREEN}${FOUND} synced${NC}  ${RED}${MISSING} missing${NC}"
+    echo -e "  Current:  ${RED}${CURRENT_MISSING} missing${NC}"
     echo -e "  Nav gaps: ${YELLOW}${NAV_MISSING}${NC}"
     echo ""
     echo "  See docs/PIPELINE.md → Website Release Notes for instructions."

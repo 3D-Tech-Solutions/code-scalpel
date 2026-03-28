@@ -1,8 +1,8 @@
-"""Polyglot static-analysis tool MCP registration.
+"""Polyglot static-analysis helpers backing analyze_code static_tools.
 
-[20260303_FEATURE] New MCP tool ``run_static_analysis`` wires the C++ tool
-parser registry (Cppcheck, clang-tidy, Clang-SA, cpplint, Coverity, SonarQube)
-to the MCP surface and, via tool_bridge, to the CLI.
+[20260303_FEATURE] Added shared static-analysis execution helpers for the C++
+tool parser registry (Cppcheck, clang-tidy, Clang-SA, cpplint, Coverity,
+SonarQube).
 
 [20260305_REFACTOR] Language dispatch delegated to the shared
 ``polyglot_dispatch.run_static_tools`` helper so that ALL supported languages
@@ -27,7 +27,9 @@ from typing import Any, Dict, List, Optional
 
 from code_scalpel import __version__ as _pkg_version
 from code_scalpel.mcp.contract import ToolError, ToolResponseEnvelope, make_envelope
-from code_scalpel.mcp.protocol import _get_current_tier, mcp
+from code_scalpel.mcp.oracle_middleware import PathStrategy, with_oracle_resilience
+from code_scalpel.mcp.path_resolver import resolve_path
+from code_scalpel.mcp.protocol import _get_current_tier
 
 # [20260305_REFACTOR] Shared polyglot dispatch replaces the old C++-only dispatch
 from code_scalpel.mcp.helpers.polyglot_dispatch import (
@@ -199,30 +201,16 @@ def _finding_to_dict(finding: Any) -> Dict[str, Any]:
     return {"value": str(finding)}
 
 
-# ---------------------------------------------------------------------------
-# MCP tool registration
-# ---------------------------------------------------------------------------
-
-
-@mcp.tool(
-    description=(
-        "Run static-analysis tools against source files or pre-existing C++ report files. "
-        "Language is auto-detected from file extensions: C++ (Cppcheck, clang-tidy, Clang-SA, cpplint, "
-        "Coverity, SonarQube), C# (Roslyn, StyleCop, SCS, FxCop, ReSharper), "
-        "Go (gofmt, golint, govet, staticcheck, golangci-lint, gosec), "
-        "Python (vulture, isort, radon, pip-audit, interrogate), "
-        "JavaScript/TypeScript (npm-audit), Java (semgrep), "
-        "Ruby (rubocop, reek, brakeman), Swift (swiftlint), "
-        "Kotlin (diktat), PHP (phpcs, phpstan, psalm, phpmd)."
-    )
-)
 async def run_static_analysis(
     paths: List[str],
     tool: str = "cppcheck",
     language: str = "cpp",
     report_path: Optional[str] = None,
 ) -> ToolResponseEnvelope:
-    """Run polyglot static-analysis tools and return structured findings.
+    """Run polyglot static-analysis helpers and return structured findings.
+
+    [20260311_REFACTOR] This is no longer a public MCP tool. Public static
+    analysis requests should flow through analyze_code(static_tools=...).
 
     Language is auto-detected from the file extension of each path in
     ``paths``.  When a tool CLI binary is not installed the parser returns an
@@ -282,12 +270,22 @@ async def run_static_analysis(
     tier = _get_current_tier()
 
     try:
+        from code_scalpel.mcp.helpers.session import _get_project_root
+
+        # [20260311_BUGFIX] Normalize path inputs before helper dispatch so malformed
+        # Windows/WSL drive paths return correction-aware errors instead of generic failures.
+        base_root = str(_get_project_root())
+        resolved_paths = [resolve_path(path, base_root) for path in paths]
+        resolved_report_path = (
+            resolve_path(report_path, base_root) if report_path is not None else None
+        )
+
         result = await asyncio.to_thread(
             _run_static_analysis_sync,
             language,
-            paths,
+            resolved_paths,
             tool,
-            report_path,
+            resolved_report_path,
             tier,
         )
         duration_ms = int((time.perf_counter() - started) * 1000)
@@ -297,6 +295,20 @@ async def run_static_analysis(
             tool_version=_pkg_version,
             tier=tier,
             duration_ms=duration_ms,
+        )
+    except FileNotFoundError as exc:
+        duration_ms = int((time.perf_counter() - started) * 1000)
+        return make_envelope(
+            data=None,
+            tool_id="run_static_analysis",
+            tool_version=_pkg_version,
+            tier=tier,
+            duration_ms=duration_ms,
+            error=ToolError(
+                error=str(exc),
+                error_code="correction_needed",
+                error_details={"hint": str(exc)},
+            ),
         )
     except Exception as exc:
         duration_ms = int((time.perf_counter() - started) * 1000)

@@ -123,10 +123,14 @@ class TestResolveOrganizationWideBasic:
         )
 
         assert result.success is True
-        assert len(result.cross_repo_imports) > 0 or len(result.resolved_symbols) > 0
-        # Should find User in resolved symbols
-        if "User" in result.resolved_symbols:
-            assert "models.py" in result.resolved_symbols["User"]
+        # [20260310_TEST] Lock org-wide import resolution to the discovered repo, file, and symbol path.
+        assert result.resolved_symbols == {"User": str(backend_repo / "models.py")}
+        assert len(result.cross_repo_imports) == 1
+        cross_repo_import = result.cross_repo_imports[0]
+        assert cross_repo_import.repo_name == "backend"
+        assert cross_repo_import.file_path == "models.py"
+        assert cross_repo_import.symbols == ["User"]
+        assert cross_repo_import.repo_root == str(backend_repo)
 
     @pytest.mark.asyncio
     async def test_symbol_extraction_from_files(self, tmp_path: Path):
@@ -164,8 +168,19 @@ class TestResolveOrganizationWideBasic:
         )
 
         assert result.success is True
-        # Should find helpers.py and extract symbols
-        assert len(result.monorepo_structure) > 0
+        # [20260310_TEST] Lock symbol extraction to the concrete repo structure and discovered symbols.
+        assert result.monorepo_structure == {"app": ["helpers.py"]}
+        assert result.resolved_symbols == {
+            "add": str(repo / "helpers.py"),
+            "subtract": str(repo / "helpers.py"),
+            "Calculator": str(repo / "helpers.py"),
+        }
+        assert len(result.cross_repo_imports) == 1
+        cross_repo_import = result.cross_repo_imports[0]
+        assert cross_repo_import.repo_name == "app"
+        assert cross_repo_import.file_path == "helpers.py"
+        assert cross_repo_import.symbols == ["add", "subtract", "Calculator"]
+        assert cross_repo_import.repo_root == str(repo)
 
 
 class TestResolveOrganizationWideMultipleFiles:
@@ -286,8 +301,9 @@ class TestResolveOrganizationWideEdgeCases:
         )
 
         assert result.success is True
-        # Should still work with the workspace root as fallback repo
-        assert len(result.monorepo_structure) > 0
+        # [20260310_TEST] Workspaces without git repos fall back to the workspace directory key and include loose Python files.
+        assert result.monorepo_structure == {tmp_path.name: ["module.py"]}
+        assert result.error is None
 
     @pytest.mark.asyncio
     async def test_nonexistent_function_name(self, tmp_path: Path):
@@ -307,7 +323,11 @@ class TestResolveOrganizationWideEdgeCases:
         )
 
         assert result.success is False
-        assert result.error is not None
+        # [20260310_TEST] Missing functions should enumerate the available top-level symbols.
+        assert (
+            result.error
+            == "Function 'nonexistent_function' not found. Available: ['existing_function']"
+        )
         assert result.target_code == ""
 
     @pytest.mark.asyncio
@@ -328,7 +348,11 @@ class TestResolveOrganizationWideEdgeCases:
         )
 
         assert result.success is False
-        assert result.error is not None
+        # [20260310_TEST] Invalid caller code should preserve the parser failure details.
+        assert (
+            result.error
+            == "Organization-wide resolution failed: Invalid Python code: Invalid Python syntax: '(' was never closed (<extraction>, line 1)"
+        )
 
     @pytest.mark.asyncio
     async def test_empty_workspace(self, tmp_path: Path):
@@ -522,10 +546,11 @@ class TestResolveOrganizationWideExplanations:
         )
 
         assert result.success is True
-        assert result.explanation is not None
-        # Explanation should contain repository count
-        assert "repository" in result.explanation.lower()
-        assert "scanned" in result.explanation.lower()
+        # [20260310_TEST] Lock the explanation payload for the two-repository empty-import case.
+        assert (
+            result.explanation
+            == "Scanned 2 repository(ies) in workspace. Found 0 cross-repository import(s). Resolved 0 symbol(s) across repositories."
+        )
 
 
 class TestResolveOrganizationWideUnparseable:
@@ -623,13 +648,10 @@ class TestResolveOrganizationWideCrossRepoImports:
         )
 
         assert result.success is True
-        # Check cross_repo_imports structure
-        for imp in result.cross_repo_imports:
-            assert hasattr(imp, "repo_name")
-            assert hasattr(imp, "file_path")
-            assert hasattr(imp, "symbols")
-            assert hasattr(imp, "repo_root")
-            assert isinstance(imp.repo_name, str)
-            assert isinstance(imp.file_path, str)
-            assert isinstance(imp.symbols, list)
-            assert isinstance(imp.repo_root, str)
+        # [20260310_TEST] Lock cross-repo import discovery to the concrete backend service payload.
+        assert len(result.cross_repo_imports) == 1
+        imp = result.cross_repo_imports[0]
+        assert imp.repo_name == "backend"
+        assert imp.file_path == "services.py"
+        assert imp.symbols == ["UserService"]
+        assert imp.repo_root == str(repo1)

@@ -411,8 +411,11 @@ class TestDetectServiceBoundariesExplanation:
         result = detect_service_boundaries(project_root=str(tmp_path))
 
         assert result.success is True
-        assert result.explanation is not None
-        assert len(result.explanation) > 0
+        # [20260310_TEST] Lock explanation output for the single-file no-boundary case.
+        assert (
+            result.explanation
+            == "Analyzed 1 Python file(s). Found 0 potential service boundary(ies) with isolation score >= 0.6."
+        )
 
     def test_explanation_contains_stats(self, tmp_path: Path):
         """Test that explanation contains important statistics."""
@@ -425,8 +428,11 @@ class TestDetectServiceBoundariesExplanation:
         result = detect_service_boundaries(project_root=str(tmp_path))
 
         assert result.success is True
-        # Should mention file count
-        assert "3" in result.explanation or "file" in result.explanation.lower()
+        # [20260310_TEST] Three standalone files currently produce one candidate boundary at the default threshold.
+        assert (
+            result.explanation
+            == "Analyzed 3 Python file(s). Found 1 potential service boundary(ies) with isolation score >= 0.6."
+        )
 
 
 class TestDetectServiceBoundariesServiceNaming:

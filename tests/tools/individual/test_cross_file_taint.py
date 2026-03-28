@@ -15,6 +15,8 @@ from pathlib import Path
 
 import pytest
 
+from code_scalpel.ast_tools.import_resolver import ImportResolver
+from code_scalpel.ast_tools.java_import_resolver import JavaImportResolver
 from code_scalpel.security.analyzers.cross_file_taint import (
     DANGEROUS_SINKS,
     TAINT_SOURCES,
@@ -423,6 +425,1379 @@ def multiply(x, y):
 
         # Should handle gracefully
         assert result.modules_analyzed == 0
+
+    def test_java_only_project_uses_java_resolver(self, temp_project):
+        """[20260309_TEST] Java-only projects should select the Java resolver."""
+        java_dir = temp_project / "src" / "com" / "example"
+        java_dir.mkdir(parents=True)
+        (java_dir / "UserService.java").write_text(
+            "package com.example;\npublic class UserService {}\n"
+        )
+
+        tracker = CrossFileTaintTracker(temp_project)
+
+        assert isinstance(tracker.resolver, JavaImportResolver)
+        assert tracker._resolver_language == "java"
+        assert tracker.build() is True
+
+    def test_mixed_project_prefers_python_resolver(self, temp_project):
+        """[20260309_TEST] Mixed projects should keep Python-first behavior."""
+        (temp_project / "main.py").write_text("def main():\n    return 1\n")
+        java_dir = temp_project / "src" / "com" / "example"
+        java_dir.mkdir(parents=True)
+        (java_dir / "UserService.java").write_text(
+            "package com.example;\npublic class UserService {}\n"
+        )
+
+        tracker = CrossFileTaintTracker(temp_project)
+
+        assert isinstance(tracker.resolver, ImportResolver)
+        assert tracker._resolver_language == "python"
+
+    def test_java_only_project_returns_pending_warning(self, temp_project):
+        """[20260309_TEST] Java-only projects should report bounded Java support."""
+        java_dir = temp_project / "src" / "com" / "example"
+        java_dir.mkdir(parents=True)
+        (java_dir / "UserService.java").write_text(
+            "package com.example;\npublic class UserService { String run(String id) { return id; } }\n"
+        )
+
+        tracker = CrossFileTaintTracker(temp_project)
+        result = tracker.analyze()
+
+        assert result.success is True
+        assert result.modules_analyzed == 1
+        assert result.warnings == [
+            "Java cross-file security scan currently supports a bounded IR-based subset: common sources/sinks plus direct/static-import flows. Broader Java patterns are not implemented yet."
+        ]
+
+    def test_java_only_project_builds_cross_module_call_graph(self, temp_project):
+        """[20260309_TEST] Java-only projects should build cross-module call edges."""
+        service_dir = temp_project / "src" / "com" / "example" / "service"
+        repo_dir = temp_project / "src" / "com" / "example" / "repo"
+        util_dir = temp_project / "src" / "com" / "example" / "util"
+        service_dir.mkdir(parents=True)
+        repo_dir.mkdir(parents=True)
+        util_dir.mkdir(parents=True)
+
+        (service_dir / "UserService.java").write_text("""
+package com.example.service;
+
+import com.example.repo.UserRepository;
+import static com.example.util.Sql.raw;
+
+class UserService {
+    String run(String id) {
+        return raw(UserRepository.find(id));
+    }
+}
+""")
+        (repo_dir / "UserRepository.java").write_text("""
+package com.example.repo;
+
+class UserRepository {
+    static String find(String id) {
+        return id;
+    }
+}
+""")
+        (util_dir / "Sql.java").write_text("""
+package com.example.util;
+
+class Sql {
+    static String raw(String sql) {
+        return sql;
+    }
+}
+""")
+
+        tracker = CrossFileTaintTracker(temp_project)
+        result = tracker.analyze()
+
+        assert result.success is True
+        assert result.modules_analyzed == 3
+        targets = {
+            (call.target_module, call.target_function)
+            for call in tracker.call_graph["com.example.service.UserService"]
+        }
+        assert ("com.example.repo.UserRepository", "find") in targets
+        assert ("com.example.util.Sql", "raw") in targets
+        mermaid = tracker.get_taint_graph_mermaid()
+        assert "com_example_service_UserService" in mermaid
+        assert "|find|" in mermaid or "|raw|" in mermaid
+
+    def test_java_cross_file_argument_propagation_finds_vulnerability(
+        self, temp_project
+    ):
+        """[20260309_TEST] Java source-to-sink propagation should create a vulnerability across modules."""
+        controller_dir = temp_project / "src" / "com" / "example" / "web"
+        service_dir = temp_project / "src" / "com" / "example" / "service"
+        repo_dir = temp_project / "src" / "com" / "example" / "repo"
+        util_dir = temp_project / "src" / "com" / "example" / "util"
+        controller_dir.mkdir(parents=True)
+        service_dir.mkdir(parents=True)
+        repo_dir.mkdir(parents=True)
+        util_dir.mkdir(parents=True)
+
+        (controller_dir / "UserController.java").write_text("""
+package com.example.web;
+
+import com.example.service.UserService;
+
+class UserController {
+    String run(Request request) {
+        String user = request.getParameter("id");
+        return UserService.run(user);
+    }
+}
+""")
+        (service_dir / "UserService.java").write_text("""
+package com.example.service;
+
+import com.example.repo.UserRepository;
+
+class UserService {
+    static String run(String user) {
+        return UserRepository.execute(user);
+    }
+}
+""")
+        (repo_dir / "UserRepository.java").write_text("""
+package com.example.repo;
+
+import static com.example.util.Sql.raw;
+
+class UserRepository {
+    static String execute(String query) {
+        return raw(query);
+    }
+}
+""")
+        (util_dir / "Sql.java").write_text("""
+package com.example.util;
+
+class Sql {
+    static String raw(String sql) {
+        return sql;
+    }
+}
+""")
+
+        tracker = CrossFileTaintTracker(temp_project)
+        result = tracker.analyze()
+
+        assert result.success is True
+        assert result.modules_analyzed == 4
+        assert result.vulnerabilities
+        assert any(v.cwe_id == "CWE-89" for v in result.vulnerabilities)
+        flow = next(v.flow for v in result.vulnerabilities if v.cwe_id == "CWE-89")
+        assert flow.source_module == "com.example.web.UserController"
+        assert flow.sink_module == "com.example.service.UserService"
+        assert flow.tainted_data == "user"
+
+    def test_java_imported_tainted_return_reaches_local_sink(self, temp_project):
+        """[20260309_TEST] Java imported tainted returns should mark local sink reachability."""
+        source_dir = temp_project / "src" / "com" / "example" / "source"
+        service_dir = temp_project / "src" / "com" / "example" / "service"
+        util_dir = temp_project / "src" / "com" / "example" / "util"
+        source_dir.mkdir(parents=True)
+        service_dir.mkdir(parents=True)
+        util_dir.mkdir(parents=True)
+
+        (source_dir / "InputSource.java").write_text("""
+package com.example.source;
+
+class InputSource {
+    static String read() {
+        return System.getenv("USER_INPUT");
+    }
+}
+""")
+        (service_dir / "UserService.java").write_text("""
+package com.example.service;
+
+import com.example.source.InputSource;
+import static com.example.util.Sql.raw;
+
+class UserService {
+    static String run() {
+        String query = InputSource.read();
+        return raw(query);
+    }
+}
+""")
+        (util_dir / "Sql.java").write_text("""
+package com.example.util;
+
+class Sql {
+    static String raw(String sql) {
+        return sql;
+    }
+}
+""")
+
+        tracker = CrossFileTaintTracker(temp_project)
+        result = tracker.analyze(
+            entry_points=["src/com/example/service/UserService.java"]
+        )
+
+        assert result.success is True
+        assert any(flow.tainted_data == "query" for flow in result.taint_flows)
+
+    def test_java_instance_receiver_type_resolution_finds_vulnerability(
+        self, temp_project
+    ):
+        """[20260309_TEST] Java instance receiver types should resolve cross-module calls."""
+        web_dir = temp_project / "src" / "com" / "example" / "web"
+        service_dir = temp_project / "src" / "com" / "example" / "service"
+        repo_dir = temp_project / "src" / "com" / "example" / "repo"
+        util_dir = temp_project / "src" / "com" / "example" / "util"
+        web_dir.mkdir(parents=True)
+        service_dir.mkdir(parents=True)
+        repo_dir.mkdir(parents=True)
+        util_dir.mkdir(parents=True)
+
+        (web_dir / "UserController.java").write_text("""
+package com.example.web;
+
+import com.example.service.UserService;
+
+class UserController {
+    String run(Request request) {
+        UserService service = new UserService();
+        String user = request.getParameter("id");
+        return service.run(user);
+    }
+}
+""")
+        (service_dir / "UserService.java").write_text("""
+package com.example.service;
+
+import com.example.repo.UserRepository;
+
+class UserService {
+    String run(String user) {
+        UserRepository repo = new UserRepository();
+        return repo.execute(user);
+    }
+}
+""")
+        (repo_dir / "UserRepository.java").write_text("""
+package com.example.repo;
+
+import com.example.util.Sql;
+
+class UserRepository {
+    String execute(String query) {
+        Sql sql = new Sql();
+        return sql.raw(query);
+    }
+}
+""")
+        (util_dir / "Sql.java").write_text("""
+package com.example.util;
+
+class Sql {
+    String raw(String sql) {
+        return sql;
+    }
+}
+""")
+
+        tracker = CrossFileTaintTracker(temp_project)
+        result = tracker.analyze()
+
+        assert result.success is True
+        assert any(v.cwe_id == "CWE-89" for v in result.vulnerabilities)
+
+    def test_java_field_backed_receiver_type_resolution_finds_vulnerability(
+        self, temp_project
+    ):
+        """[20260310_TEST] Java field-backed receivers should resolve cross-module calls."""
+        web_dir = temp_project / "src" / "com" / "example" / "web"
+        service_dir = temp_project / "src" / "com" / "example" / "service"
+        repo_dir = temp_project / "src" / "com" / "example" / "repo"
+        util_dir = temp_project / "src" / "com" / "example" / "util"
+        web_dir.mkdir(parents=True)
+        service_dir.mkdir(parents=True)
+        repo_dir.mkdir(parents=True)
+        util_dir.mkdir(parents=True)
+
+        (web_dir / "UserController.java").write_text("""
+package com.example.web;
+
+import com.example.service.UserService;
+
+class UserController {
+    private UserService service = new UserService();
+
+    String run(Request request) {
+        String user = request.getParameter("id");
+        return this.service.run(user);
+    }
+}
+""")
+        (service_dir / "UserService.java").write_text("""
+package com.example.service;
+
+import com.example.repo.UserRepository;
+
+class UserService {
+    private UserRepository repo = new UserRepository();
+
+    String run(String user) {
+        return repo.execute(user);
+    }
+}
+""")
+        (repo_dir / "UserRepository.java").write_text("""
+package com.example.repo;
+
+import com.example.util.Sql;
+
+class UserRepository {
+    private Sql sql = new Sql();
+
+    String execute(String query) {
+        return sql.raw(query);
+    }
+}
+""")
+        (util_dir / "Sql.java").write_text("""
+package com.example.util;
+
+class Sql {
+    String raw(String sql) {
+        return sql;
+    }
+}
+""")
+
+        tracker = CrossFileTaintTracker(temp_project)
+        result = tracker.analyze()
+
+        assert result.success is True
+        assert any(v.cwe_id == "CWE-89" for v in result.vulnerabilities)
+
+    def test_java_tainted_field_flows_across_methods(self, temp_project):
+        """[20260310_TEST] Java tainted fields should propagate across methods in the same class."""
+        web_dir = temp_project / "src" / "com" / "example" / "web"
+        service_dir = temp_project / "src" / "com" / "example" / "service"
+        repo_dir = temp_project / "src" / "com" / "example" / "repo"
+        util_dir = temp_project / "src" / "com" / "example" / "util"
+        web_dir.mkdir(parents=True)
+        service_dir.mkdir(parents=True)
+        repo_dir.mkdir(parents=True)
+        util_dir.mkdir(parents=True)
+
+        (web_dir / "UserController.java").write_text("""
+package com.example.web;
+
+import com.example.service.UserService;
+
+class UserController {
+    private String cachedUser;
+
+    void capture(Request request) {
+        this.cachedUser = request.getParameter("id");
+    }
+
+    String run() {
+        UserService service = new UserService();
+        return service.run(this.cachedUser);
+    }
+}
+""")
+        (service_dir / "UserService.java").write_text("""
+package com.example.service;
+
+import com.example.repo.UserRepository;
+
+class UserService {
+    String run(String user) {
+        UserRepository repo = new UserRepository();
+        return repo.execute(user);
+    }
+}
+""")
+        (repo_dir / "UserRepository.java").write_text("""
+package com.example.repo;
+
+import com.example.util.Sql;
+
+class UserRepository {
+    String execute(String query) {
+        Sql sql = new Sql();
+        return sql.raw(query);
+    }
+}
+""")
+        (util_dir / "Sql.java").write_text("""
+package com.example.util;
+
+class Sql {
+    String raw(String sql) {
+        return sql;
+    }
+}
+""")
+
+        tracker = CrossFileTaintTracker(temp_project)
+        result = tracker.analyze()
+
+        assert result.success is True
+        assert any(v.cwe_id == "CWE-89" for v in result.vulnerabilities)
+
+    def test_java_implicit_field_write_flows_across_methods(self, temp_project):
+        """[20260310_TEST] Java bare field writes should propagate across methods when no local shadows exist."""
+        web_dir = temp_project / "src" / "com" / "example" / "web"
+        service_dir = temp_project / "src" / "com" / "example" / "service"
+        repo_dir = temp_project / "src" / "com" / "example" / "repo"
+        util_dir = temp_project / "src" / "com" / "example" / "util"
+        web_dir.mkdir(parents=True)
+        service_dir.mkdir(parents=True)
+        repo_dir.mkdir(parents=True)
+        util_dir.mkdir(parents=True)
+
+        (web_dir / "UserController.java").write_text("""
+package com.example.web;
+
+import com.example.service.UserService;
+
+class UserController {
+    private String cachedUser;
+
+    void capture(Request request) {
+        cachedUser = request.getParameter("id");
+    }
+
+    String run() {
+        UserService service = new UserService();
+        return service.run(cachedUser);
+    }
+}
+""")
+        (service_dir / "UserService.java").write_text("""
+package com.example.service;
+
+import com.example.repo.UserRepository;
+
+class UserService {
+    String run(String user) {
+        UserRepository repo = new UserRepository();
+        return repo.execute(user);
+    }
+}
+""")
+        (repo_dir / "UserRepository.java").write_text("""
+package com.example.repo;
+
+import com.example.util.Sql;
+
+class UserRepository {
+    String execute(String query) {
+        Sql sql = new Sql();
+        return sql.raw(query);
+    }
+}
+""")
+        (util_dir / "Sql.java").write_text("""
+package com.example.util;
+
+class Sql {
+    String raw(String sql) {
+        return sql;
+    }
+}
+""")
+
+        tracker = CrossFileTaintTracker(temp_project)
+        result = tracker.analyze()
+
+        assert result.success is True
+        assert any(v.cwe_id == "CWE-89" for v in result.vulnerabilities)
+
+    def test_java_local_shadow_does_not_taint_field_across_methods(self, temp_project):
+        """[20260310_TEST] Java locals that shadow fields must not be promoted into class-field taint."""
+        web_dir = temp_project / "src" / "com" / "example" / "web"
+        service_dir = temp_project / "src" / "com" / "example" / "service"
+        repo_dir = temp_project / "src" / "com" / "example" / "repo"
+        util_dir = temp_project / "src" / "com" / "example" / "util"
+        web_dir.mkdir(parents=True)
+        service_dir.mkdir(parents=True)
+        repo_dir.mkdir(parents=True)
+        util_dir.mkdir(parents=True)
+
+        (web_dir / "UserController.java").write_text("""
+package com.example.web;
+
+import com.example.service.UserService;
+
+class UserController {
+    private String cachedUser;
+
+    void capture(Request request) {
+        var cachedUser = request.getParameter("id");
+    }
+
+    String run() {
+        UserService service = new UserService();
+        return service.run(cachedUser);
+    }
+}
+""")
+        (service_dir / "UserService.java").write_text("""
+package com.example.service;
+
+import com.example.repo.UserRepository;
+
+class UserService {
+    String run(String user) {
+        UserRepository repo = new UserRepository();
+        return repo.execute(user);
+    }
+}
+""")
+        (repo_dir / "UserRepository.java").write_text("""
+package com.example.repo;
+
+import com.example.util.Sql;
+
+class UserRepository {
+    String execute(String query) {
+        Sql sql = new Sql();
+        return sql.raw(query);
+    }
+}
+""")
+        (util_dir / "Sql.java").write_text("""
+package com.example.util;
+
+class Sql {
+    String raw(String sql) {
+        return sql;
+    }
+}
+""")
+
+        tracker = CrossFileTaintTracker(temp_project)
+        result = tracker.analyze()
+
+        assert result.success is True
+        assert not any(v.cwe_id == "CWE-89" for v in result.vulnerabilities)
+
+    def test_java_constructor_tainted_receiver_reaches_imported_no_arg_sink(
+        self, temp_project
+    ):
+        """[20260310_TEST] Java constructor-tainted receivers should propagate into imported no-arg methods with local sinks."""
+        web_dir = temp_project / "src" / "com" / "example" / "web"
+        service_dir = temp_project / "src" / "com" / "example" / "service"
+        util_dir = temp_project / "src" / "com" / "example" / "util"
+        web_dir.mkdir(parents=True)
+        service_dir.mkdir(parents=True)
+        util_dir.mkdir(parents=True)
+
+        (web_dir / "UserController.java").write_text("""
+package com.example.web;
+
+import com.example.service.UserService;
+
+class UserController {
+    String handle(Request request) {
+        String user = request.getParameter("id");
+        UserService service = new UserService(user);
+        return service.run();
+    }
+}
+""")
+        (service_dir / "UserService.java").write_text("""
+package com.example.service;
+
+import com.example.util.Sql;
+
+class UserService {
+    private String user;
+
+    UserService(String user) {
+        this.user = user;
+    }
+
+    String run() {
+        Sql sql = new Sql();
+        return sql.raw(user);
+    }
+}
+""")
+        (util_dir / "Sql.java").write_text("""
+package com.example.util;
+
+class Sql {
+    String raw(String sql) {
+        return sql;
+    }
+}
+""")
+
+        tracker = CrossFileTaintTracker(temp_project)
+        result = tracker.analyze()
+
+        assert result.success is True
+        assert any(v.cwe_id == "CWE-89" for v in result.vulnerabilities)
+
+    def test_java_chained_constructor_receiver_reaches_imported_no_arg_sink(
+        self, temp_project
+    ):
+        """[20260310_TEST] Java chained constructor receivers should propagate into imported no-arg methods with local sinks."""
+        web_dir = temp_project / "src" / "com" / "example" / "web"
+        service_dir = temp_project / "src" / "com" / "example" / "service"
+        util_dir = temp_project / "src" / "com" / "example" / "util"
+        web_dir.mkdir(parents=True)
+        service_dir.mkdir(parents=True)
+        util_dir.mkdir(parents=True)
+
+        (web_dir / "UserController.java").write_text("""
+package com.example.web;
+
+import com.example.service.UserService;
+
+class UserController {
+    String handle(Request request) {
+        String user = request.getParameter("id");
+        return new UserService(user).run();
+    }
+}
+""")
+        (service_dir / "UserService.java").write_text("""
+package com.example.service;
+
+import com.example.util.Sql;
+
+class UserService {
+    private String user;
+
+    UserService(String user) {
+        this.user = user;
+    }
+
+    String run() {
+        Sql sql = new Sql();
+        return sql.raw(user);
+    }
+}
+""")
+        (util_dir / "Sql.java").write_text("""
+package com.example.util;
+
+class Sql {
+    String raw(String sql) {
+        return sql;
+    }
+}
+""")
+
+        tracker = CrossFileTaintTracker(temp_project)
+        result = tracker.analyze()
+
+        assert result.success is True
+        assert any(v.cwe_id == "CWE-89" for v in result.vulnerabilities)
+
+    def test_java_field_backed_constructor_receiver_reaches_imported_no_arg_sink(
+        self, temp_project
+    ):
+        """[20260310_TEST] Java field-backed receivers seeded from tainted constructor calls should reach imported no-arg local sinks."""
+        web_dir = temp_project / "src" / "com" / "example" / "web"
+        service_dir = temp_project / "src" / "com" / "example" / "service"
+        util_dir = temp_project / "src" / "com" / "example" / "util"
+        web_dir.mkdir(parents=True)
+        service_dir.mkdir(parents=True)
+        util_dir.mkdir(parents=True)
+
+        (web_dir / "UserController.java").write_text("""
+package com.example.web;
+
+import com.example.service.UserService;
+
+class UserController {
+    private UserService service;
+
+    void init(Request request) {
+        String user = request.getParameter("id");
+        this.service = new UserService(user);
+    }
+
+    String run() {
+        return this.service.run();
+    }
+}
+""")
+        (service_dir / "UserService.java").write_text("""
+package com.example.service;
+
+import com.example.util.Sql;
+
+class UserService {
+    private String user;
+
+    UserService(String user) {
+        this.user = user;
+    }
+
+    String run() {
+        Sql sql = new Sql();
+        return sql.raw(user);
+    }
+}
+""")
+        (util_dir / "Sql.java").write_text("""
+package com.example.util;
+
+class Sql {
+    String raw(String sql) {
+        return sql;
+    }
+}
+""")
+
+        tracker = CrossFileTaintTracker(temp_project)
+        result = tracker.analyze()
+
+        assert result.success is True
+        assert any(v.cwe_id == "CWE-89" for v in result.vulnerabilities)
+
+    def test_java_shadowing_object_receiver_does_not_taint_field_backed_sink(
+        self, temp_project
+    ):
+        """[20260310_TEST] Java locals that shadow object receiver fields must not taint the field-backed sink path."""
+        web_dir = temp_project / "src" / "com" / "example" / "web"
+        service_dir = temp_project / "src" / "com" / "example" / "service"
+        util_dir = temp_project / "src" / "com" / "example" / "util"
+        web_dir.mkdir(parents=True)
+        service_dir.mkdir(parents=True)
+        util_dir.mkdir(parents=True)
+
+        (web_dir / "UserController.java").write_text("""
+package com.example.web;
+
+import com.example.service.UserService;
+
+class UserController {
+    private UserService service = new UserService("safe");
+
+    void init(Request request) {
+        UserService service = new UserService(request.getParameter("id"));
+    }
+
+    String run() {
+        return this.service.run();
+    }
+}
+""")
+        (service_dir / "UserService.java").write_text("""
+package com.example.service;
+
+import com.example.util.Sql;
+
+class UserService {
+    private String user;
+
+    UserService(String user) {
+        this.user = user;
+    }
+
+    String run() {
+        Sql sql = new Sql();
+        return sql.raw(user);
+    }
+}
+""")
+        (util_dir / "Sql.java").write_text("""
+package com.example.util;
+
+class Sql {
+    String raw(String sql) {
+        return sql;
+    }
+}
+""")
+
+        tracker = CrossFileTaintTracker(temp_project)
+        result = tracker.analyze()
+
+        assert result.success is True
+        assert not any(v.cwe_id == "CWE-89" for v in result.vulnerabilities)
+
+    def test_java_sanitized_chained_constructor_receiver_does_not_report_sink(
+        self, temp_project
+    ):
+        """[20260310_TEST] Java chained constructor receivers should not report when a same-class helper returns safe data."""
+        web_dir = temp_project / "src" / "com" / "example" / "web"
+        service_dir = temp_project / "src" / "com" / "example" / "service"
+        util_dir = temp_project / "src" / "com" / "example" / "util"
+        web_dir.mkdir(parents=True)
+        service_dir.mkdir(parents=True)
+        util_dir.mkdir(parents=True)
+
+        (web_dir / "UserController.java").write_text("""
+package com.example.web;
+
+import com.example.service.UserService;
+
+class UserController {
+    String clean(String value) {
+        return "safe";
+    }
+
+    String handle(Request request) {
+        return new UserService(clean(request.getParameter("id"))).run();
+    }
+}
+""")
+        (service_dir / "UserService.java").write_text("""
+package com.example.service;
+
+import com.example.util.Sql;
+
+class UserService {
+    private String user;
+
+    UserService(String user) {
+        this.user = user;
+    }
+
+    String run() {
+        Sql sql = new Sql();
+        return sql.raw(user);
+    }
+}
+""")
+        (util_dir / "Sql.java").write_text("""
+package com.example.util;
+
+class Sql {
+    String raw(String sql) {
+        return sql;
+    }
+}
+""")
+
+        tracker = CrossFileTaintTracker(temp_project)
+        result = tracker.analyze()
+
+        assert result.success is True
+        assert not any(v.cwe_id == "CWE-89" for v in result.vulnerabilities)
+
+    def test_java_imported_safe_helper_in_chained_constructor_receiver_does_not_report_sink(
+        self, temp_project
+    ):
+        """[20260310_TEST] Java chained constructor receivers should ignore imported helpers that return safe data."""
+        web_dir = temp_project / "src" / "com" / "example" / "web"
+        service_dir = temp_project / "src" / "com" / "example" / "service"
+        util_dir = temp_project / "src" / "com" / "example" / "util"
+        db_dir = temp_project / "src" / "com" / "example" / "db"
+        web_dir.mkdir(parents=True)
+        service_dir.mkdir(parents=True)
+        util_dir.mkdir(parents=True)
+        db_dir.mkdir(parents=True)
+
+        (web_dir / "UserController.java").write_text("""
+package com.example.web;
+
+import com.example.service.UserService;
+import com.example.util.Cleaner;
+
+class UserController {
+    String handle(Request request) {
+        return new UserService(Cleaner.clean(request.getParameter("id"))).run();
+    }
+}
+""")
+        (util_dir / "Cleaner.java").write_text("""
+package com.example.util;
+
+class Cleaner {
+    static String clean(String value) {
+        return "safe";
+    }
+}
+""")
+        (service_dir / "UserService.java").write_text("""
+package com.example.service;
+
+import com.example.db.Sql;
+
+class UserService {
+    private String user;
+
+    UserService(String user) {
+        this.user = user;
+    }
+
+    String run() {
+        Sql sql = new Sql();
+        return sql.raw(user);
+    }
+}
+""")
+        (db_dir / "Sql.java").write_text("""
+package com.example.db;
+
+class Sql {
+    String raw(String sql) {
+        return sql;
+    }
+}
+""")
+
+        tracker = CrossFileTaintTracker(temp_project)
+        result = tracker.analyze()
+
+        assert result.success is True
+        assert not any(v.cwe_id == "CWE-89" for v in result.vulnerabilities)
+
+    def test_java_imported_tainted_helper_in_chained_constructor_receiver_reports_sink(
+        self, temp_project
+    ):
+        """[20260310_TEST] Java chained constructor receivers should report when an imported helper preserves tainted data."""
+        web_dir = temp_project / "src" / "com" / "example" / "web"
+        service_dir = temp_project / "src" / "com" / "example" / "service"
+        util_dir = temp_project / "src" / "com" / "example" / "util"
+        db_dir = temp_project / "src" / "com" / "example" / "db"
+        web_dir.mkdir(parents=True)
+        service_dir.mkdir(parents=True)
+        util_dir.mkdir(parents=True)
+        db_dir.mkdir(parents=True)
+
+        (web_dir / "UserController.java").write_text("""
+package com.example.web;
+
+import com.example.service.UserService;
+import com.example.util.Cleaner;
+
+class UserController {
+    String handle(Request request) {
+        return new UserService(Cleaner.clean(request.getParameter("id"))).run();
+    }
+}
+""")
+        (util_dir / "Cleaner.java").write_text("""
+package com.example.util;
+
+class Cleaner {
+    static String clean(String value) {
+        return value;
+    }
+}
+""")
+        (service_dir / "UserService.java").write_text("""
+package com.example.service;
+
+import com.example.db.Sql;
+
+class UserService {
+    private String user;
+
+    UserService(String user) {
+        this.user = user;
+    }
+
+    String run() {
+        Sql sql = new Sql();
+        return sql.raw(user);
+    }
+}
+""")
+        (db_dir / "Sql.java").write_text("""
+package com.example.db;
+
+class Sql {
+    String raw(String sql) {
+        return sql;
+    }
+}
+""")
+
+        tracker = CrossFileTaintTracker(temp_project)
+        result = tracker.analyze()
+
+        assert result.success is True
+        assert any(v.cwe_id == "CWE-89" for v in result.vulnerabilities)
+
+    def test_java_factory_created_receiver_reports_sink(self, temp_project):
+        """[20260310_TEST] Java factory-created receivers should resolve to the returned object type for no-arg sink paths."""
+        web_dir = temp_project / "src" / "com" / "example" / "web"
+        factory_dir = temp_project / "src" / "com" / "example" / "factory"
+        service_dir = temp_project / "src" / "com" / "example" / "service"
+        db_dir = temp_project / "src" / "com" / "example" / "db"
+        web_dir.mkdir(parents=True)
+        factory_dir.mkdir(parents=True)
+        service_dir.mkdir(parents=True)
+        db_dir.mkdir(parents=True)
+
+        (web_dir / "UserController.java").write_text("""
+package com.example.web;
+
+import com.example.factory.UserFactory;
+
+class UserController {
+    String handle(Request request) {
+        String user = request.getParameter("id");
+        return UserFactory.create(user).run();
+    }
+}
+""")
+        (factory_dir / "UserFactory.java").write_text("""
+package com.example.factory;
+
+import com.example.service.UserService;
+
+class UserFactory {
+    static UserService create(String user) {
+        return new UserService(user);
+    }
+}
+""")
+        (service_dir / "UserService.java").write_text("""
+package com.example.service;
+
+import com.example.db.Sql;
+
+class UserService {
+    private String user;
+
+    UserService(String user) {
+        this.user = user;
+    }
+
+    String run() {
+        Sql sql = new Sql();
+        return sql.raw(user);
+    }
+}
+""")
+        (db_dir / "Sql.java").write_text("""
+package com.example.db;
+
+class Sql {
+    String raw(String sql) {
+        return sql;
+    }
+}
+""")
+
+        tracker = CrossFileTaintTracker(temp_project)
+        result = tracker.analyze()
+
+        assert result.success is True
+        assert any(v.cwe_id == "CWE-89" for v in result.vulnerabilities)
+
+    def test_java_field_backed_factory_created_receiver_reports_sink(
+        self, temp_project
+    ):
+        """[20260310_TEST] Java field-backed factory receivers should resolve through the factory return type for no-arg sink paths."""
+        web_dir = temp_project / "src" / "com" / "example" / "web"
+        factory_dir = temp_project / "src" / "com" / "example" / "factory"
+        service_dir = temp_project / "src" / "com" / "example" / "service"
+        db_dir = temp_project / "src" / "com" / "example" / "db"
+        web_dir.mkdir(parents=True)
+        factory_dir.mkdir(parents=True)
+        service_dir.mkdir(parents=True)
+        db_dir.mkdir(parents=True)
+
+        (web_dir / "UserController.java").write_text("""
+package com.example.web;
+
+import com.example.factory.UserFactory;
+
+class UserController {
+    private UserFactory factory = new UserFactory();
+
+    String handle(Request request) {
+        String user = request.getParameter("id");
+        return this.factory.create(user).run();
+    }
+}
+""")
+        (factory_dir / "UserFactory.java").write_text("""
+package com.example.factory;
+
+import com.example.service.UserService;
+
+class UserFactory {
+    UserService create(String user) {
+        return new UserService(user);
+    }
+}
+""")
+        (service_dir / "UserService.java").write_text("""
+package com.example.service;
+
+import com.example.db.Sql;
+
+class UserService {
+    private String user;
+
+    UserService(String user) {
+        this.user = user;
+    }
+
+    String run() {
+        Sql sql = new Sql();
+        return sql.raw(user);
+    }
+}
+""")
+        (db_dir / "Sql.java").write_text("""
+package com.example.db;
+
+class Sql {
+    String raw(String sql) {
+        return sql;
+    }
+}
+""")
+
+        tracker = CrossFileTaintTracker(temp_project)
+        result = tracker.analyze()
+
+        assert result.success is True
+        assert any(v.cwe_id == "CWE-89" for v in result.vulnerabilities)
+
+    def test_java_shadowing_local_factory_does_not_taint_field_backed_factory_sink(
+        self, temp_project
+    ):
+        """[20260310_TEST] Java locals that shadow factory fields must not taint field-backed factory receiver paths."""
+        web_dir = temp_project / "src" / "com" / "example" / "web"
+        factory_dir = temp_project / "src" / "com" / "example" / "factory"
+        service_dir = temp_project / "src" / "com" / "example" / "service"
+        db_dir = temp_project / "src" / "com" / "example" / "db"
+        web_dir.mkdir(parents=True)
+        factory_dir.mkdir(parents=True)
+        service_dir.mkdir(parents=True)
+        db_dir.mkdir(parents=True)
+
+        (web_dir / "UserController.java").write_text("""
+package com.example.web;
+
+import com.example.factory.UserFactory;
+
+class UserController {
+    private UserFactory factory = new UserFactory("safe");
+
+    void init(Request request) {
+        UserFactory factory = new UserFactory(request.getParameter("id"));
+    }
+
+    String handle() {
+        return this.factory.create().run();
+    }
+}
+""")
+        (factory_dir / "UserFactory.java").write_text("""
+package com.example.factory;
+
+import com.example.service.UserService;
+
+class UserFactory {
+    private String user;
+
+    UserFactory(String user) {
+        this.user = user;
+    }
+
+    UserService create() {
+        return new UserService(user);
+    }
+}
+""")
+        (service_dir / "UserService.java").write_text("""
+package com.example.service;
+
+import com.example.db.Sql;
+
+class UserService {
+    private String user;
+
+    UserService(String user) {
+        this.user = user;
+    }
+
+    String run() {
+        Sql sql = new Sql();
+        return sql.raw(user);
+    }
+}
+""")
+        (db_dir / "Sql.java").write_text("""
+package com.example.db;
+
+class Sql {
+    String raw(String sql) {
+        return sql;
+    }
+}
+""")
+
+        tracker = CrossFileTaintTracker(temp_project)
+        result = tracker.analyze()
+
+        assert result.success is True
+        assert not any(v.cwe_id == "CWE-89" for v in result.vulnerabilities)
+
+    def test_java_imported_safe_factory_helper_does_not_report_sink(self, temp_project):
+        """[20260310_TEST] Java imported factory helpers that sanitize before returning a service must not taint no-arg receiver sinks."""
+        web_dir = temp_project / "src" / "com" / "example" / "web"
+        factory_dir = temp_project / "src" / "com" / "example" / "factory"
+        builder_dir = temp_project / "src" / "com" / "example" / "builder"
+        service_dir = temp_project / "src" / "com" / "example" / "service"
+        db_dir = temp_project / "src" / "com" / "example" / "db"
+        web_dir.mkdir(parents=True)
+        factory_dir.mkdir(parents=True)
+        builder_dir.mkdir(parents=True)
+        service_dir.mkdir(parents=True)
+        db_dir.mkdir(parents=True)
+
+        (web_dir / "UserController.java").write_text("""
+package com.example.web;
+
+import com.example.factory.UserFactory;
+
+class UserController {
+    String handle(Request request) {
+        return UserFactory.create(request.getParameter("id")).run();
+    }
+}
+""")
+        (factory_dir / "UserFactory.java").write_text("""
+package com.example.factory;
+
+import com.example.builder.ServiceBuilder;
+import com.example.service.UserService;
+
+class UserFactory {
+    static UserService create(String user) {
+        return ServiceBuilder.safe(user);
+    }
+}
+""")
+        (builder_dir / "ServiceBuilder.java").write_text("""
+package com.example.builder;
+
+import com.example.service.UserService;
+
+class ServiceBuilder {
+    static UserService safe(String user) {
+        return new UserService("safe");
+    }
+}
+""")
+        (service_dir / "UserService.java").write_text("""
+package com.example.service;
+
+import com.example.db.Sql;
+
+class UserService {
+    private String user;
+
+    UserService(String user) {
+        this.user = user;
+    }
+
+    String run() {
+        Sql sql = new Sql();
+        return sql.raw(user);
+    }
+}
+""")
+        (db_dir / "Sql.java").write_text("""
+package com.example.db;
+
+class Sql {
+    String raw(String sql) {
+        return sql;
+    }
+}
+""")
+
+        tracker = CrossFileTaintTracker(temp_project)
+        result = tracker.analyze()
+
+        assert result.success is True
+        assert not result.vulnerabilities
+
+    def test_java_field_backed_safe_factory_helper_does_not_report_sink(
+        self, temp_project
+    ):
+        """[20260310_TEST] Java field-backed factory helpers that sanitize before returning a service must keep receiver sinks safe."""
+        web_dir = temp_project / "src" / "com" / "example" / "web"
+        factory_dir = temp_project / "src" / "com" / "example" / "factory"
+        service_dir = temp_project / "src" / "com" / "example" / "service"
+        db_dir = temp_project / "src" / "com" / "example" / "db"
+        web_dir.mkdir(parents=True)
+        factory_dir.mkdir(parents=True)
+        service_dir.mkdir(parents=True)
+        db_dir.mkdir(parents=True)
+
+        (web_dir / "UserController.java").write_text("""
+package com.example.web;
+
+import com.example.factory.UserFactory;
+
+class UserController {
+    private UserFactory factory = new UserFactory();
+
+    String handle(Request request) {
+        return this.factory.create(request.getParameter("id")).run();
+    }
+}
+""")
+        (factory_dir / "UserFactory.java").write_text("""
+package com.example.factory;
+
+import com.example.service.UserService;
+
+class UserFactory {
+    UserService create(String user) {
+        return buildSafe(user);
+    }
+
+    private UserService buildSafe(String user) {
+        return new UserService("safe");
+    }
+}
+""")
+        (service_dir / "UserService.java").write_text("""
+package com.example.service;
+
+import com.example.db.Sql;
+
+class UserService {
+    private String user;
+
+    UserService(String user) {
+        this.user = user;
+    }
+
+    String run() {
+        Sql sql = new Sql();
+        return sql.raw(user);
+    }
+}
+""")
+        (db_dir / "Sql.java").write_text("""
+package com.example.db;
+
+class Sql {
+    String raw(String sql) {
+        return sql;
+    }
+}
+""")
+
+        tracker = CrossFileTaintTracker(temp_project)
+        result = tracker.analyze()
+
+        assert result.success is True
+        assert not result.vulnerabilities
 
 
 # =============================================================================

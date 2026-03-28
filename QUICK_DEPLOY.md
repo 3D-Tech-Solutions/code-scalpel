@@ -102,12 +102,16 @@ docker run -d --name codescalpel \
   3dtechsolutions/code-scalpel:latest
 ```
 
-**Health Check:**
+**Listener Check:**
 ```bash
-# Check server health
-curl http://localhost:8594/health
-
-# Expected response: {"status": "healthy", "version": "1.4.0"}
+# [20260310_DOCS] The MCP runtime exposes /mcp, not a native /health endpoint.
+# Verify the MCP listener is reachable
+python - <<'PY'
+import socket
+s = socket.create_connection(("127.0.0.1", 8593), 2)
+s.close()
+print("MCP listener reachable on 127.0.0.1:8593")
+PY
 ```
 
 ### Option 2: Docker Compose
@@ -119,7 +123,6 @@ services:
     image: 3dtechsolutions/code-scalpel:latest
     ports:
       - "8593:8593"  # MCP server
-      - "8594:8594"  # Health endpoint
     volumes:
       - ./:/app/code
       - ./.code-scalpel/license.jwt:/app/.code-scalpel/license.jwt:ro
@@ -685,8 +688,13 @@ docker logs codescalpel
 # Run interactively for debugging
 docker run -it --rm 3dtechsolutions/code-scalpel:latest
 
-# Check health endpoint
-curl http://localhost:8594/health
+# Check MCP listener
+python - <<'PY'
+import socket
+s = socket.create_connection(("127.0.0.1", 8593), 2)
+s.close()
+print("MCP listener reachable on 127.0.0.1:8593")
+PY
 ```
 
 ### Docker image pull fails

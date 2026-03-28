@@ -64,8 +64,8 @@ codescalpel analyze --code "def foo(): return 42"
 
 **Tier Limits:**
 - Community: 1MB files, basic AST analysis
-- Pro: 10MB files, control flow analysis
-- Enterprise: Unlimited files, full analysis with security insights
+- Pro: 100MB files, advanced metrics and control/data-flow analysis
+- Enterprise: 100MB files, Pro-scale limits plus compliance/custom-rule capabilities
 
 ---
 
@@ -345,9 +345,9 @@ codescalpel extract-code src/lib.py --function helper -o extracted.py
 ```
 
 **Tier Limits:**
-- Community: Single file, max depth 0, 1MB files
-- Pro: Cross-file deps, max depth 1, 10MB files
-- Enterprise: Unlimited, org-wide resolution, 100MB files
+- Community: Single file, max depth 1, 1MB files, no cross-file deps
+- Pro: Cross-file deps enabled, unlimited depth, 100MB files
+- Enterprise: Pro-scale limits plus org-wide/service-boundary features
 
 ---
 

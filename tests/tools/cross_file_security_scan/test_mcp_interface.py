@@ -287,6 +287,1253 @@ class TestResultFormat:
             for field in expected_fields:
                 assert hasattr(result, field), f"Result should have '{field}' field"
 
+    @pytest.mark.asyncio
+    async def test_java_only_project_reports_bounded_java_warning(self):
+        """[20260309_TEST] Java-only projects should report the bounded Java analysis warning."""
+        from code_scalpel.mcp.server import cross_file_security_scan
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "UserController.java").write_text("""
+package demo;
+
+class UserController {
+    String run(String q) {
+        return q;
+    }
+}
+""")
+
+            result = await cross_file_security_scan(
+                project_root=tmpdir,
+                max_depth=3,
+                include_diagram=False,
+                timeout_seconds=10.0,
+                max_modules=10,
+            )
+
+            assert result.success is True
+            assert result.files_analyzed == 1
+            assert result.warnings
+            assert any(
+                "bounded IR-based subset" in warning for warning in result.warnings
+            )
+
+    @pytest.mark.asyncio
+    async def test_java_only_project_reports_sql_injection_flow(self):
+        """[20260309_TEST] Java-only projects should surface bounded source-to-sink vulnerabilities."""
+        from code_scalpel.mcp.server import cross_file_security_scan
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            web_dir = root / "src" / "com" / "example" / "web"
+            service_dir = root / "src" / "com" / "example" / "service"
+            repo_dir = root / "src" / "com" / "example" / "repo"
+            util_dir = root / "src" / "com" / "example" / "util"
+            web_dir.mkdir(parents=True)
+            service_dir.mkdir(parents=True)
+            repo_dir.mkdir(parents=True)
+            util_dir.mkdir(parents=True)
+
+            (web_dir / "UserController.java").write_text("""
+package com.example.web;
+
+import com.example.service.UserService;
+
+class UserController {
+    String run(Request request) {
+        String user = request.getParameter("id");
+        return UserService.run(user);
+    }
+}
+""")
+            (service_dir / "UserService.java").write_text("""
+package com.example.service;
+
+import com.example.repo.UserRepository;
+
+class UserService {
+    static String run(String user) {
+        return UserRepository.execute(user);
+    }
+}
+""")
+            (repo_dir / "UserRepository.java").write_text("""
+package com.example.repo;
+
+import static com.example.util.Sql.raw;
+
+class UserRepository {
+    static String execute(String query) {
+        return raw(query);
+    }
+}
+""")
+            (util_dir / "Sql.java").write_text("""
+package com.example.util;
+
+class Sql {
+    static String raw(String sql) {
+        return sql;
+    }
+}
+""")
+
+            result = await cross_file_security_scan(
+                project_root=tmpdir,
+                max_depth=3,
+                include_diagram=False,
+                timeout_seconds=10.0,
+                max_modules=10,
+            )
+
+            assert result.success is True
+            assert result.files_analyzed == 4
+            assert result.vulnerability_count >= 1
+            assert any(v.cwe == "CWE-89" for v in result.vulnerabilities)
+
+    @pytest.mark.asyncio
+    async def test_java_only_project_reports_sql_injection_flow_from_implicit_field_write(
+        self,
+    ):
+        """[20260310_TEST] Java-only MCP scan should surface implicit same-class field flows."""
+        from code_scalpel.mcp.server import cross_file_security_scan
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            web_dir = root / "src" / "com" / "example" / "web"
+            service_dir = root / "src" / "com" / "example" / "service"
+            repo_dir = root / "src" / "com" / "example" / "repo"
+            util_dir = root / "src" / "com" / "example" / "util"
+            web_dir.mkdir(parents=True)
+            service_dir.mkdir(parents=True)
+            repo_dir.mkdir(parents=True)
+            util_dir.mkdir(parents=True)
+
+            (web_dir / "UserController.java").write_text("""
+package com.example.web;
+
+import com.example.service.UserService;
+
+class UserController {
+    private String cachedUser;
+
+    void capture(Request request) {
+        cachedUser = request.getParameter("id");
+    }
+
+    String run() {
+        UserService service = new UserService();
+        return service.run(cachedUser);
+    }
+}
+""")
+            (service_dir / "UserService.java").write_text("""
+package com.example.service;
+
+import com.example.repo.UserRepository;
+
+class UserService {
+    String run(String user) {
+        UserRepository repo = new UserRepository();
+        return repo.execute(user);
+    }
+}
+""")
+            (repo_dir / "UserRepository.java").write_text("""
+package com.example.repo;
+
+import com.example.util.Sql;
+
+class UserRepository {
+    String execute(String query) {
+        Sql sql = new Sql();
+        return sql.raw(query);
+    }
+}
+""")
+            (util_dir / "Sql.java").write_text("""
+package com.example.util;
+
+class Sql {
+    String raw(String sql) {
+        return sql;
+    }
+}
+""")
+
+            result = await cross_file_security_scan(
+                project_root=tmpdir,
+                max_depth=3,
+                include_diagram=False,
+                timeout_seconds=10.0,
+                max_modules=10,
+            )
+
+            assert result.success is True
+            assert result.vulnerability_count >= 1
+            assert any(v.cwe == "CWE-89" for v in result.vulnerabilities)
+
+    @pytest.mark.asyncio
+    async def test_java_only_project_ignores_local_shadow_of_field_for_sql_flow(self):
+        """[20260310_TEST] Java-only MCP scan should not taint fields from shadowing local vars."""
+        from code_scalpel.mcp.server import cross_file_security_scan
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            web_dir = root / "src" / "com" / "example" / "web"
+            service_dir = root / "src" / "com" / "example" / "service"
+            repo_dir = root / "src" / "com" / "example" / "repo"
+            util_dir = root / "src" / "com" / "example" / "util"
+            web_dir.mkdir(parents=True)
+            service_dir.mkdir(parents=True)
+            repo_dir.mkdir(parents=True)
+            util_dir.mkdir(parents=True)
+
+            (web_dir / "UserController.java").write_text("""
+package com.example.web;
+
+import com.example.service.UserService;
+
+class UserController {
+    private String cachedUser;
+
+    void capture(Request request) {
+        var cachedUser = request.getParameter("id");
+    }
+
+    String run() {
+        UserService service = new UserService();
+        return service.run(cachedUser);
+    }
+}
+""")
+            (service_dir / "UserService.java").write_text("""
+package com.example.service;
+
+import com.example.repo.UserRepository;
+
+class UserService {
+    String run(String user) {
+        UserRepository repo = new UserRepository();
+        return repo.execute(user);
+    }
+}
+""")
+            (repo_dir / "UserRepository.java").write_text("""
+package com.example.repo;
+
+import com.example.util.Sql;
+
+class UserRepository {
+    String execute(String query) {
+        Sql sql = new Sql();
+        return sql.raw(query);
+    }
+}
+""")
+            (util_dir / "Sql.java").write_text("""
+package com.example.util;
+
+class Sql {
+    String raw(String sql) {
+        return sql;
+    }
+}
+""")
+
+            result = await cross_file_security_scan(
+                project_root=tmpdir,
+                max_depth=3,
+                include_diagram=False,
+                timeout_seconds=10.0,
+                max_modules=10,
+            )
+
+            assert result.success is True
+            assert not any(v.cwe == "CWE-89" for v in result.vulnerabilities)
+
+    @pytest.mark.asyncio
+    async def test_java_only_project_reports_constructor_tainted_receiver_flow(self):
+        """[20260310_TEST] Java-only MCP scan should surface constructor-tainted receivers reaching imported no-arg local sinks."""
+        from code_scalpel.mcp.server import cross_file_security_scan
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            web_dir = root / "src" / "com" / "example" / "web"
+            service_dir = root / "src" / "com" / "example" / "service"
+            util_dir = root / "src" / "com" / "example" / "util"
+            web_dir.mkdir(parents=True)
+            service_dir.mkdir(parents=True)
+            util_dir.mkdir(parents=True)
+
+            (web_dir / "UserController.java").write_text("""
+package com.example.web;
+
+import com.example.service.UserService;
+
+class UserController {
+    String handle(Request request) {
+        String user = request.getParameter("id");
+        UserService service = new UserService(user);
+        return service.run();
+    }
+}
+""")
+            (service_dir / "UserService.java").write_text("""
+package com.example.service;
+
+import com.example.util.Sql;
+
+class UserService {
+    private String user;
+
+    UserService(String user) {
+        this.user = user;
+    }
+
+    String run() {
+        Sql sql = new Sql();
+        return sql.raw(user);
+    }
+}
+""")
+            (util_dir / "Sql.java").write_text("""
+package com.example.util;
+
+class Sql {
+    String raw(String sql) {
+        return sql;
+    }
+}
+""")
+
+            result = await cross_file_security_scan(
+                project_root=tmpdir,
+                max_depth=3,
+                include_diagram=False,
+                timeout_seconds=10.0,
+                max_modules=10,
+            )
+
+            assert result.success is True
+            assert any(v.cwe == "CWE-89" for v in result.vulnerabilities)
+
+    @pytest.mark.asyncio
+    async def test_java_only_project_reports_chained_constructor_receiver_flow(self):
+        """[20260310_TEST] Java-only MCP scan should surface chained constructor receivers reaching imported no-arg local sinks."""
+        from code_scalpel.mcp.server import cross_file_security_scan
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            web_dir = root / "src" / "com" / "example" / "web"
+            service_dir = root / "src" / "com" / "example" / "service"
+            util_dir = root / "src" / "com" / "example" / "util"
+            web_dir.mkdir(parents=True)
+            service_dir.mkdir(parents=True)
+            util_dir.mkdir(parents=True)
+
+            (web_dir / "UserController.java").write_text("""
+package com.example.web;
+
+import com.example.service.UserService;
+
+class UserController {
+    String handle(Request request) {
+        String user = request.getParameter("id");
+        return new UserService(user).run();
+    }
+}
+""")
+            (service_dir / "UserService.java").write_text("""
+package com.example.service;
+
+import com.example.util.Sql;
+
+class UserService {
+    private String user;
+
+    UserService(String user) {
+        this.user = user;
+    }
+
+    String run() {
+        Sql sql = new Sql();
+        return sql.raw(user);
+    }
+}
+""")
+            (util_dir / "Sql.java").write_text("""
+package com.example.util;
+
+class Sql {
+    String raw(String sql) {
+        return sql;
+    }
+}
+""")
+
+            result = await cross_file_security_scan(
+                project_root=tmpdir,
+                max_depth=3,
+                include_diagram=False,
+                timeout_seconds=10.0,
+                max_modules=10,
+            )
+
+            assert result.success is True
+            assert any(v.cwe == "CWE-89" for v in result.vulnerabilities)
+
+    @pytest.mark.asyncio
+    async def test_java_only_project_reports_field_backed_constructor_receiver_flow(
+        self,
+    ):
+        """[20260310_TEST] Java-only MCP scan should surface field-backed receivers seeded from tainted constructor calls."""
+        from code_scalpel.mcp.server import cross_file_security_scan
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            web_dir = root / "src" / "com" / "example" / "web"
+            service_dir = root / "src" / "com" / "example" / "service"
+            util_dir = root / "src" / "com" / "example" / "util"
+            web_dir.mkdir(parents=True)
+            service_dir.mkdir(parents=True)
+            util_dir.mkdir(parents=True)
+
+            (web_dir / "UserController.java").write_text("""
+package com.example.web;
+
+import com.example.service.UserService;
+
+class UserController {
+    private UserService service;
+
+    void init(Request request) {
+        String user = request.getParameter("id");
+        this.service = new UserService(user);
+    }
+
+    String run() {
+        return this.service.run();
+    }
+}
+""")
+            (service_dir / "UserService.java").write_text("""
+package com.example.service;
+
+import com.example.util.Sql;
+
+class UserService {
+    private String user;
+
+    UserService(String user) {
+        this.user = user;
+    }
+
+    String run() {
+        Sql sql = new Sql();
+        return sql.raw(user);
+    }
+}
+""")
+            (util_dir / "Sql.java").write_text("""
+package com.example.util;
+
+class Sql {
+    String raw(String sql) {
+        return sql;
+    }
+}
+""")
+
+            result = await cross_file_security_scan(
+                project_root=tmpdir,
+                max_depth=3,
+                include_diagram=False,
+                timeout_seconds=10.0,
+                max_modules=10,
+            )
+
+            assert result.success is True
+            assert any(v.cwe == "CWE-89" for v in result.vulnerabilities)
+
+    @pytest.mark.asyncio
+    async def test_java_only_project_ignores_shadowing_object_receiver_for_field_backed_sink(
+        self,
+    ):
+        """[20260310_TEST] Java-only MCP scan should ignore shadowing object receivers when the field-backed receiver stays safe."""
+        from code_scalpel.mcp.server import cross_file_security_scan
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            web_dir = root / "src" / "com" / "example" / "web"
+            service_dir = root / "src" / "com" / "example" / "service"
+            util_dir = root / "src" / "com" / "example" / "util"
+            web_dir.mkdir(parents=True)
+            service_dir.mkdir(parents=True)
+            util_dir.mkdir(parents=True)
+
+            (web_dir / "UserController.java").write_text("""
+package com.example.web;
+
+import com.example.service.UserService;
+
+class UserController {
+    private UserService service = new UserService("safe");
+
+    void init(Request request) {
+        UserService service = new UserService(request.getParameter("id"));
+    }
+
+    String run() {
+        return this.service.run();
+    }
+}
+""")
+            (service_dir / "UserService.java").write_text("""
+package com.example.service;
+
+import com.example.util.Sql;
+
+class UserService {
+    private String user;
+
+    UserService(String user) {
+        this.user = user;
+    }
+
+    String run() {
+        Sql sql = new Sql();
+        return sql.raw(user);
+    }
+}
+""")
+            (util_dir / "Sql.java").write_text("""
+package com.example.util;
+
+class Sql {
+    String raw(String sql) {
+        return sql;
+    }
+}
+""")
+
+            result = await cross_file_security_scan(
+                project_root=tmpdir,
+                max_depth=3,
+                include_diagram=False,
+                timeout_seconds=10.0,
+                max_modules=10,
+            )
+
+            assert result.success is True
+            assert not any(v.cwe == "CWE-89" for v in result.vulnerabilities)
+
+    @pytest.mark.asyncio
+    async def test_java_only_project_ignores_sanitized_chained_constructor_receiver(
+        self,
+    ):
+        """[20260310_TEST] Java-only MCP scan should ignore sanitized chained constructor receiver arguments."""
+        from code_scalpel.mcp.server import cross_file_security_scan
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            web_dir = root / "src" / "com" / "example" / "web"
+            service_dir = root / "src" / "com" / "example" / "service"
+            util_dir = root / "src" / "com" / "example" / "util"
+            web_dir.mkdir(parents=True)
+            service_dir.mkdir(parents=True)
+            util_dir.mkdir(parents=True)
+
+            (web_dir / "UserController.java").write_text("""
+package com.example.web;
+
+import com.example.service.UserService;
+
+class UserController {
+    String clean(String value) {
+        return "safe";
+    }
+
+    String handle(Request request) {
+        return new UserService(clean(request.getParameter("id"))).run();
+    }
+}
+""")
+            (service_dir / "UserService.java").write_text("""
+package com.example.service;
+
+import com.example.util.Sql;
+
+class UserService {
+    private String user;
+
+    UserService(String user) {
+        this.user = user;
+    }
+
+    String run() {
+        Sql sql = new Sql();
+        return sql.raw(user);
+    }
+}
+""")
+            (util_dir / "Sql.java").write_text("""
+package com.example.util;
+
+class Sql {
+    String raw(String sql) {
+        return sql;
+    }
+}
+""")
+
+            result = await cross_file_security_scan(
+                project_root=tmpdir,
+                max_depth=3,
+                include_diagram=False,
+                timeout_seconds=10.0,
+                max_modules=10,
+            )
+
+            assert result.success is True
+            assert not any(v.cwe == "CWE-89" for v in result.vulnerabilities)
+
+    @pytest.mark.asyncio
+    async def test_java_only_project_ignores_imported_safe_helper_in_chained_constructor_receiver(
+        self,
+    ):
+        """[20260310_TEST] Java-only MCP scan should ignore imported helpers that sanitize chained constructor receiver arguments."""
+        from code_scalpel.mcp.server import cross_file_security_scan
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            web_dir = root / "src" / "com" / "example" / "web"
+            service_dir = root / "src" / "com" / "example" / "service"
+            util_dir = root / "src" / "com" / "example" / "util"
+            db_dir = root / "src" / "com" / "example" / "db"
+            web_dir.mkdir(parents=True)
+            service_dir.mkdir(parents=True)
+            util_dir.mkdir(parents=True)
+            db_dir.mkdir(parents=True)
+
+            (web_dir / "UserController.java").write_text("""
+package com.example.web;
+
+import com.example.service.UserService;
+import com.example.util.Cleaner;
+
+class UserController {
+    String handle(Request request) {
+        return new UserService(Cleaner.clean(request.getParameter("id"))).run();
+    }
+}
+""")
+            (util_dir / "Cleaner.java").write_text("""
+package com.example.util;
+
+class Cleaner {
+    static String clean(String value) {
+        return "safe";
+    }
+}
+""")
+            (service_dir / "UserService.java").write_text("""
+package com.example.service;
+
+import com.example.db.Sql;
+
+class UserService {
+    private String user;
+
+    UserService(String user) {
+        this.user = user;
+    }
+
+    String run() {
+        Sql sql = new Sql();
+        return sql.raw(user);
+    }
+}
+""")
+            (db_dir / "Sql.java").write_text("""
+package com.example.db;
+
+class Sql {
+    String raw(String sql) {
+        return sql;
+    }
+}
+""")
+
+            result = await cross_file_security_scan(
+                project_root=tmpdir,
+                max_depth=3,
+                include_diagram=False,
+                timeout_seconds=10.0,
+                max_modules=10,
+            )
+
+            assert result.success is True
+            assert not any(v.cwe == "CWE-89" for v in result.vulnerabilities)
+
+    @pytest.mark.asyncio
+    async def test_java_only_project_reports_imported_tainted_helper_in_chained_constructor_receiver(
+        self,
+    ):
+        """[20260310_TEST] Java-only MCP scan should report imported helpers that preserve chained constructor receiver taint."""
+        from code_scalpel.mcp.server import cross_file_security_scan
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            web_dir = root / "src" / "com" / "example" / "web"
+            service_dir = root / "src" / "com" / "example" / "service"
+            util_dir = root / "src" / "com" / "example" / "util"
+            db_dir = root / "src" / "com" / "example" / "db"
+            web_dir.mkdir(parents=True)
+            service_dir.mkdir(parents=True)
+            util_dir.mkdir(parents=True)
+            db_dir.mkdir(parents=True)
+
+            (web_dir / "UserController.java").write_text("""
+package com.example.web;
+
+import com.example.service.UserService;
+import com.example.util.Cleaner;
+
+class UserController {
+    String handle(Request request) {
+        return new UserService(Cleaner.clean(request.getParameter("id"))).run();
+    }
+}
+""")
+            (util_dir / "Cleaner.java").write_text("""
+package com.example.util;
+
+class Cleaner {
+    static String clean(String value) {
+        return value;
+    }
+}
+""")
+            (service_dir / "UserService.java").write_text("""
+package com.example.service;
+
+import com.example.db.Sql;
+
+class UserService {
+    private String user;
+
+    UserService(String user) {
+        this.user = user;
+    }
+
+    String run() {
+        Sql sql = new Sql();
+        return sql.raw(user);
+    }
+}
+""")
+            (db_dir / "Sql.java").write_text("""
+package com.example.db;
+
+class Sql {
+    String raw(String sql) {
+        return sql;
+    }
+}
+""")
+
+            result = await cross_file_security_scan(
+                project_root=tmpdir,
+                max_depth=3,
+                include_diagram=False,
+                timeout_seconds=10.0,
+                max_modules=10,
+            )
+
+            assert result.success is True
+            assert any(v.cwe == "CWE-89" for v in result.vulnerabilities)
+
+    @pytest.mark.asyncio
+    async def test_java_only_project_reports_factory_created_receiver_flow(self):
+        """[20260310_TEST] Java-only MCP scan should resolve factory-created receivers to the returned object type."""
+        from code_scalpel.mcp.server import cross_file_security_scan
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            web_dir = root / "src" / "com" / "example" / "web"
+            factory_dir = root / "src" / "com" / "example" / "factory"
+            service_dir = root / "src" / "com" / "example" / "service"
+            db_dir = root / "src" / "com" / "example" / "db"
+            web_dir.mkdir(parents=True)
+            factory_dir.mkdir(parents=True)
+            service_dir.mkdir(parents=True)
+            db_dir.mkdir(parents=True)
+
+            (web_dir / "UserController.java").write_text("""
+package com.example.web;
+
+import com.example.factory.UserFactory;
+
+class UserController {
+    String handle(Request request) {
+        String user = request.getParameter("id");
+        return UserFactory.create(user).run();
+    }
+}
+""")
+            (factory_dir / "UserFactory.java").write_text("""
+package com.example.factory;
+
+import com.example.service.UserService;
+
+class UserFactory {
+    static UserService create(String user) {
+        return new UserService(user);
+    }
+}
+""")
+            (service_dir / "UserService.java").write_text("""
+package com.example.service;
+
+import com.example.db.Sql;
+
+class UserService {
+    private String user;
+
+    UserService(String user) {
+        this.user = user;
+    }
+
+    String run() {
+        Sql sql = new Sql();
+        return sql.raw(user);
+    }
+}
+""")
+            (db_dir / "Sql.java").write_text("""
+package com.example.db;
+
+class Sql {
+    String raw(String sql) {
+        return sql;
+    }
+}
+""")
+
+            result = await cross_file_security_scan(
+                project_root=tmpdir,
+                max_depth=3,
+                include_diagram=False,
+                timeout_seconds=10.0,
+                max_modules=10,
+            )
+
+            assert result.success is True
+            assert any(v.cwe == "CWE-89" for v in result.vulnerabilities)
+
+    @pytest.mark.asyncio
+    async def test_java_only_project_reports_field_backed_factory_created_receiver_flow(
+        self,
+    ):
+        """[20260310_TEST] Java-only MCP scan should resolve field-backed factory receivers to the returned object type."""
+        from code_scalpel.mcp.server import cross_file_security_scan
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            web_dir = root / "src" / "com" / "example" / "web"
+            factory_dir = root / "src" / "com" / "example" / "factory"
+            service_dir = root / "src" / "com" / "example" / "service"
+            db_dir = root / "src" / "com" / "example" / "db"
+            web_dir.mkdir(parents=True)
+            factory_dir.mkdir(parents=True)
+            service_dir.mkdir(parents=True)
+            db_dir.mkdir(parents=True)
+
+            (web_dir / "UserController.java").write_text("""
+package com.example.web;
+
+import com.example.factory.UserFactory;
+
+class UserController {
+    private UserFactory factory = new UserFactory();
+
+    String handle(Request request) {
+        String user = request.getParameter("id");
+        return this.factory.create(user).run();
+    }
+}
+""")
+            (factory_dir / "UserFactory.java").write_text("""
+package com.example.factory;
+
+import com.example.service.UserService;
+
+class UserFactory {
+    UserService create(String user) {
+        return new UserService(user);
+    }
+}
+""")
+            (service_dir / "UserService.java").write_text("""
+package com.example.service;
+
+import com.example.db.Sql;
+
+class UserService {
+    private String user;
+
+    UserService(String user) {
+        this.user = user;
+    }
+
+    String run() {
+        Sql sql = new Sql();
+        return sql.raw(user);
+    }
+}
+""")
+            (db_dir / "Sql.java").write_text("""
+package com.example.db;
+
+class Sql {
+    String raw(String sql) {
+        return sql;
+    }
+}
+""")
+
+            result = await cross_file_security_scan(
+                project_root=tmpdir,
+                max_depth=3,
+                include_diagram=False,
+                timeout_seconds=10.0,
+                max_modules=10,
+            )
+
+            assert result.success is True
+            assert any(v.cwe == "CWE-89" for v in result.vulnerabilities)
+
+    @pytest.mark.asyncio
+    async def test_java_only_project_ignores_shadowing_local_factory_for_field_backed_factory_sink(
+        self,
+    ):
+        """[20260310_TEST] Java-only MCP scan should ignore shadowing local factories when the field-backed factory stays safe."""
+        from code_scalpel.mcp.server import cross_file_security_scan
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            web_dir = root / "src" / "com" / "example" / "web"
+            factory_dir = root / "src" / "com" / "example" / "factory"
+            service_dir = root / "src" / "com" / "example" / "service"
+            db_dir = root / "src" / "com" / "example" / "db"
+            web_dir.mkdir(parents=True)
+            factory_dir.mkdir(parents=True)
+            service_dir.mkdir(parents=True)
+            db_dir.mkdir(parents=True)
+
+            (web_dir / "UserController.java").write_text("""
+package com.example.web;
+
+import com.example.factory.UserFactory;
+
+class UserController {
+    private UserFactory factory = new UserFactory("safe");
+
+    void init(Request request) {
+        UserFactory factory = new UserFactory(request.getParameter("id"));
+    }
+
+    String handle() {
+        return this.factory.create().run();
+    }
+}
+""")
+            (factory_dir / "UserFactory.java").write_text("""
+package com.example.factory;
+
+import com.example.service.UserService;
+
+class UserFactory {
+    private String user;
+
+    UserFactory(String user) {
+        this.user = user;
+    }
+
+    UserService create() {
+        return new UserService(user);
+    }
+}
+""")
+            (service_dir / "UserService.java").write_text("""
+package com.example.service;
+
+import com.example.db.Sql;
+
+class UserService {
+    private String user;
+
+    UserService(String user) {
+        this.user = user;
+    }
+
+    String run() {
+        Sql sql = new Sql();
+        return sql.raw(user);
+    }
+}
+""")
+            (db_dir / "Sql.java").write_text("""
+package com.example.db;
+
+class Sql {
+    String raw(String sql) {
+        return sql;
+    }
+}
+""")
+
+            result = await cross_file_security_scan(
+                project_root=tmpdir,
+                max_depth=3,
+                include_diagram=False,
+                timeout_seconds=10.0,
+                max_modules=10,
+            )
+
+            assert result.success is True
+            assert not any(v.cwe == "CWE-89" for v in result.vulnerabilities)
+
+    @pytest.mark.asyncio
+    async def test_java_only_project_ignores_imported_safe_factory_helper(self):
+        """[20260310_TEST] Java-only MCP scan should ignore imported factory helpers that sanitize before returning a service."""
+        from code_scalpel.mcp.server import cross_file_security_scan
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            web_dir = root / "src" / "com" / "example" / "web"
+            factory_dir = root / "src" / "com" / "example" / "factory"
+            builder_dir = root / "src" / "com" / "example" / "builder"
+            service_dir = root / "src" / "com" / "example" / "service"
+            db_dir = root / "src" / "com" / "example" / "db"
+            web_dir.mkdir(parents=True)
+            factory_dir.mkdir(parents=True)
+            builder_dir.mkdir(parents=True)
+            service_dir.mkdir(parents=True)
+            db_dir.mkdir(parents=True)
+
+            (web_dir / "UserController.java").write_text("""
+package com.example.web;
+
+import com.example.factory.UserFactory;
+
+class UserController {
+    String handle(Request request) {
+        return UserFactory.create(request.getParameter("id")).run();
+    }
+}
+""")
+            (factory_dir / "UserFactory.java").write_text("""
+package com.example.factory;
+
+import com.example.builder.ServiceBuilder;
+import com.example.service.UserService;
+
+class UserFactory {
+    static UserService create(String user) {
+        return ServiceBuilder.safe(user);
+    }
+}
+""")
+            (builder_dir / "ServiceBuilder.java").write_text("""
+package com.example.builder;
+
+import com.example.service.UserService;
+
+class ServiceBuilder {
+    static UserService safe(String user) {
+        return new UserService("safe");
+    }
+}
+""")
+            (service_dir / "UserService.java").write_text("""
+package com.example.service;
+
+import com.example.db.Sql;
+
+class UserService {
+    private String user;
+
+    UserService(String user) {
+        this.user = user;
+    }
+
+    String run() {
+        Sql sql = new Sql();
+        return sql.raw(user);
+    }
+}
+""")
+            (db_dir / "Sql.java").write_text("""
+package com.example.db;
+
+class Sql {
+    String raw(String sql) {
+        return sql;
+    }
+}
+""")
+
+            result = await cross_file_security_scan(
+                project_root=tmpdir,
+                max_depth=3,
+                include_diagram=False,
+                timeout_seconds=10.0,
+                max_modules=10,
+            )
+
+            assert result.success is True
+            assert not result.vulnerabilities
+
+    @pytest.mark.asyncio
+    async def test_java_only_project_ignores_field_backed_safe_factory_helper(self):
+        """[20260310_TEST] Java-only MCP scan should keep field-backed factory helpers safe when they sanitize before returning a service."""
+        from code_scalpel.mcp.server import cross_file_security_scan
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            web_dir = root / "src" / "com" / "example" / "web"
+            factory_dir = root / "src" / "com" / "example" / "factory"
+            service_dir = root / "src" / "com" / "example" / "service"
+            db_dir = root / "src" / "com" / "example" / "db"
+            web_dir.mkdir(parents=True)
+            factory_dir.mkdir(parents=True)
+            service_dir.mkdir(parents=True)
+            db_dir.mkdir(parents=True)
+
+            (web_dir / "UserController.java").write_text("""
+package com.example.web;
+
+import com.example.factory.UserFactory;
+
+class UserController {
+    private UserFactory factory = new UserFactory();
+
+    String handle(Request request) {
+        return this.factory.create(request.getParameter("id")).run();
+    }
+}
+""")
+            (factory_dir / "UserFactory.java").write_text("""
+package com.example.factory;
+
+import com.example.service.UserService;
+
+class UserFactory {
+    UserService create(String user) {
+        return buildSafe(user);
+    }
+
+    private UserService buildSafe(String user) {
+        return new UserService("safe");
+    }
+}
+""")
+            (service_dir / "UserService.java").write_text("""
+package com.example.service;
+
+import com.example.db.Sql;
+
+class UserService {
+    private String user;
+
+    UserService(String user) {
+        this.user = user;
+    }
+
+    String run() {
+        Sql sql = new Sql();
+        return sql.raw(user);
+    }
+}
+""")
+            (db_dir / "Sql.java").write_text("""
+package com.example.db;
+
+class Sql {
+    String raw(String sql) {
+        return sql;
+    }
+}
+""")
+
+            result = await cross_file_security_scan(
+                project_root=tmpdir,
+                max_depth=3,
+                include_diagram=False,
+                timeout_seconds=10.0,
+                max_modules=10,
+            )
+
+            assert result.success is True
+            assert not result.vulnerabilities
+
+    @pytest.mark.asyncio
+    async def test_mixed_python_java_project_reports_java_skipped_warning(self):
+        """[20260309_TEST] Mixed Python/Java projects should warn that Java files were skipped."""
+        from code_scalpel.mcp.server import cross_file_security_scan
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "safe.py").write_text("""
+def safe(x):
+    return x * 2
+""")
+            (root / "UserController.java").write_text("""
+class UserController {}
+""")
+
+            result = await cross_file_security_scan(
+                project_root=tmpdir,
+                max_depth=3,
+                include_diagram=False,
+                timeout_seconds=10.0,
+                max_modules=10,
+            )
+
+            assert result.success is True
+            assert result.files_analyzed == 1
+            assert result.warnings
+            assert any(
+                "skipped detected Java files" in warning for warning in result.warnings
+            )
+
+    @pytest.mark.asyncio
+    async def test_python_only_project_has_no_java_skip_warning(self):
+        """[20260309_TEST] Python-only projects should not emit Java-skip warnings."""
+        from code_scalpel.mcp.server import cross_file_security_scan
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "safe.py").write_text("""
+def safe(x):
+    return x * 2
+""")
+
+            result = await cross_file_security_scan(
+                project_root=tmpdir,
+                max_depth=3,
+                include_diagram=False,
+                timeout_seconds=10.0,
+                max_modules=10,
+            )
+
+            assert result.success is True
+            assert result.files_analyzed == 1
+            assert not any("Java" in warning for warning in result.warnings)
+
 
 # =============================================================================
 # END-TO-END WORKFLOW TESTS

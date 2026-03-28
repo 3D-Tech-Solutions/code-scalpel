@@ -159,6 +159,62 @@ def complex_logic(a, b, c):
         assert result.success is True
         assert result.test_count >= 1  # Should generate at least one test
 
+    def test_typescript_bounded_generation_returns_concrete_cases(self):
+        """[20260315_TEST] TypeScript generation should emit bounded-useful concrete path cases."""
+        from code_scalpel.mcp.helpers.symbolic_helpers import _generate_tests_sync
+
+        code = """
+export function classify(x: number): number {
+    if (x > 0) {
+        return 1;
+    }
+    return 0;
+}
+"""
+
+        result = _generate_tests_sync(
+            code=code,
+            framework="pytest",
+            language="typescript",
+        )
+
+        assert result.success is True
+        assert result.function_name == "classify"
+        assert result.test_count >= 2
+        assert result.total_test_cases >= 2
+        assert result.framework_used == "pytest"
+        assert "scaffold" in result.pytest_code.lower()
+        assert "invoke_typescript_case" in result.pytest_code
+        assert any("x" in case.inputs for case in result.test_cases)
+        compile(result.pytest_code, "<typescript-scaffold-pytest>", "exec")
+
+    def test_typescript_bounded_generation_honors_function_name(self):
+        """[20260315_TEST] Explicit function_name should drive bounded TS generated output."""
+        from code_scalpel.mcp.helpers.symbolic_helpers import _generate_tests_sync
+
+        code = """
+export function classify(x: number): number {
+    if (x > 0) {
+        return 1;
+    }
+    return 0;
+}
+"""
+
+        result = _generate_tests_sync(
+            code=code,
+            function_name="renameUser",
+            framework="unittest",
+            language="typescript",
+        )
+
+        assert result.success is True
+        assert result.function_name == "renameUser"
+        assert result.framework_used == "unittest"
+        assert "renameUser" in result.unittest_code
+        assert "invoke_typescript_case" in result.unittest_code
+        compile(result.unittest_code, "<typescript-scaffold-unittest>", "exec")
+
 
 class TestPytestOutputFormat:
     """Test specific pytest output format."""

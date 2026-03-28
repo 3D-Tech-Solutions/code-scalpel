@@ -205,7 +205,7 @@ DEFAULT_TOOLS: Dict[str, MCPTool] = {
     "cross_file_security_scan": MCPTool(
         name="cross_file_security_scan",
         tier="community",  # Available at all tiers, features gated
-        description="Cross-module taint tracking",
+        description="Cross-module taint tracking for Python plus a bounded Java IR subset",
         category="security",
         parameters={
             "directory": {"type": "string", "required": True},

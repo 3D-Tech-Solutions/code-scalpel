@@ -33,6 +33,7 @@ This module flags:
 
 from __future__ import annotations
 
+import ast
 import re
 from dataclasses import dataclass, field
 from enum import Enum, auto
@@ -570,6 +571,467 @@ class TypeEvaporationDetector:
 
 
 # =============================================================================
+# [20260314_FEATURE] Python Backend Type Evaporation Analyzer
+# Detects where Python route handlers lose type information received from
+# a typed TS/JS frontend (e.g. untyped params, Any annotations, dict access).
+# Scope: route-handler functions ONLY (Flask/FastAPI/Django decorators).
+# This is intentionally narrow: "TS/JS frontend → Python backend" contract only.
+# =============================================================================
+
+
+@dataclass
+class PythonTypeEvaporationFinding:
+    """A detected type evaporation pattern in a Python backend handler.
+
+    [20260314_FEATURE] Represents a location where type information from a
+    typed TS/JS contract boundary is lost or ignored in a Python handler.
+    """
+
+    pattern: str  # e.g. "UNTYPED_PARAMETER", "KWARGS_WILDCARD", "ANY_TYPE", etc.
+    location: Tuple[int, int]  # (line, col)
+    description: str
+    function_name: str
+    parameter_name: Optional[str]  # None when the finding is function-level
+    code_snippet: str
+    severity: str  # "high" | "medium" | "low"
+    cwe_id: str  # CWE-20 (Improper Input Validation) for most evaporation patterns
+    remediation: str
+    vulnerability_type: str = field(init=False)  # alias for compatibility
+    sink_location: Optional[Tuple[int, int]] = None  # alias used by outer model
+
+    def __post_init__(self) -> None:
+        # Alias for compatibility with SecurityAnalyzer result shape
+        self.vulnerability_type = f"[Backend-TypeEvaporation] {self.pattern}"
+        if self.sink_location is None:
+            self.sink_location = self.location
+
+
+# Flask / FastAPI / Django route decorator patterns (conservative whitelist)
+_ROUTE_DECORATOR_METHODS = frozenset(
+    {"route", "get", "post", "put", "delete", "patch", "head", "options",
+     "api_route", "api_view", "action"}
+)
+
+# Known framework prefixes for route decorators
+_ROUTE_DECORATOR_PREFIXES = frozenset(
+    {"app", "router", "bp", "blueprint", "api"}
+)
+
+
+def _is_route_decorator(dec: ast.expr) -> bool:
+    """Return True if *dec* is a known web-framework route decorator.
+
+    Accepts both `@app.get(...)` and `@arbitrary_name.get(...)` patterns so that
+    blueprints / routers with custom variable names are included.
+    """
+    # @name(...)  — bare call, e.g. @api_view(['GET'])
+    if isinstance(dec, ast.Call):
+        func = dec.func
+    else:
+        func = dec
+
+    if isinstance(func, ast.Attribute):
+        method = func.attr
+        # Accept known methods on any object (covers @users_bp.post, @v1_router.get, etc.)
+        if method in _ROUTE_DECORATOR_METHODS:
+            return True
+        # Also accept known prefix + any attribute (e.g. @app.something_custom)
+        if isinstance(func.value, ast.Name) and func.value.id in _ROUTE_DECORATOR_PREFIXES:
+            return True
+    elif isinstance(func, ast.Name) and func.id in _ROUTE_DECORATOR_METHODS:
+        # @api_view / @action / @route used bare
+        return True
+
+    return False
+
+
+class PythonBackendAnalyzer:
+    """Detect type evaporation patterns in Python backend route handlers.
+
+    [20260314_FEATURE] Uses Python's ``ast`` module to inspect route-handler
+    function signatures and bodies for patterns where type information
+    received from a typed TS/JS frontend is dropped or ignored.
+
+    Only route handler functions (decorated with web-framework route decorators)
+    are analysed. Non-route code is out of scope to avoid overclaiming beyond the
+    "TS/JS frontend → Python backend" contract.
+    """
+
+    # Fully-qualified names that represent fully-typed Pydantic/dataclass params
+    # (these do NOT constitute an evaporation finding).
+    _TYPED_MODEL_BASES: frozenset[str] = frozenset(
+        {"BaseModel", "TypedDict", "dataclass", "NamedTuple"}
+    )
+
+    def analyze(
+        self, python_code: str, filename: str = "backend.py"
+    ) -> list[PythonTypeEvaporationFinding]:
+        """Analyse *python_code* for type evaporation in route handlers.
+
+        Falls back to regex-based detection if the code cannot be parsed by
+        ``ast.parse`` (mirrors the TypeScript detector's fallback pattern).
+
+        Args:
+            python_code: Python source code string.
+            filename: Display name used in finding descriptions.
+
+        Returns:
+            List of :class:`PythonTypeEvaporationFinding` instances.
+        """
+        try:
+            tree = ast.parse(python_code, filename=filename)
+        except SyntaxError:
+            return self._analyze_with_regex(python_code, filename)
+
+        findings: list[PythonTypeEvaporationFinding] = []
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if self._is_route_handler(node):
+                    findings.extend(self._check_function(node, python_code))
+        return findings
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _is_route_handler(
+        self, func: ast.FunctionDef | ast.AsyncFunctionDef
+    ) -> bool:
+        """Return True if the function has at least one route decorator."""
+        return any(_is_route_decorator(dec) for dec in func.decorator_list)
+
+    def _check_function(
+        self,
+        func: ast.FunctionDef | ast.AsyncFunctionDef,
+        source: str,
+    ) -> list[PythonTypeEvaporationFinding]:
+        findings: list[PythonTypeEvaporationFinding] = []
+        findings.extend(self._check_untyped_parameters(func, source))
+        findings.extend(self._check_any_annotations(func, source))
+        findings.extend(self._check_variadic_wildcards(func, source))
+        findings.extend(self._check_request_data_access(func, source))
+        findings.extend(self._check_missing_return_type(func, source))
+        return findings
+
+    def _annotation_name(self, ann: ast.expr | None) -> Optional[str]:
+        """Extract a simple string representation of an annotation node."""
+        if ann is None:
+            return None
+        if isinstance(ann, ast.Name):
+            return ann.id
+        if isinstance(ann, ast.Attribute):
+            return ann.attr
+        if isinstance(ann, ast.Subscript):
+            return self._annotation_name(ann.value)
+        return None
+
+    def _snippet(self, source: str, lineno: int, n: int = 1) -> str:
+        """Return *n* lines from *source* starting at 1-based *lineno*."""
+        lines = source.splitlines()
+        start = max(0, lineno - 1)
+        end = min(len(lines), start + n)
+        return "\n".join(lines[start:end])
+
+    def _check_untyped_parameters(
+        self,
+        func: ast.FunctionDef | ast.AsyncFunctionDef,
+        source: str,
+    ) -> list[PythonTypeEvaporationFinding]:
+        """Flag route-handler parameters that have no type annotation."""
+        findings: list[PythonTypeEvaporationFinding] = []
+        args = func.args
+        all_args = args.args + args.posonlyargs + args.kwonlyargs
+
+        for arg in all_args:
+            if arg.arg in ("self", "cls"):
+                continue
+            if arg.annotation is None:
+                findings.append(
+                    PythonTypeEvaporationFinding(
+                        pattern="UNTYPED_PARAMETER",
+                        location=(arg.lineno, arg.col_offset),
+                        description=(
+                            f"Parameter '{arg.arg}' in route handler "
+                            f"'{func.name}' has no type annotation — "
+                            "type contract from TS/JS frontend is silently dropped."
+                        ),
+                        function_name=func.name,
+                        parameter_name=arg.arg,
+                        code_snippet=self._snippet(source, arg.lineno),
+                        severity="high",
+                        cwe_id="CWE-20",
+                        remediation=(
+                            f"Annotate '{arg.arg}' with a Pydantic model or explicit "
+                            "type and add validation before use."
+                        ),
+                    )
+                )
+        return findings
+
+    def _check_any_annotations(
+        self,
+        func: ast.FunctionDef | ast.AsyncFunctionDef,
+        source: str,
+    ) -> list[PythonTypeEvaporationFinding]:
+        """Flag parameters annotated as ``typing.Any`` or bare ``Any``."""
+        findings: list[PythonTypeEvaporationFinding] = []
+        args = func.args
+        all_args = args.args + args.posonlyargs + args.kwonlyargs
+
+        for arg in all_args:
+            if arg.arg in ("self", "cls") or arg.annotation is None:
+                continue
+            ann_name = self._annotation_name(arg.annotation)
+            if ann_name == "Any":
+                findings.append(
+                    PythonTypeEvaporationFinding(
+                        pattern="ANY_TYPE",
+                        location=(arg.lineno, arg.col_offset),
+                        description=(
+                            f"Parameter '{arg.arg}' in '{func.name}' is annotated as "
+                            "`Any` — the TS/JS type contract is accepted without "
+                            "validation."
+                        ),
+                        function_name=func.name,
+                        parameter_name=arg.arg,
+                        code_snippet=self._snippet(source, arg.lineno),
+                        severity="high",
+                        cwe_id="CWE-20",
+                        remediation=(
+                            f"Replace `Any` annotation for '{arg.arg}' with a "
+                            "Pydantic model or explicit type and add validation."
+                        ),
+                    )
+                )
+        return findings
+
+    def _check_variadic_wildcards(
+        self,
+        func: ast.FunctionDef | ast.AsyncFunctionDef,
+        source: str,
+    ) -> list[PythonTypeEvaporationFinding]:
+        """Flag ``*args`` / ``**kwargs`` parameters in route handlers."""
+        findings: list[PythonTypeEvaporationFinding] = []
+        args = func.args
+
+        if args.vararg is not None:
+            a = args.vararg
+            findings.append(
+                PythonTypeEvaporationFinding(
+                    pattern="ARGS_WILDCARD",
+                    location=(a.lineno, a.col_offset),
+                    description=(
+                        f"Route handler '{func.name}' accepts *{a.arg} — "
+                        "positional arguments from the frontend are not typed or validated."
+                    ),
+                    function_name=func.name,
+                    parameter_name=f"*{a.arg}",
+                    code_snippet=self._snippet(source, a.lineno),
+                    severity="medium",
+                    cwe_id="CWE-20",
+                    remediation=(
+                        "Replace *args with an explicit typed Pydantic model parameter."
+                    ),
+                )
+            )
+
+        if args.kwarg is not None:
+            k = args.kwarg
+            findings.append(
+                PythonTypeEvaporationFinding(
+                    pattern="KWARGS_WILDCARD",
+                    location=(k.lineno, k.col_offset),
+                    description=(
+                        f"Route handler '{func.name}' accepts **{k.arg} — "
+                        "all keyword arguments from the frontend are absorbed without "
+                        "type checking."
+                    ),
+                    function_name=func.name,
+                    parameter_name=f"**{k.arg}",
+                    code_snippet=self._snippet(source, k.lineno),
+                    severity="medium",
+                    cwe_id="CWE-20",
+                    remediation=(
+                        "Replace **kwargs with an explicit typed Pydantic model "
+                        "parameter."
+                    ),
+                )
+            )
+        return findings
+
+    def _check_request_data_access(
+        self,
+        func: ast.FunctionDef | ast.AsyncFunctionDef,
+        source: str,
+    ) -> list[PythonTypeEvaporationFinding]:
+        """Flag dict-style access on ``request.get_json()`` / ``request.json`` result.
+
+        Patterns like ``data["key"]`` or ``data.get("key")`` on a variable that
+        is assigned from a JSON request represent type evaporation at the access
+        level: no schema or model is enforcing the expected shape.
+        """
+        findings: list[PythonTypeEvaporationFinding] = []
+
+        # Collect names that receive request JSON data
+        json_var_names: set[str] = set()
+
+        for node in ast.walk(func):
+            if isinstance(node, ast.Assign):
+                # data = request.get_json()  or  data = request.json
+                if (
+                    isinstance(node.value, ast.Call)
+                    and isinstance(node.value.func, ast.Attribute)
+                    and node.value.func.attr == "get_json"
+                ):
+                    for target in node.targets:
+                        if isinstance(target, ast.Name):
+                            json_var_names.add(target.id)
+                elif (
+                    isinstance(node.value, ast.Attribute)
+                    and node.value.attr in ("json", "data", "form")
+                    and isinstance(node.value.value, ast.Name)
+                    and node.value.value.id == "request"
+                ):
+                    for target in node.targets:
+                        if isinstance(target, ast.Name):
+                            json_var_names.add(target.id)
+
+        if not json_var_names:
+            return findings
+
+        # Detect dict-style subscript access on those variables
+        for node in ast.walk(func):
+            if isinstance(node, ast.Subscript):
+                if (
+                    isinstance(node.value, ast.Name)
+                    and node.value.id in json_var_names
+                ):
+                    lineno = getattr(node, "lineno", 0)
+                    col = getattr(node, "col_offset", 0)
+                    snippet = self._snippet(source, lineno)
+                    key_repr = ""
+                    sl = node.slice
+                    if isinstance(sl, ast.Constant):
+                        key_repr = repr(sl.value)
+                    elif isinstance(sl, ast.Name):
+                        key_repr = sl.id
+                    findings.append(
+                        PythonTypeEvaporationFinding(
+                            pattern="DICT_ACCESS_WITHOUT_VALIDATION",
+                            location=(lineno, col),
+                            description=(
+                                f"Unvalidated dict access on request JSON in "
+                                f"'{func.name}': `{node.value.id}[{key_repr}]` — "
+                                "the TS/JS type contract is not enforced at runtime."
+                            ),
+                            function_name=func.name,
+                            parameter_name=None,
+                            code_snippet=snippet,
+                            severity="high",
+                            cwe_id="CWE-20",
+                            remediation=(
+                                "Replace dict subscript access with a Pydantic model "
+                                "or explicit schema validation (e.g. "
+                                "`model = MyModel(**request.get_json())`)."
+                            ),
+                        )
+                    )
+        return findings
+
+    def _check_missing_return_type(
+        self,
+        func: ast.FunctionDef | ast.AsyncFunctionDef,
+        source: str,
+    ) -> list[PythonTypeEvaporationFinding]:
+        """Flag route handlers with no return type annotation."""
+        if func.returns is None:
+            return [
+                PythonTypeEvaporationFinding(
+                    pattern="UNTYPED_RETURN",
+                    location=(func.lineno, func.col_offset),
+                    description=(
+                        f"Route handler '{func.name}' has no return type annotation — "
+                        "the response shape is opaque to TS/JS callers relying on "
+                        "typed API contracts."
+                    ),
+                    function_name=func.name,
+                    parameter_name=None,
+                    code_snippet=self._snippet(source, func.lineno),
+                    severity="low",
+                    cwe_id="CWE-20",
+                    remediation=(
+                        "Add a return type annotation (e.g. `-> MyResponseModel` or "
+                        "`-> dict`) so the response contract is explicit."
+                    ),
+                )
+            ]
+        return []
+
+    def _analyze_with_regex(
+        self, python_code: str, filename: str
+    ) -> list[PythonTypeEvaporationFinding]:
+        """Regex-based fallback when ``ast.parse`` fails (e.g. partial code).
+
+        Detects a minimal set of evaporation signals via line-level patterns.
+        """
+        findings: list[PythonTypeEvaporationFinding] = []
+        lines = python_code.splitlines()
+        in_route: bool = False
+        func_name: str = ""
+        route_dec_pattern = re.compile(
+            r"@\w+\.(route|get|post|put|delete|patch|head|options|api_route)"
+        )
+        func_def_pattern = re.compile(r"^(?:async\s+)?def\s+(\w+)\s*\(([^)]*)\)\s*:")
+        dict_access_pattern = re.compile(
+            r"\b(\w+)\s*\[\s*['\"](\w+)['\"]\s*\]"
+        )
+
+        for i, line in enumerate(lines, 1):
+            if route_dec_pattern.search(line):
+                in_route = True
+                continue
+
+            if in_route:
+                m = func_def_pattern.match(line.lstrip())
+                if m:
+                    func_name = m.group(1)
+                    params_str = m.group(2)
+                    # Flag params with no type annotation
+                    for param in params_str.split(","):
+                        param = param.strip().lstrip("*")
+                        if param and ":" not in param and "=" not in param:
+                            param = param.split("=")[0].strip()
+                            if param and param not in ("self", "cls"):
+                                findings.append(
+                                    PythonTypeEvaporationFinding(
+                                        pattern="UNTYPED_PARAMETER",
+                                        location=(i, 0),
+                                        description=(
+                                            f"Parameter '{param}' in route handler "
+                                            f"'{func_name}' has no type annotation."
+                                        ),
+                                        function_name=func_name,
+                                        parameter_name=param,
+                                        code_snippet=line.strip()[:120],
+                                        severity="high",
+                                        cwe_id="CWE-20",
+                                        remediation=(
+                                            f"Annotate '{param}' with an explicit type."
+                                        ),
+                                    )
+                                )
+                    in_route = False
+                    continue
+                in_route = False
+
+            # Dict access pattern anywhere (best-effort in fallback mode)
+            if func_name and dict_access_pattern.search(line):
+                pass  # skip: without AST we can't be sure this is on json data
+
+        return findings
+
+
+# =============================================================================
 # Cross-File Type Evaporation Analysis
 # =============================================================================
 
@@ -631,21 +1093,41 @@ def analyze_type_evaporation_cross_file(
     detector = TypeEvaporationDetector()
     frontend_result = detector.analyze(typescript_code, ts_filename)
 
-    # Analyze backend
+    # Analyze backend - generic security analysis (SQL injection, XSS, etc.)
     analyzer = SecurityAnalyzer()
     backend_result = analyzer.analyze(python_code)
 
-    # Extract Python routes
+    # [20260314_FEATURE] Python-specific type evaporation detection
+    py_evap_analyzer = PythonBackendAnalyzer()
+    py_evap_findings = py_evap_analyzer.analyze(python_code, py_filename)
+
+    # Build map: function_name -> [findings] for fast lookup during endpoint matching
+    _py_func_findings: Dict[str, List[PythonTypeEvaporationFinding]] = {}
+    for _pf in py_evap_findings:
+        _py_func_findings.setdefault(_pf.function_name, []).append(_pf)
+
+    # Extract Python routes (1-based line numbers)
     py_routes: Dict[str, int] = {}
     # Support Flask/FastAPI blueprints/routers (e.g., @bp.route, @router.get, @app.post)
     route_pattern = re.compile(
         r'@\w+\.(route|get|post|put|delete|patch)\s*\(\s*["\']([^"\']+)["\']'
     )
-    for i, line in enumerate(python_code.splitlines(), 1):
+    py_source_lines = python_code.splitlines()
+    for i, line in enumerate(py_source_lines, 1):
         match = route_pattern.search(line)
         if match:
             route_path = match.group(2)
             py_routes[route_path] = i
+
+    # [20260314_FEATURE] Map route path -> handler function name (scan for def after decorator)
+    _route_handler_names: Dict[str, str] = {}
+    for route_path, deco_line in py_routes.items():
+        for idx in range(deco_line - 1, min(deco_line + 4, len(py_source_lines))):
+            stripped = py_source_lines[idx].strip()
+            m = re.match(r"def\s+(\w+)\s*\(", stripped)
+            if m:
+                _route_handler_names[route_path] = m.group(1)
+                break
 
     # Match endpoints
     matched_endpoints: List[Tuple[str, int, int]] = []
@@ -706,9 +1188,29 @@ def analyze_type_evaporation_cross_file(
                     )
                 )
 
+        # [20260314_FEATURE] Generate cross-file issues from Python handler type evaporation
+        handler_name = _route_handler_names.get(endpoint)
+        if handler_name and handler_name in _py_func_findings:
+            for py_finding in _py_func_findings[handler_name]:
+                cross_file_issues.append(
+                    TypeEvaporationVulnerability(
+                        risk_type=TypeEvaporationRisk.CROSS_FILE_TYPE_TRUST,
+                        location=(ts_line, 0),
+                        description=(
+                            f"Python handler '{handler_name}' at {endpoint} has "
+                            f"{py_finding.pattern}: {py_finding.description}"
+                        ),
+                        code_snippet=py_finding.code_snippet,
+                        confidence=0.85,
+                        remediation=py_finding.remediation,
+                        related_type=py_finding.parameter_name or handler_name,
+                        endpoint=endpoint,
+                    )
+                )
+
     return CrossFileTypeEvaporationResult(
         frontend_result=frontend_result,
-        backend_vulnerabilities=backend_result.vulnerabilities,
+        backend_vulnerabilities=list(backend_result.vulnerabilities) + py_evap_findings,
         matched_endpoints=matched_endpoints,
         cross_file_issues=cross_file_issues,
     )

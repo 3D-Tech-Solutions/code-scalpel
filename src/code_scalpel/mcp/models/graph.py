@@ -871,6 +871,10 @@ class CrossFileSecurityResult(BaseModel):
     dangerous_sinks: list[str] = Field(
         default_factory=list, description="Functions containing dangerous sinks"
     )
+    warnings: list[str] = Field(
+        default_factory=list,
+        description="Non-fatal warnings about unsupported or skipped analysis paths",
+    )
 
     # [20251226_FEATURE] Tier-aware optional outputs for Pro/Enterprise
     framework_contexts: list[dict[str, Any]] | None = Field(

@@ -95,6 +95,24 @@ class TestDockerDetection:
 class TestPathResolution:
     """Test path resolution strategies."""
 
+    def test_parse_windows_path_with_leading_slash(self):
+        """Malformed '/C:/...' paths should still parse as Windows drive paths."""
+        resolver = PathResolver()
+
+        assert resolver._parse_windows_path("/K:/backup/project/file.py") == (
+            "k",
+            "backup/project/file.py",
+        )
+
+    def test_translate_windows_path_with_leading_slash(self):
+        """Malformed '/C:/...' paths should translate to WSL candidates."""
+        resolver = PathResolver(workspace_roots=["/workspace"])
+
+        candidates = resolver._translate_windows_path("/K:/backup/project/file.py")
+
+        assert "/mnt/k/backup/project/file.py" in candidates
+        assert "/k/backup/project/file.py" in candidates
+
     def test_absolute_path_exists(self, tmp_path):
         """Test resolution of existing absolute path."""
         test_file = tmp_path / "test.py"

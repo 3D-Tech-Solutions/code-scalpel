@@ -19,7 +19,11 @@ sys.path.insert(
     0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../src"))
 )
 
-from code_scalpel.surgery.unified_extractor import UnifiedExtractor
+from code_scalpel.surgery.unified_extractor import (
+    Language,
+    UnifiedExtractor,
+    detect_language,
+)
 
 
 class TestPythonLanguageSupport:
@@ -100,9 +104,12 @@ class StringUtils:
                 result = extractor.extract("method", "DataProcessor.process")
 
                 assert result.success, f"Extraction failed: {result.error}"
-                assert "def process" in result.code, "Method not extracted"
-                assert "data.strip()" in result.code, "Method body not extracted"
-                # Note: Method extraction may or may not include class context
+                # [20260309_TEST] Lock Python method extraction to the actual slice and bounds.
+                assert result.start_line == 2
+                assert result.end_line == 3
+                assert (
+                    result.code == "def process(self, data):\n    return data.strip()"
+                )
             finally:
                 os.unlink(f.name)
 
@@ -129,13 +136,12 @@ function farewell(name) {
                 result = extractor.extract("function", "greet")
 
                 assert result.success, f"Extraction failed: {result.error}"
-                assert (
-                    "function greet" in result.code
-                ), "Function definition not extracted"
-                assert "Hello" in result.code, "Function body not extracted"
-                assert (
-                    "farewell" not in result.code
-                ), "Other function incorrectly included"
+                # [20260309_TEST] Assert the exact JavaScript slice instead of loose substring checks.
+                assert result.start_line == 1
+                assert result.end_line == 3
+                assert result.code == """function greet(name) {
+    return `Hello, ${name}!`;
+}"""
             finally:
                 os.unlink(f.name)
 
@@ -166,13 +172,15 @@ class StringUtils {
                 result = extractor.extract("class", "Calculator")
 
                 assert result.success, f"Extraction failed: {result.error}"
+                # [20260309_TEST] Verify the class extraction boundaries and full emitted class body.
+                assert result.start_line == 1
+                assert result.end_line == 9
+                assert result.code.startswith("class Calculator {\n")
+                assert "    add(a, b) {\n        return a + b;\n    }" in result.code
                 assert (
-                    "class Calculator" in result.code
-                ), "Class definition not extracted"
-                assert "add" in result.code, "Methods not extracted"
-                assert (
-                    "StringUtils" not in result.code
-                ), "Other class incorrectly included"
+                    "    subtract(a, b) {\n        return a - b;\n    }" in result.code
+                )
+                assert "StringUtils" not in result.code
             finally:
                 os.unlink(f.name)
 
@@ -197,8 +205,12 @@ class StringUtils {
                 result = extractor.extract("method", "DataProcessor.process")
 
                 assert result.success, f"Extraction failed: {result.error}"
-                assert "process" in result.code, "Method not extracted"
-                assert "trim()" in result.code, "Method body not extracted"
+                # [20260309_TEST] Verify exact JavaScript method extraction including indentation.
+                assert result.start_line == 2
+                assert result.end_line == 4
+                assert result.code == """    process(data) {
+        return data.trim();
+    }"""
             finally:
                 os.unlink(f.name)
 
@@ -225,13 +237,67 @@ function farewell(name: string): string {
                 result = extractor.extract("function", "greet")
 
                 assert result.success, f"Extraction failed: {result.error}"
-                assert (
-                    "function greet" in result.code
-                ), "Function definition not extracted"
-                assert "string" in result.code, "Type annotations not preserved"
-                assert (
-                    "farewell" not in result.code
-                ), "Other function incorrectly included"
+                # [20260309_TEST] Assert the exact TypeScript function slice and preserved types.
+                assert result.start_line == 1
+                assert result.end_line == 3
+                assert result.code == """function greet(name: string): string {
+    return `Hello, ${name}!`;
+}"""
+            finally:
+                os.unlink(f.name)
+
+
+class TestUnifiedDiscoverySupport:
+    """Symbol and import discovery should match unified extraction support."""
+
+    def test_rust_extension_detection(self):
+        """Rust files should be detected from the .rs extension."""
+        assert detect_language(file_path="main.rs") == Language.RUST
+
+    def test_javascript_symbol_and_import_discovery(self):
+        """IR-backed JS files should expose symbols and imports via the unified API."""
+        js_code = """import thing from './thing';
+import { helper } from './helper';
+
+function greet(name) {
+    return helper(thing(name));
+}
+
+class Widget {
+    render(name) {
+        return greet(name);
+    }
+}
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".js", delete=False) as f:
+            f.write(js_code)
+            f.flush()
+
+            try:
+                extractor = UnifiedExtractor.from_file(f.name)
+
+                symbols = extractor.list_symbols()
+                assert [(s.symbol_type, s.qualified_name) for s in symbols] == [
+                    ("function", "greet"),
+                    ("class", "Widget"),
+                    ("method", "Widget.render"),
+                ]
+
+                imports = extractor.get_imports()
+                assert [
+                    (imp.module, imp.names, imp.alias, imp.line_number)
+                    for imp in imports
+                ] == [
+                    ("./thing", ["thing"], None, 1),
+                    ("./helper", ["helper"], None, 2),
+                ]
+
+                summary = extractor.get_summary()
+                assert summary.language == "javascript"
+                assert summary.num_functions == 1
+                assert summary.num_classes == 1
+                assert summary.num_methods == 1
+                assert summary.num_imports == 2
             finally:
                 os.unlink(f.name)
 
@@ -298,10 +364,14 @@ interface Product {
                 )  # Interfaces often treated as classes
 
                 assert result.success, f"Extraction failed: {result.error}"
-                assert "User" in result.code, "Interface not extracted"
-                assert (
-                    "Product" not in result.code
-                ), "Other interface incorrectly included"
+                # [20260309_TEST] Lock interface extraction to the current TS normalizer output.
+                assert result.start_line == 1
+                assert result.end_line == 5
+                assert result.code == """interface User {
+    name: string;
+    age: number;
+    email?: string;
+}"""
             finally:
                 os.unlink(f.name)
 
@@ -330,10 +400,12 @@ class TestJavaLanguageSupport:
                 result = extractor.extract("method", "Calculator.add")
 
                 assert result.success, f"Extraction failed: {result.error}"
-                assert "add" in result.code, "Method not extracted"
-                assert (
-                    "int a" in result.code or "a + b" in result.code
-                ), "Method signature/body not extracted"
+                # [20260309_TEST] Assert the exact Java method slice rather than partial signature checks.
+                assert result.start_line == 2
+                assert result.end_line == 4
+                assert result.code == """    public int add(int a, int b) {
+        return a + b;
+    }"""
             finally:
                 os.unlink(f.name)
 
@@ -393,8 +465,13 @@ public class StringUtils {
                 result = extractor.extract("method", "Service.toString")
 
                 assert result.success, f"Extraction failed: {result.error}"
-                assert "@Override" in result.code, "Annotation not preserved"
-                assert "toString" in result.code, "Method not extracted"
+                # [20260309_TEST] Preserve the annotation-bearing Java method exactly as emitted.
+                assert result.start_line == 2
+                assert result.end_line == 5
+                assert result.code == """    @Override
+    public String toString() {
+        return \"Service\";
+    }"""
             finally:
                 os.unlink(f.name)
 
@@ -419,8 +496,11 @@ public class StringUtils {
                 result = extractor.extract("method", "MathUtils.max")
 
                 assert result.success, f"Extraction failed: {result.error}"
-                assert "static" in result.code, "Static modifier not preserved"
-                assert "max" in result.code, "Method not extracted"
-                assert "min" not in result.code, "Other method incorrectly included"
+                # [20260309_TEST] Keep the static Java method assertion concrete and exclusive.
+                assert result.start_line == 2
+                assert result.end_line == 4
+                assert result.code == """    public static int max(int a, int b) {
+        return a > b ? a : b;
+    }"""
             finally:
                 os.unlink(f.name)

@@ -106,16 +106,35 @@ class TestAnalyzeCodeCommunityTier:
         result = _analyze_code_sync(_javascript_sample(), language="javascript")
         assert result.success
         assert result.language_detected == "javascript"
+        # [20260309_TEST] Verify JavaScript parsing extracts concrete symbols and metrics.
+        assert "foo" in result.functions
+        cls = next(c for c in result.class_details if c.name == "Bar")
+        assert "method" in cls.methods
+        assert "./util.js" in result.imports
+        assert result.complexity == 1
 
     def test_ts_parsing(self):
         result = _analyze_code_sync(_typescript_sample(), language="typescript")
         assert result.success
         assert result.language_detected == "typescript"
+        # [20260309_TEST] Verify TypeScript parsing extracts concrete symbols and metrics.
+        assert "foo" in result.functions
+        cls = next(c for c in result.class_details if c.name == "Bar")
+        assert "method" in cls.methods
+        assert "./util" in result.imports
+        assert result.complexity == 1
 
     def test_java_parsing(self):
         result = _analyze_code_sync(_java_sample(), language="java")
         assert result.success
         assert result.language_detected == "java"
+        # [20260309_TEST] Verify Java parsing extracts concrete symbols and metrics.
+        assert "Foo" in result.classes
+        assert "add" in result.functions
+        assert any(
+            import_name.startswith("java.util") for import_name in result.imports
+        )
+        assert result.complexity >= 1
 
     def test_function_class_and_method_extraction(self):
         result = _analyze_code_sync(_python_sample(), language="python")

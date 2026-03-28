@@ -18,11 +18,12 @@ from code_scalpel.mcp.oracle_middleware import (
     SymbolStrategy,
     PathStrategy,
 )
+from code_scalpel.mcp.path_resolver import resolve_path
 from code_scalpel import __version__ as _pkg_version
 
 
 @mcp.tool(
-    description="Crawl a directory and return a file inventory with complexity metrics and security warnings."
+    description="Crawl a directory and return a file inventory with deep Python analysis and summary-level slices for other supported source languages."
 )
 @with_oracle_resilience(tool_id="crawl_project", strategy=PathStrategy)
 async def crawl_project(
@@ -35,12 +36,18 @@ async def crawl_project(
     include_related: list[str] | None = None,
     ctx: Context | None = None,
 ) -> ToolResponseEnvelope:
-    """Crawl a project directory and analyze Python files.
+    """Crawl a project directory and analyze supported source files.
 
     **Tier Behavior:**
     - Community: Limited to 500 files, basic file tree indexing with language breakdown and entrypoint detection
     - Pro: Unlimited files/depth, parallel processing, incremental crawling, framework detection, dependency mapping, hotspot identification
     - Enterprise: Unlimited files/depth/repos, distributed crawling, historical trends, custom rules, compliance scanning, monorepo support
+
+    [20260315_DOCS] Python remains the deep semantic path for crawl_project.
+    JavaScript, TypeScript, Java, and the other shipped source extensions are
+    currently summary-oriented slices: file discovery, language breakdown,
+    imports, entrypoint hints, and cheap complexity heuristics without claiming
+    rich function/class extraction parity.
 
     **Tier Capabilities:**
     - Community: Full file tree indexing, language breakdown, gitignore respect, basic statistics, entrypoint detection (max 500 files, 10 depth)
@@ -82,6 +89,39 @@ async def crawl_project(
     """
     started = time.perf_counter()
     try:
+        # [20260311_BUGFIX] Validate crawl request shape before helper/result-model handling.
+        if complexity_threshold < 1:
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            tier = _get_current_tier()
+            return make_envelope(
+                data=None,
+                tool_id="crawl_project",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=duration_ms,
+                error=ToolError(
+                    error="'complexity_threshold' must be at least 1.",
+                    error_code="invalid_argument",
+                    error_details={"complexity_threshold": complexity_threshold},
+                ),
+            )
+        if pattern_type not in {"regex", "glob"}:
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            tier = _get_current_tier()
+            return make_envelope(
+                data=None,
+                tool_id="crawl_project",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=duration_ms,
+                error=ToolError(
+                    error="Invalid pattern_type. Use 'regex' or 'glob'.",
+                    error_code="invalid_argument",
+                    error_details={"pattern_type": pattern_type},
+                ),
+            )
+        if root_path is not None:
+            root_path = resolve_path(root_path)
         result = await _crawl_project(
             root_path=root_path,
             exclude_dirs=exclude_dirs,
@@ -101,6 +141,21 @@ async def crawl_project(
             tier=tier,
             duration_ms=duration_ms,
         )
+    except FileNotFoundError as exc:
+        duration_ms = int((time.perf_counter() - started) * 1000)
+        tier = _get_current_tier()
+        return make_envelope(
+            data=None,
+            tool_id="crawl_project",
+            tool_version=_pkg_version,
+            tier=tier,
+            duration_ms=duration_ms,
+            error=ToolError(
+                error=str(exc),
+                error_code="correction_needed",
+                error_details={"hint": str(exc)},
+            ),
+        )
     except Exception as exc:
         duration_ms = int((time.perf_counter() - started) * 1000)
         tier = _get_current_tier()
@@ -115,12 +170,20 @@ async def crawl_project(
         )
 
 
+# [20260314_DOCS] Document the current polyglot get_file_context slice so the
+# public tool description matches the tested usefulness contract.
 @mcp.tool(
-    description="Get a file overview (functions, classes, imports, summary) without reading the full content."
+    description="Get a file overview (functions, classes, imports, summary) without reading the full content, with current runtime-backed slices across all 13 shipped source languages."
 )
 @with_oracle_resilience(tool_id="get_file_context", strategy=PathStrategy)
 async def get_file_context(file_path: str) -> ToolResponseEnvelope:
     """Get a file overview without reading full content.
+
+    [20260314_DOCS] The current public usefulness slice now spans all 13 shipped
+    source languages. Python remains the deepest path, while JavaScript,
+    TypeScript, Java, C, C++, C#, Go, Kotlin, PHP, Ruby, Swift, and Rust are
+    currently documented as bounded-useful public slices backed by explicit
+    contract coverage.
 
     **Tier Behavior:**
     - Community: Limited to 500 lines of context, basic file structure analysis
@@ -179,6 +242,8 @@ async def get_file_context(file_path: str) -> ToolResponseEnvelope:
     """
     started = time.perf_counter()
     try:
+        # [20260311_BUGFIX] Normalize file paths here so malformed Windows/WSL paths become correction_needed.
+        file_path = resolve_path(file_path)
         result = await _get_file_context(file_path)
         duration_ms = int((time.perf_counter() - started) * 1000)
         tier = _get_current_tier()
@@ -188,6 +253,21 @@ async def get_file_context(file_path: str) -> ToolResponseEnvelope:
             tool_version=_pkg_version,
             tier=tier,
             duration_ms=duration_ms,
+        )
+    except FileNotFoundError as exc:
+        duration_ms = int((time.perf_counter() - started) * 1000)
+        tier = _get_current_tier()
+        return make_envelope(
+            data=None,
+            tool_id="get_file_context",
+            tool_version=_pkg_version,
+            tier=tier,
+            duration_ms=duration_ms,
+            error=ToolError(
+                error=str(exc),
+                error_code="correction_needed",
+                error_details={"hint": str(exc)},
+            ),
         )
     except Exception as exc:
         duration_ms = int((time.perf_counter() - started) * 1000)
@@ -276,6 +356,40 @@ async def get_symbol_references(
     """
     started = time.perf_counter()
     try:
+        # [20260311_BUGFIX] Validate symbol lookup shape before helper/result-model handling.
+        if not symbol_name.strip():
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            tier = _get_current_tier()
+            return make_envelope(
+                data=None,
+                tool_id="get_symbol_references",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=duration_ms,
+                error=ToolError(
+                    error="Parameter 'symbol_name' cannot be empty.",
+                    error_code="invalid_argument",
+                    error_details={"symbol_name": symbol_name},
+                ),
+            )
+        if project_root is not None:
+            try:
+                project_root = resolve_path(project_root)
+            except FileNotFoundError as exc:
+                duration_ms = int((time.perf_counter() - started) * 1000)
+                tier = _get_current_tier()
+                return make_envelope(
+                    data=None,
+                    tool_id="get_symbol_references",
+                    tool_version=_pkg_version,
+                    tier=tier,
+                    duration_ms=duration_ms,
+                    error=ToolError(
+                        error=str(exc),
+                        error_code="correction_needed",
+                        error_details={"hint": str(exc)},
+                    ),
+                )
         result = await _get_symbol_references(
             symbol_name,
             project_root=project_root,

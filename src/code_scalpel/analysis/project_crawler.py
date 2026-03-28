@@ -682,10 +682,10 @@ class ProjectCrawler:
 
     def _analyze_file(self, file_path: str) -> FileAnalysisResult:
         """
-        Analyze a single Python file.
+        Analyze a single supported source file.
 
         Args:
-            file_path: Path to the Python file
+            file_path: Path to the source file
 
         Returns:
             FileAnalysisResult with metrics
@@ -789,7 +789,7 @@ class ProjectCrawler:
             result = self.crawl()
 
         md_lines = [
-            "# Project Python Analysis Report",
+            "# Project Analysis Report",
             "",
             f"**Target:** `{result.root_path}`",
             f"**Date:** {result.timestamp}",

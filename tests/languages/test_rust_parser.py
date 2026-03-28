@@ -8,6 +8,11 @@ Follows the pattern established by test_swift_parser.py.
 
 import pytest
 
+pytest.importorskip(
+    "tree_sitter_rust",
+    reason="tree_sitter_rust not installed; skipping Rust parser tests",
+)
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

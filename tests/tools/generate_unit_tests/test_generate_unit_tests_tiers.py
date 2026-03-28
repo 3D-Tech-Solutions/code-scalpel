@@ -27,6 +27,7 @@ async def test_generate_unit_tests_community_limits_and_framework(monkeypatch):
         max_test_cases,
         data_driven,
         crash_log,
+        language,
     ):
         calls.append(
             {
@@ -87,6 +88,7 @@ async def test_generate_unit_tests_pro_allows_data_driven_and_unittest(monkeypat
         max_test_cases,
         data_driven,
         crash_log,
+        language,
     ):
         calls.append(
             {
@@ -138,6 +140,7 @@ async def test_generate_unit_tests_enterprise_allows_bug_repro(monkeypatch):
         max_test_cases,
         data_driven,
         crash_log,
+        language,
     ):
         calls.append({"max_test_cases": max_test_cases, "crash_log": crash_log})
         return server.TestGenerationResult(
@@ -187,6 +190,7 @@ async def test_generate_unit_tests_limits_toml_override(monkeypatch, tmp_path):
         max_test_cases,
         data_driven,
         crash_log,
+        language,
     ):
         calls.append({"max_test_cases": max_test_cases})
         return server.TestGenerationResult(

@@ -1,12 +1,14 @@
 # Code Scalpel Enterprise Compliance - One-Pager
 
+> [20260310_DOCS] Runtime-aligned note: built-in HIPAA, SOC2, GDPR, and PCI-DSS scanning plus PDF report generation are Enterprise-tier features. Community and Pro return explicit `upgrade_required` responses for those requests rather than silently degrading.
+
 **Automated Compliance Scanning for HIPAA, SOC2, GDPR, and PCI-DSS**
 
 ---
 
 ## What It Does
 
-Code Scalpel automatically scans your codebase for compliance violations across healthcare (HIPAA), security (SOC2), privacy (GDPR), and payment card (PCI-DSS) standards. Get detailed reports with specific violations, line numbers, and remediation steps.
+Code Scalpel Enterprise scans your codebase for built-in compliance violations across healthcare (HIPAA), security (SOC2), privacy (GDPR), and payment card (PCI-DSS) standards. Get detailed findings with specific violations, line numbers, and remediation steps.
 
 ### 30-Second Demo
 
@@ -90,6 +92,8 @@ logging.info(f"Patient ID: {patient.id}")
 | PCI003 | Insecure transmission | CRITICAL | HTTP for card data (not HTTPS) |
 
 ### PDF Compliance Reports
+
+Enterprise tier only.
 
 Generate professional reports for auditors with:
 - ✅ Compliance scores (0-100)
@@ -209,7 +213,7 @@ All claims verified by automated tests.
 - PDF report generation
 - Audit trail & certifications
 - Priority support
-- Custom compliance rules
+- Optional governance overlays and custom rules
 
 ---
 

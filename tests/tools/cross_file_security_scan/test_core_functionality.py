@@ -325,6 +325,62 @@ def process():
     return temp_project
 
 
+@pytest.fixture
+def javascript_eval_project(temp_project):
+        """Create a JavaScript project with an imported tainted return reaching eval."""
+        (temp_project / "source.js").write_text("""
+export function getUserInput() {
+    return process.env.USER_INPUT;
+}
+""")
+
+        (temp_project / "executor.js").write_text("""
+import { getUserInput } from './source.js';
+
+export function run() {
+    const script = getUserInput();
+    return eval(script);
+}
+""")
+
+        return temp_project
+
+
+@pytest.fixture
+def typescript_alias_eval_project(temp_project):
+        """Create a TypeScript project that uses a tsconfig path alias."""
+        src_dir = temp_project / "src"
+        src_dir.mkdir()
+
+        (temp_project / "tsconfig.json").write_text("""
+{
+    "compilerOptions": {
+        "baseUrl": ".",
+        "paths": {
+            "@lib/*": ["src/*"]
+        }
+    }
+}
+""")
+
+        (src_dir / "input.ts").write_text("""
+export function getUserInput(): string | undefined {
+    return process.env.USER_INPUT;
+}
+""")
+
+        (src_dir / "executor.ts").write_text("""
+import { getUserInput } from '@lib/input';
+
+export function run(): unknown {
+    const script = getUserInput();
+    return eval(script ?? '0');
+}
+""")
+
+        return temp_project
+
+
 # =============================================================================
 # BASIC FUNCTIONALITY TESTS
 # =============================================================================
@@ -421,6 +477,34 @@ class TestCrossFileFlows:
 
         # Call graph should contain cross-module calls
         assert len(tracker.call_graph) >= 0
+
+    def test_javascript_relative_import_eval_flow(self, javascript_eval_project):
+        """[20260314_TEST] Track bounded JavaScript taint across a same-project import."""
+        tracker = CrossFileTaintTracker(javascript_eval_project)
+        result = tracker.analyze()
+
+        assert result.success
+        assert result.modules_analyzed == 2
+        assert any(vuln.cwe_id == "CWE-94" for vuln in result.vulnerabilities)
+        assert any(flow.sink_module == "executor" for flow in result.taint_flows)
+        assert any(
+            warning.startswith("JavaScript/TypeScript cross-file security scan")
+            for warning in result.warnings
+        )
+
+    def test_typescript_alias_import_eval_flow(self, typescript_alias_eval_project):
+        """[20260314_TEST] Track bounded TypeScript taint through tsconfig alias imports."""
+        tracker = CrossFileTaintTracker(typescript_alias_eval_project)
+        result = tracker.analyze()
+
+        assert result.success
+        assert result.modules_analyzed == 2
+        assert any(vuln.cwe_id == "CWE-94" for vuln in result.vulnerabilities)
+        assert any(flow.sink_module == "src/executor" for flow in result.taint_flows)
+        assert any(
+            warning.startswith("JavaScript/TypeScript cross-file security scan")
+            for warning in result.warnings
+        )
 
 
 # =============================================================================

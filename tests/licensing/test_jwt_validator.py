@@ -482,6 +482,44 @@ class TestLicenseFileHandling:
             finally:
                 os.chdir(original_cwd)
 
+    def test_license_path_supports_root_placeholder_file(
+        self, clean_env, pro_license_token
+    ):
+        """Test ${root} placeholder resolution for explicit file paths."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            license_path = Path(tmpdir) / ".code-scalpel" / "license" / "license.jwt"
+            license_path.parent.mkdir(parents=True, exist_ok=True)
+            license_path.write_text(pro_license_token)
+
+            os.environ["CODE_SCALPEL_PROJECT_ROOT"] = str(Path(tmpdir))
+            os.environ["CODE_SCALPEL_LICENSE_PATH"] = (
+                "${root}/.code-scalpel/license/license.jwt"
+            )
+
+            validator = JWTLicenseValidator(
+                algorithm=JWTAlgorithm.HS256, secret_key=TEST_SECRET_KEY
+            )
+            token = validator.load_license_token()
+            assert token == pro_license_token
+
+    def test_license_path_supports_root_placeholder_directory(
+        self, clean_env, pro_license_token
+    ):
+        """Test ${root} placeholder resolution for directory scanning."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            license_dir = Path(tmpdir) / ".code-scalpel" / "license"
+            license_dir.mkdir(parents=True, exist_ok=True)
+            (license_dir / "license.jwt").write_text(pro_license_token)
+
+            os.environ["CODE_SCALPEL_PROJECT_ROOT"] = str(Path(tmpdir))
+            os.environ["CODE_SCALPEL_LICENSE_PATH"] = "${root}/.code-scalpel/license/"
+
+            validator = JWTLicenseValidator(
+                algorithm=JWTAlgorithm.HS256, secret_key=TEST_SECRET_KEY
+            )
+            token = validator.load_license_token()
+            assert token == pro_license_token
+
 
 class TestLicenseInfo:
     """Tests for license info API."""

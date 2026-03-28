@@ -57,6 +57,9 @@ dependencies = [
     "tree-sitter-go>=0.21.0",          # [20260302_FEATURE] Go language support
     "tree-sitter-kotlin>=0.3.8",       # [20260306_BUGFIX] Kotlin normalizer/adapter require tree_sitter_kotlin
     "tree-sitter-ruby>=0.21.0",        # [20260304_FEATURE] Ruby language support
+    "tree-sitter-php>=0.23.11",        # [20260314_BUGFIX] Keep analyze_code PHP support available in core installs
+    "tree-sitter-swift>=0.0.1",        # [20260314_BUGFIX] Keep analyze_code Swift support available in core installs
+    "tree-sitter-rust>=0.24.0",        # [20260314_BUGFIX] Keep analyze_code Rust support available in core installs
     "structlog>=24.1.0",  # [20251216_FEATURE] v2.2.0 Structured MCP logging
     "PyJWT[crypto]>=2.10.1",  # [20251230_BUGFIX] Align with MCP requirement for JWT validation
     "cryptography>=42.0.0",  # [20251225_FEATURE] v3.3.0 RSA key support for JWT; [20260218_SECURITY] bump >=42.0.0 (CVE-2024-26130 fixed in 42.x)
@@ -93,6 +96,9 @@ all = [
     "tree-sitter-go>=0.21.0",          # [20260302_FEATURE] Go language support
     "tree-sitter-kotlin>=0.3.8",       # [20260306_BUGFIX] Kotlin normalizer/adapter require tree_sitter_kotlin
     "tree-sitter-ruby>=0.21.0",        # [20260304_FEATURE] Ruby language support
+    "tree-sitter-php>=0.23.11",        # [20260314_BUGFIX] Keep analyze_code PHP support available in all extras
+    "tree-sitter-swift>=0.0.1",        # [20260314_BUGFIX] Keep analyze_code Swift support available in all extras
+    "tree-sitter-rust>=0.24.0",        # [20260314_BUGFIX] Keep analyze_code Rust support available in all extras
 ]
 polyglot = [
     "tree-sitter>=0.21.0",
@@ -105,6 +111,9 @@ polyglot = [
     "tree-sitter-go>=0.21.0",          # [20260302_FEATURE] Go language support
     "tree-sitter-kotlin>=0.3.8",       # [20260306_BUGFIX] Kotlin normalizer/adapter require tree_sitter_kotlin
     "tree-sitter-ruby>=0.21.0",        # [20260304_FEATURE] Ruby language support
+    "tree-sitter-php>=0.23.11",        # [20260314_BUGFIX] Keep analyze_code PHP support available in polyglot installs
+    "tree-sitter-swift>=0.0.1",        # [20260314_BUGFIX] Keep analyze_code Swift support available in polyglot installs
+    "tree-sitter-rust>=0.24.0",        # [20260314_BUGFIX] Keep analyze_code Rust support available in polyglot installs
 ]
 dev = [
     "pytest>=7.0.0",

@@ -506,6 +506,19 @@ class PolyglotExtractor:
         normalizer = GoNormalizer()
         self._ir_module = normalizer.normalize(self.code)
 
+    def _parse_kotlin(self) -> None:
+        """
+        Parse Kotlin code using tree-sitter-kotlin.
+
+        [20260313_BUGFIX] Add the missing Kotlin parser hook so explicit
+        Language.KOTLIN extraction and analysis do not fall back to broken
+        auto-detection paths.
+        """
+        from code_scalpel.ir.normalizers.kotlin_normalizer import KotlinNormalizer
+
+        normalizer = KotlinNormalizer()
+        self._ir_module = normalizer.normalize(self.code)
+
     def _parse_php(self) -> None:
         """
         Parse PHP code using tree-sitter-php.

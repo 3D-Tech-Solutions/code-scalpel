@@ -312,9 +312,8 @@ class Derived(Base):
 
                 assert result.success, f"Extraction failed: {result.error}"
                 assert (
-                    "class Derived(Base)" in result.code
-                    or "class Derived" in result.code
-                ), "Class not extracted"
+                    "class Derived(Base):" in result.code
+                ), "Class header not extracted"
                 assert "def method" in result.code, "Method not included"
             finally:
                 os.unlink(f.name)

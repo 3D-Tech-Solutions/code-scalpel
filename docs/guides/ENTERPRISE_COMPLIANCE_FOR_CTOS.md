@@ -105,7 +105,7 @@ Community ⊂ Pro ⊂ Enterprise
 **3. Configuration-Driven Compliance**
 - `features.toml`: Defines which capabilities are available per tier
 - `limits.toml`: Defines resource limits (file counts, rule counts, analysis depth)
-- Compliance rules: Externalized in `.code-scalpel/governance.yaml` for auditability
+- Built-in compliance patterns: Shipped in `src/code_scalpel/policy_engine/code_policy_check/` with optional organization overlays layered via policy configuration such as `.code-scalpel/governance.yaml`
 
 **4. Audit Trail & Certification**
 - Every compliance check generates structured JSON audit log
@@ -123,7 +123,7 @@ Community ⊂ Pro ⊂ Enterprise
 | **AI agent bypasses tier enforcement** | Server-side cryptographic license validation; agent cannot override | 24 tier inheritance tests verify enforcement |
 | **False negatives (missing violations)** | Pattern-based detection + AST parsing; multiple detection strategies | 22 compliance tests with known violations |
 | **False positives (incorrect flagging)** | Confidence scoring; sanitizer detection; contextual analysis | Pro tier async error tests verify accuracy |
-| **Compliance standard drift** | Configuration externalization; rules versioned in git | `.code-scalpel/governance.yaml` tracked in VCS |
+| **Compliance standard drift** | Built-in rule updates ship with the product; org-specific overlays can still be versioned in git | `src/code_scalpel/policy_engine/code_policy_check/` plus optional `.code-scalpel/governance.yaml` overlays |
 | **License tampering** | JWT signature with public key verification; tampering = validation failure | Cryptographic primitives (RSA-2048, SHA-256) |
 
 ---
@@ -171,7 +171,8 @@ Community ⊂ Pro ⊂ Enterprise
 2. Inspect configuration:
    - `src/code_scalpel/capabilities/features.toml` (capability definitions)
    - `src/code_scalpel/capabilities/limits.toml` (tier limits)
-   - `.code-scalpel/governance.yaml` (compliance rules)
+    - `src/code_scalpel/policy_engine/code_policy_check/` (built-in compliance patterns)
+    - `.code-scalpel/governance.yaml` (optional organization overlays)
 
 3. Run compliance scan on sample code:
    ```bash
@@ -440,7 +441,7 @@ code-scalpel check --standard hipaa,soc2 --report pdf --output compliance_report
 
 ### Q: What if compliance standards change?
 
-**A:** Compliance rules are externalized in `.code-scalpel/governance.yaml` configuration file. Update rules without code changes. Version control tracks rule evolution. Enterprise customers receive rule updates with minor version releases.
+**A:** Built-in compliance standards ship with Code Scalpel and evolve with product releases. Teams that need local exceptions or overlays can version those in `.code-scalpel/governance.yaml`, but the standard HIPAA, SOC2, GDPR, and PCI-DSS corpus is not loaded exclusively from that file.
 
 ### Q: Does Code Scalpel replace manual compliance audits?
 
@@ -448,7 +449,7 @@ code-scalpel check --standard hipaa,soc2 --report pdf --output compliance_report
 
 ### Q: Can we customize compliance rules for our organization?
 
-**A:** Yes (Enterprise tier). Use `.code-scalpel/governance.yaml` to define custom rules. Custom rules integrate with standard HIPAA/SOC2/GDPR/PCI-DSS detection. AI agents enforce custom rules identically to built-in rules.
+**A:** Yes (Enterprise tier). Use policy configuration such as `.code-scalpel/governance.yaml` for organization-specific overlays and custom rules. Those overlays run alongside the built-in HIPAA, SOC2, GDPR, and PCI-DSS detectors rather than replacing them.
 
 ---
 

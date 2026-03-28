@@ -334,10 +334,11 @@ function calculate(x, y) {
         result = _analyze_code_sync(code=js_code, language="javascript")
 
         assert result.success
-        assert len(result.functions) > 0
+        # [20260309_TEST] Verify extracted symbols and real metric values, not field presence.
         assert "calculate" in result.functions
-        # Pro tier should provide cognitive_complexity for JS too
-        assert hasattr(result, "cognitive_complexity")
+        assert result.language_detected == "javascript"
+        assert result.tier_applied == "pro"
+        assert result.complexity >= 4
 
 
 class TestEnterpriseTierRealLicense:
@@ -449,10 +450,11 @@ function processUser(user: User): boolean {
         result = _analyze_code_sync(code=ts_code, language="typescript")
 
         assert result.success
-        assert len(result.functions) > 0
+        # [20260309_TEST] Verify extracted symbols and real metric values, not field presence.
         assert "processUser" in result.functions
-        # Enterprise tier should provide all metrics for TS
-        assert hasattr(result, "cognitive_complexity")
+        assert result.language_detected == "typescript"
+        assert result.tier_applied == "enterprise"
+        assert result.complexity >= 5
 
 
 class TestBrokenLicenseHandling:

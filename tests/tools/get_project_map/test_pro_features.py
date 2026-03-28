@@ -320,6 +320,64 @@ class TestProFeatureModuleRelationships:
         assert "-->" in dependency_diagram
 
     @pytest.mark.asyncio
+    async def test_pro_typescript_tsconfig_alias_relationships(
+        self, pro_server, tmp_path
+    ):
+        """[20260314_TEST] Pro tier should resolve tsconfig path aliases into TypeScript module relationships."""
+        root = tmp_path / "ts_project_aliases"
+        src = root / "src"
+        ui = src / "ui"
+        ui.mkdir(parents=True)
+
+        (root / "tsconfig.json").write_text(
+            '{\n'
+            '  "compilerOptions": {\n'
+            '    "baseUrl": ".",\n'
+            '    "paths": {\n'
+            '      "@ui/*": ["src/ui/*"]\n'
+            '    }\n'
+            '  }\n'
+            '}\n',
+            encoding="utf-8",
+        )
+        (ui / "button.ts").write_text(
+            "export function renderButton(): string {\n"
+            '    return "button"\n'
+            "}\n",
+            encoding="utf-8",
+        )
+        (src / "main.ts").write_text(
+            'import { renderButton } from "@ui/button"\n\n'
+            "export function run(): string {\n"
+            "    return renderButton()\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        result = await pro_server.get_project_map(
+            project_root=str(root), include_complexity=False
+        )
+
+        assert result.success is True
+        assert result.languages.get("typescript") == 2
+
+        result_dict = (
+            result.model_dump() if hasattr(result, "model_dump") else vars(result)
+        )
+        relationships = result_dict.get("module_relationships") or []
+        assert any(
+            rel.get("source") == "src/main.ts"
+            and rel.get("target") == "src/ui/button.ts"
+            for rel in relationships
+        )
+
+        dependency_diagram = result_dict.get("dependency_diagram") or ""
+        assert "graph TD" in dependency_diagram
+        assert "src_main_ts" in dependency_diagram
+        assert "src_ui_button_ts" in dependency_diagram
+        assert "-->" in dependency_diagram
+
+    @pytest.mark.asyncio
     async def test_pro_javascript_dependency_diagram(self, pro_server, tmp_path):
         """[20260308_TEST] Pro tier dependency diagram should include the local JS edge."""
         root = tmp_path / "js_project_diagram"
@@ -468,3 +526,83 @@ class TestProFeatureModuleRelationships:
         assert "demo_App_java" in dependency_diagram
         assert "demo_util_Helper_java" in dependency_diagram
         assert "-->" in dependency_diagram
+
+    @pytest.mark.asyncio
+    async def test_pro_java_wildcard_import_relationships(self, pro_server, tmp_path):
+        """[20260314_TEST] Pro tier should expand Java wildcard package imports into module relationships."""
+        root = tmp_path / "java_project_map_wildcard"
+        app_dir = root / "demo"
+        util_dir = app_dir / "util"
+        util_dir.mkdir(parents=True)
+
+        (util_dir / "Helper.java").write_text(
+            "package demo.util;\n\n"
+            "public class Helper {\n"
+            "    public static int tool() {\n"
+            "        return 1;\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        (app_dir / "App.java").write_text(
+            "package demo;\n\n"
+            "import demo.util.*;\n\n"
+            "public class App {\n"
+            "    public static int entry() {\n"
+            "        return Helper.tool();\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        result = await pro_server.get_project_map(
+            project_root=str(root), include_complexity=False
+        )
+
+        result_dict = (
+            result.model_dump() if hasattr(result, "model_dump") else vars(result)
+        )
+        relationships = result_dict.get("module_relationships") or []
+
+        assert any(
+            rel.get("source") == "demo/App.java"
+            and rel.get("target") == "demo/util/Helper.java"
+            for rel in relationships
+        )
+
+    @pytest.mark.asyncio
+    async def test_pro_java_same_package_type_relationships(self, pro_server, tmp_path):
+        """[20260314_TEST] Pro tier should resolve same-package Java type references without explicit imports."""
+        root = tmp_path / "java_project_map_same_package"
+        package_dir = root / "demo"
+        package_dir.mkdir(parents=True)
+
+        (package_dir / "BaseWorker.java").write_text(
+            "package demo;\n\n"
+            "public class BaseWorker {\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        (package_dir / "Worker.java").write_text(
+            "package demo;\n\n"
+            "public class Worker extends BaseWorker {\n"
+            "    public static void entry() {\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        result = await pro_server.get_project_map(
+            project_root=str(root), include_complexity=False
+        )
+
+        result_dict = (
+            result.model_dump() if hasattr(result, "model_dump") else vars(result)
+        )
+        relationships = result_dict.get("module_relationships") or []
+
+        assert any(
+            rel.get("source") == "demo/Worker.java"
+            and rel.get("target") == "demo/BaseWorker.java"
+            for rel in relationships
+        )

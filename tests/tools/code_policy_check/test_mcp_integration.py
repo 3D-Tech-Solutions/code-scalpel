@@ -189,6 +189,29 @@ def broken(
         # Should return result (may report error in summary)
         assert hasattr(result, "success"), "Should return result object"
 
+    @pytest.mark.asyncio
+    async def test_compliance_request_returns_upgrade_required_envelope(
+        self, tmp_path, community_tier
+    ):
+        """Enterprise-only compliance requests must fail explicitly at the MCP boundary."""
+        # [20260310_TEST] Verify lower-tier compliance requests surface the
+        # explicit upgrade_required contract instead of silently degrading.
+        test_file = tmp_path / "test.py"
+        test_file.write_text("x = 1\n")
+
+        result = await code_policy_check(
+            paths=[str(test_file)],
+            compliance_standards=["HIPAA"],
+        )
+
+        assert result.success is False
+        assert result.error is not None
+        assert result.error.error_code == "upgrade_required"
+        assert result.tier_applied == "community"
+        assert result.data["success"] is False
+        assert result.data["tier_applied"] == "community"
+        assert "Enterprise tier" in result.data["error"]
+
 
 # [20260111_TEST] Added output metadata validation tests
 class TestOutputMetadata:

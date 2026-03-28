@@ -1,8 +1,10 @@
 # Enterprise Compliance for Engineers: Technical Implementation Guide
 
+> [20260310_DOCS] Runtime tier-gating and compliance-request semantics changed after this guide was first written. Use [../compliance/README.md](../compliance/README.md) as the current source of truth for live behavior.
+
 **Target Audience:** Software Engineers, Platform Engineers, DevOps Engineers, Security Engineers  
-**Last Updated:** February 1, 2026  
-**Version:** 1.3.0  
+**Last Updated:** March 10, 2026  
+**Version:** 2.1.x  
 **Prerequisite Reading:** [ENTERPRISE_COMPLIANCE_FOR_CTOS.md](ENTERPRISE_COMPLIANCE_FOR_CTOS.md)
 
 ---
@@ -82,11 +84,12 @@
 2. **Capability Check** (happens on every tool call)
    - Read `features.toml`: `compliance_auditing` feature available?
    - Read `limits.toml`: `max_files` limit enforced?
-   - If tier insufficient: return error immediately ("Requires Enterprise tier")
+    - If tier insufficient for requested compliance auditing or PDF generation: return an explicit `upgrade_required` error
 
 3. **Compliance Analysis** (if tier check passes)
    - Parse source code files with AST parsers
-   - Apply compliance rule patterns from `governance.yaml`
+    - Apply built-in compliance patterns from `code_policy_check.patterns`
+    - Optionally layer organization policy configuration discovered by `load_effective_policy()`
    - Detect violations via pattern matching + taint analysis
    - Generate structured results (JSON) with line numbers, severity, remediation
 
@@ -209,19 +212,16 @@ async def code_policy_check(
     tier = get_current_tier()  # "enterprise"
     
     # 2. Check if compliance features available
-    if compliance_standards:
-        required_cap = "compliance_auditing"
-        if not has_capability(tier, "code_policy_check", required_cap):
-            return ToolResponseEnvelope(
-                error=f"Compliance standards require Enterprise tier (current: {tier})"
-            )
+    if compliance_standards and tier != "enterprise":
+        return ToolResponseEnvelope(
+            error="Compliance standards require Enterprise tier",
+        )
     
     # 3. Check if report generation available
-    if generate_report:
-        if not has_capability(tier, "code_policy_check", "pdf_certification_reports"):
-            return ToolResponseEnvelope(
-                error=f"PDF reports require Enterprise tier (current: {tier})"
-            )
+    if generate_report and tier != "enterprise":
+        return ToolResponseEnvelope(
+            error="Compliance PDF reports require Enterprise tier",
+        )
     
     # 4. Enforce limits from limits.toml
     limits = get_tool_limits(tier, "code_policy_check")
@@ -1138,7 +1138,8 @@ def register_user(request):
 |------|---------|--------|----------|
 | **features.toml** | Capability definitions per tier | TOML | `src/code_scalpel/capabilities/features.toml` |
 | **limits.toml** | Resource limits per tier | TOML | `src/code_scalpel/capabilities/limits.toml` |
-| **governance.yaml** | Compliance rule definitions | YAML | `.code-scalpel/governance.yaml` |
+| **code_policy_check/*.py** | Built-in compliance and policy patterns | Python | `src/code_scalpel/policy_engine/code_policy_check/` |
+| **governance.yaml** | Optional organization-specific overlays and custom rules | YAML | `.code-scalpel/governance.yaml` |
 | **license.jwt** | Cryptographic tier license | JWT | `$CODE_SCALPEL_LICENSE_PATH` |
 
 ### features.toml Structure
@@ -1198,10 +1199,12 @@ max_rules = -1         # Unlimited
 analysis_depth = 10    # Deepest AST analysis
 ```
 
-### governance.yaml Structure
+### Compliance Rule Sources
+
+> [20260310_DOCS] Built-in HIPAA, SOC2, GDPR, and PCI-DSS detection ships in the `code_policy_check` pattern modules. `.code-scalpel/governance.yaml` is an optional layering point for organization-specific overlays and custom rules; it is not the sole source of the standard compliance corpus.
 
 ```yaml
-# HIPAA compliance rules
+# Example organization overlay
 hipaa_rules:
   - rule_id: HIPAA-164.312(a)(2)(iv)
     name: "Encryption of ePHI"
@@ -1277,7 +1280,7 @@ with open('$CODE_SCALPEL_LICENSE_PATH') as f:
 
 **Cause:** Overly broad pattern matching
 
-**Solution:** Customize rules in `governance.yaml`:
+**Solution:** Add an organization-specific overlay in `governance.yaml` or narrow the scan scope; built-in standard rules continue to come from the shipped policy modules:
 ```yaml
 # Example: Ignore test files from HIPAA checks
 hipaa_rules:
@@ -1386,7 +1389,7 @@ else:
 
 ### Custom Compliance Rules
 
-**Create custom rule in governance.yaml:**
+**Create custom organization rule in governance.yaml:**
 ```yaml
 custom_rules:
   - rule_id: CUSTOM-001

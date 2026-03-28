@@ -318,7 +318,7 @@ value = 1
 
     @pytest.mark.asyncio
     async def test_pro_blocks_compliance_outputs(self, tmp_path, pro_license):
-        """Pro tier should not return compliance artifacts even if requested."""
+        """Pro tier should fail explicitly when compliance auditing is requested."""
         test_file = tmp_path / "test.py"
         test_file.write_text("""
 def handler(request):
@@ -332,12 +332,32 @@ def handler(request):
         )
 
         assert result.tier_applied == "pro"
-        assert not getattr(
-            result, "compliance_reports", None
-        ), "Pro tier should ignore compliance_reports field"
-        assert not getattr(
-            result, "pdf_report", None
-        ), "Pro tier should not generate PDF reports"
+        assert result.success is False
+        assert result.error is not None
+        assert "Enterprise tier" in result.error.error
+        assert result.data["error"] == result.error.error
+
+    @pytest.mark.asyncio
+    async def test_community_blocks_report_generation(
+        self, tmp_path, community_license
+    ):
+        """Community tier should fail explicitly when compliance PDF generation is requested."""
+        test_file = tmp_path / "test.py"
+        test_file.write_text("""
+def handler(request):
+    return request.json.get("email")
+""")
+
+        result = await code_policy_check(
+            paths=[str(test_file)],
+            generate_report=True,
+        )
+
+        assert result.tier_applied == "community"
+        assert result.success is False
+        assert result.error is not None
+        assert "Enterprise tier" in result.error.error
+        assert result.data["error"] == result.error.error
 
     @pytest.mark.asyncio
     async def test_enterprise_includes_audit_trail_and_score(

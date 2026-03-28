@@ -85,6 +85,31 @@ def is_positive(x):
         assert result.framework_used == "pytest"
         assert result.tier_applied in ("community", "pro", "enterprise")
 
+    @pytest.mark.asyncio
+    async def test_java_generation_includes_language_metadata(self):
+        """[20260309_TEST] Java generation should flow through the public language parameter."""
+        code = """
+class Demo {
+    int classify(int x) {
+        if (x > 0) {
+            return 1;
+        }
+        return 0;
+    }
+}
+"""
+        result = await generate_unit_tests(
+            code=code,
+            language="java",
+            framework="pytest",
+        )
+
+        assert result.success is True
+        assert result.framework_used == "pytest"
+        assert result.tier_applied in ("community", "pro", "enterprise")
+        assert result.function_name == "classify"
+        assert result.test_count >= 1
+
 
 class TestMetadataFieldTypes:
     """Test the data types of metadata fields in the model."""

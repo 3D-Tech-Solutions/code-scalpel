@@ -19,6 +19,7 @@ from code_scalpel.mcp.helpers.security_helpers import (
 from code_scalpel.mcp.protocol import mcp, _get_current_tier
 from code_scalpel.mcp.contract import ToolResponseEnvelope, ToolError, make_envelope
 from code_scalpel.mcp.oracle_middleware import with_oracle_resilience, PathStrategy
+from code_scalpel.mcp.path_resolver import resolve_path
 from code_scalpel import __version__ as _pkg_version
 
 
@@ -77,6 +78,78 @@ async def unified_sink_detect(
     """
     started = time.perf_counter()
     try:
+        # [20260311_BUGFIX] Return guided validation outcomes for malformed
+        # language and threshold inputs instead of collapsing to internal_error.
+        supported_languages = {
+            "auto",
+            "python",
+            "javascript",
+            "typescript",
+            "java",
+            "c",
+            "cpp",
+            "csharp",
+            "go",
+            "kotlin",
+            "php",
+            "ruby",
+            "swift",
+            "rust",
+        }
+        tier = _get_current_tier()
+
+        if not code or not code.strip():
+            error_obj = ToolError(
+                error="'code' must be a non-empty source string.",
+                error_code="invalid_argument",
+                error_details={"hint": "Provide source code to scan for dangerous sinks."},
+            )
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            return make_envelope(
+                data=None,
+                tool_id="unified_sink_detect",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=duration_ms,
+                error=error_obj,
+            )
+
+        normalized_language = (language or "auto").lower()
+        if normalized_language not in supported_languages:
+            error_obj = ToolError(
+                error=(
+                    f"Unsupported language: {language}. Must be one of "
+                    f"{sorted(supported_languages)}"
+                ),
+                error_code="invalid_argument",
+                error_details={"supported_languages": sorted(supported_languages)},
+            )
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            return make_envelope(
+                data=None,
+                tool_id="unified_sink_detect",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=duration_ms,
+                error=error_obj,
+            )
+
+        if not 0.0 <= confidence_threshold <= 1.0:
+            error_obj = ToolError(
+                error="'confidence_threshold' must be between 0.0 and 1.0.",
+                error_code="invalid_argument",
+                error_details={"confidence_threshold": confidence_threshold},
+            )
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            return make_envelope(
+                data=None,
+                tool_id="unified_sink_detect",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=duration_ms,
+                error=error_obj,
+            )
+
         if language == "auto" or language is None:
             from code_scalpel.surgery.unified_extractor import Language, detect_language
 
@@ -100,7 +173,6 @@ async def unified_sink_detect(
             }
             language = lang_map.get(detected, "python")
 
-        tier = _get_current_tier()
         capabilities = get_tool_capabilities("unified_sink_detect", tier)
         result = await asyncio.to_thread(
             _unified_sink_detect_sync,
@@ -197,32 +269,90 @@ async def type_evaporation_scan(
     """
     started = time.perf_counter()
     try:
+        from code_scalpel.mcp.helpers.session import _get_project_root
+        tier = _get_current_tier()
+
         # Validate input: at least one way to provide each code
         if frontend_code is None and frontend_file_path is None:
-            raise ValueError(
-                "Either 'frontend_code' or 'frontend_file_path' must be provided"
+            return make_envelope(
+                data=None,
+                tool_id="type_evaporation_scan",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=int((time.perf_counter() - started) * 1000),
+                error=ToolError(
+                    error="Either 'frontend_code' or 'frontend_file_path' must be provided.",
+                    error_code="invalid_argument",
+                    error_details={"hint": "Provide frontend code directly or via frontend_file_path."},
+                ),
             )
         if backend_code is None and backend_file_path is None:
-            raise ValueError(
-                "Either 'backend_code' or 'backend_file_path' must be provided"
+            return make_envelope(
+                data=None,
+                tool_id="type_evaporation_scan",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=int((time.perf_counter() - started) * 1000),
+                error=ToolError(
+                    error="Either 'backend_code' or 'backend_file_path' must be provided.",
+                    error_code="invalid_argument",
+                    error_details={"hint": "Provide backend code directly or via backend_file_path."},
+                ),
             )
+
+        project_root = _get_project_root()
 
         # Read from files if codes not provided
         if frontend_code is None and frontend_file_path is not None:
-            if not os.path.isfile(frontend_file_path):
-                raise ValueError(f"Frontend file not found: {frontend_file_path}")
+            try:
+                # [20260311_BUGFIX] Resolve malformed Windows/WSL file paths
+                # before reading so '/k:/...' inputs can recover consistently.
+                frontend_file_path = resolve_path(
+                    frontend_file_path,
+                    str(project_root) if project_root else None,
+                )
+            except FileNotFoundError as exc:
+                duration_ms = int((time.perf_counter() - started) * 1000)
+                return make_envelope(
+                    data=None,
+                    tool_id="type_evaporation_scan",
+                    tool_version=_pkg_version,
+                    tier=tier,
+                    duration_ms=duration_ms,
+                    error=ToolError(
+                        error=str(exc),
+                        error_code="correction_needed",
+                        error_details={"hint": str(exc)},
+                    ),
+                )
             with open(frontend_file_path, "r", encoding="utf-8") as f:
                 frontend_code = f.read()
             frontend_file = os.path.basename(frontend_file_path)
 
         if backend_code is None and backend_file_path is not None:
-            if not os.path.isfile(backend_file_path):
-                raise ValueError(f"Backend file not found: {backend_file_path}")
+            try:
+                backend_file_path = resolve_path(
+                    backend_file_path,
+                    str(project_root) if project_root else None,
+                )
+            except FileNotFoundError as exc:
+                duration_ms = int((time.perf_counter() - started) * 1000)
+                return make_envelope(
+                    data=None,
+                    tool_id="type_evaporation_scan",
+                    tool_version=_pkg_version,
+                    tier=tier,
+                    duration_ms=duration_ms,
+                    error=ToolError(
+                        error=str(exc),
+                        error_code="correction_needed",
+                        error_details={"hint": str(exc)},
+                    ),
+                )
             with open(backend_file_path, "r", encoding="utf-8") as f:
                 backend_code = f.read()
             backend_file = os.path.basename(backend_file_path)
 
-        tier = _get_current_tier()
         caps = get_tool_capabilities("type_evaporation_scan", tier) or {}
         cap_set = set(caps.get("capabilities", []))
         limits = caps.get("limits", {}) or {}
@@ -352,6 +482,40 @@ async def scan_dependencies(
         tier = _get_current_tier()
         caps = get_tool_capabilities("scan_dependencies", tier)
 
+        if timeout <= 0:
+            return make_envelope(
+                data=None,
+                tool_id="scan_dependencies",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=int((time.perf_counter() - started) * 1000),
+                error=ToolError(
+                    error="'timeout' must be greater than 0.",
+                    error_code="invalid_argument",
+                    error_details={"timeout": timeout},
+                ),
+            )
+
+        if path is not None or project_root is not None:
+            try:
+                # [20260311_BUGFIX] Resolve caller-supplied project/file paths via
+                # the shared resolver so malformed '/k:/...' inputs recover.
+                resolved_path = resolve_path(resolved_path, str(server.PROJECT_ROOT))
+            except FileNotFoundError as exc:
+                duration_ms = int((time.perf_counter() - started) * 1000)
+                return make_envelope(
+                    data=None,
+                    tool_id="scan_dependencies",
+                    tool_version=_pkg_version,
+                    tier=tier,
+                    duration_ms=duration_ms,
+                    error=ToolError(
+                        error=str(exc),
+                        error_code="correction_needed",
+                        error_details={"hint": str(exc)},
+                    ),
+                )
+
         if ctx:
             await ctx.report_progress(
                 0, 100, f"Scanning dependencies in {resolved_path}..."
@@ -397,7 +561,7 @@ async def scan_dependencies(
 
 
 @mcp.tool(
-    description="Taint-based vulnerability scan for SQL injection, XSS, command injection, and path traversal."
+    description="Taint-based vulnerability scan for SQL injection, XSS, command injection, and path traversal, with full Python analysis and bounded sink/pattern slices for other supported languages."
 )
 @with_oracle_resilience(tool_id="security_scan", strategy=PathStrategy)
 async def security_scan(
@@ -409,6 +573,11 @@ async def security_scan(
 
     Identifies security vulnerabilities using taint analysis and pattern matching.
     Provide either 'code' or 'file_path'. Language is auto-detected from code content.
+
+    [20260315_DOCS] Python remains the semantic taint-analysis path. JavaScript,
+    TypeScript, Java, and the other shipped source languages currently expose
+    bounded sink/pattern-based slices rather than claiming full per-language
+    data-flow parity.
 
     **Tier Behavior:**
     - Community: Basic pattern matching, CWE mapping, confidence scoring
@@ -452,6 +621,54 @@ async def security_scan(
     try:
         tier = _get_current_tier()
         caps = get_tool_capabilities("security_scan", tier)
+
+        if code is None and file_path is None:
+            return make_envelope(
+                data=None,
+                tool_id="security_scan",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=int((time.perf_counter() - started) * 1000),
+                error=ToolError(
+                    error="Either 'code' or 'file_path' must be provided.",
+                    error_code="invalid_argument",
+                    error_details={"hint": "Provide source code directly or pass a file_path to scan."},
+                ),
+            )
+
+        if not 0.0 <= confidence_threshold <= 1.0:
+            return make_envelope(
+                data=None,
+                tool_id="security_scan",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=int((time.perf_counter() - started) * 1000),
+                error=ToolError(
+                    error="'confidence_threshold' must be between 0.0 and 1.0.",
+                    error_code="invalid_argument",
+                    error_details={"confidence_threshold": confidence_threshold},
+                ),
+            )
+
+        if file_path is not None:
+            from code_scalpel.mcp.helpers.session import _get_project_root
+
+            try:
+                file_path = resolve_path(file_path, str(_get_project_root()))
+            except FileNotFoundError as exc:
+                duration_ms = int((time.perf_counter() - started) * 1000)
+                return make_envelope(
+                    data=None,
+                    tool_id="security_scan",
+                    tool_version=_pkg_version,
+                    tier=tier,
+                    duration_ms=duration_ms,
+                    error=ToolError(
+                        error=str(exc),
+                        error_code="correction_needed",
+                        error_details={"hint": str(exc)},
+                    ),
+                )
         result = await asyncio.to_thread(
             _security_scan_sync, code, file_path, tier, caps, confidence_threshold
         )

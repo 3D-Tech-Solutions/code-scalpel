@@ -678,6 +678,89 @@ class TestInputValidation:
         ) in edge_ids
 
     @pytest.mark.asyncio
+    async def test_java_record_method_node_is_accepted_as_center(self, tmp_path):
+        """[20260309_TEST] Java record method nodes should validate as neighborhood centers."""
+        from code_scalpel.mcp.server import get_graph_neighborhood
+
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+        (package_dir / "Helper.java").write_text(
+            "package demo;\n\n"
+            "public class Helper {\n"
+            "  public static void tool() {\n"
+            "  }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        (package_dir / "RecordWorker.java").write_text(
+            "package demo;\n\n"
+            "public record RecordWorker(String value) {\n"
+            "  public void run() {\n"
+            "    Helper.tool();\n"
+            "  }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        with patch(
+            "code_scalpel.mcp.helpers.graph_helpers._get_current_tier",
+            return_value="pro",
+        ):
+            result = await get_graph_neighborhood(
+                center_node_id="java::demo/RecordWorker::method::RecordWorker:run",
+                project_root=str(tmp_path),
+                k=1,
+                max_nodes=20,
+            )
+
+        assert result.success
+        node_ids = {node.id for node in result.nodes}
+        assert "java::demo/RecordWorker::method::RecordWorker:run" in node_ids
+        assert "java::demo/Helper::method::Helper:tool" in node_ids
+        edge_ids = {(edge.from_id, edge.to_id) for edge in result.edges}
+        assert (
+            "java::demo/RecordWorker::method::RecordWorker:run",
+            "java::demo/Helper::method::Helper:tool",
+        ) in edge_ids
+
+    @pytest.mark.asyncio
+    async def test_java_constructor_node_tracks_this_constructor_chain(self, tmp_path):
+        """[20260309_TEST] Java constructor neighborhoods should include this(...) constructor chaining targets."""
+        from code_scalpel.mcp.server import get_graph_neighborhood
+
+        (tmp_path / "Helper.java").write_text(
+            "public class Helper {\n"
+            "  public Helper() {\n"
+            "    this(1);\n"
+            "  }\n\n"
+            "  public Helper(int value) {\n"
+            "  }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        with patch(
+            "code_scalpel.mcp.helpers.graph_helpers._get_current_tier",
+            return_value="pro",
+        ):
+            result = await get_graph_neighborhood(
+                center_node_id="java::Helper::method::Helper:Helper()",
+                project_root=str(tmp_path),
+                k=1,
+                max_nodes=20,
+            )
+
+        assert result.success
+        node_ids = {node.id for node in result.nodes}
+        assert "java::Helper::method::Helper:Helper()" in node_ids
+        assert "java::Helper::method::Helper:Helper(int)" in node_ids
+        edge_ids = {(edge.from_id, edge.to_id) for edge in result.edges}
+        assert (
+            "java::Helper::method::Helper:Helper()",
+            "java::Helper::method::Helper:Helper(int)",
+        ) in edge_ids
+
+    @pytest.mark.asyncio
     async def test_typescript_node_id_extracts_neighborhood(self, tmp_path):
         """TypeScript local function nodes should participate in neighborhood extraction."""
         # [20260306_TEST] Initial JS/TS graph-neighborhood parity slice.
@@ -768,6 +851,44 @@ class TestInputValidation:
             "typescript::src/service::method::Service:run",
             "typescript::src/service::method::Service:helper",
         ) in edge_ids
+
+    @pytest.mark.asyncio
+    async def test_go_node_id_extracts_neighborhood(self, tmp_path):
+        """[20260311_TEST] Go function node IDs should participate in neighborhood extraction."""
+        pytest.importorskip("tree_sitter_go")
+        from code_scalpel.mcp.server import get_graph_neighborhood
+
+        (tmp_path / "main.go").write_text(
+            "package main\n\n"
+            "func main() {\n"
+            "\thelper()\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "helper.go").write_text(
+            "package main\n\n"
+            "func helper() {\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        with patch(
+            "code_scalpel.mcp.helpers.graph_helpers._get_current_tier",
+            return_value="community",
+        ):
+            result = await get_graph_neighborhood(
+                center_node_id="go::main::function::main",
+                project_root=str(tmp_path),
+                k=1,
+                max_nodes=20,
+            )
+
+        assert result.success
+        node_ids = {node.id for node in result.nodes}
+        assert "go::main::function::main" in node_ids
+        assert "go::helper::function::helper" in node_ids
+        edge_ids = {(edge.from_id, edge.to_id) for edge in result.edges}
+        assert ("go::main::function::main", "go::helper::function::helper") in edge_ids
 
     @pytest.mark.asyncio
     async def test_typescript_neighborhood_clamps_to_community_limits(self, tmp_path):

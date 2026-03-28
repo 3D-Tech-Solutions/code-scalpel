@@ -6,7 +6,6 @@ code_parsers extractor, and adapter integration.
 Follows the pattern established by test_ruby_parser.py.
 """
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

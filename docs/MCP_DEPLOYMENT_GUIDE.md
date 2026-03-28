@@ -70,8 +70,8 @@ uvx code-scalpel mcp
 Code Scalpel operates in three tiers:
 
 1. **Community** (Free) - All tools available with basic limits
-2. **Pro** ($19/month) - Enhanced limits and features
-3. **Enterprise** (Custom) - Unlimited with compliance features
+2. **Pro** ($19/month) - Enhanced capabilities and expanded limits
+3. **Enterprise** (Custom) - Pro-scale limits plus governance, audit, and compliance features
 
 **Configure your tier** (optional - defaults to Community):
 
@@ -960,12 +960,13 @@ WORKDIR /workspace
 # Expose ports
 EXPOSE 8080
 
+# [20260310_DOCS] Use a port-level liveness probe for MCP; the runtime does not expose a native /health endpoint.
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost:8080/health || exit 1
+  CMD python -c "import socket; s = socket.create_connection(('127.0.0.1', 8080), 2); s.close()" || exit 1
 
-# Start MCP server in HTTP mode
-CMD ["uvx", "code-scalpel", "mcp", "--http", "--port", "8080", "--project-root", "/workspace"]
+# Start MCP server in streamable HTTP mode
+CMD ["uvx", "code-scalpel", "mcp", "--transport", "streamable-http", "--port", "8080", "--project-root", "/workspace"]
 ```
 
 #### Docker Compose
@@ -986,7 +987,7 @@ services:
       - ./config:/root/.code-scalpel:ro
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      test: ["CMD", "python", "-c", "import socket; s = socket.create_connection(('127.0.0.1', 8080), 2); s.close()"]
       interval: 30s
       timeout: 3s
       retries: 3
@@ -997,8 +998,13 @@ services:
 ```bash
 docker-compose up -d
 
-# Test
-curl http://localhost:8080/health
+# Test listener reachability
+python - <<'PY'
+import socket
+s = socket.create_connection(("127.0.0.1", 8080), 2)
+s.close()
+print("MCP listener reachable on 127.0.0.1:8080")
+PY
 ```
 
 ---

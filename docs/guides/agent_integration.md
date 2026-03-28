@@ -82,19 +82,27 @@ Create `.vscode/mcp.json` in your workspace:
 For team or remote deployment:
 
 ```bash
-# Start HTTP server with SSE (port 8593) and health endpoint (port 8594)
-docker run -p 8593:8593 -p 8594:8594 -v /path/to/project:/app/code code-scalpel:3.0.0
+# [20260310_DOCS] Use the verified MCP streamable-http transport; there is no native /health endpoint.
+# Start MCP server and expose the /mcp endpoint on port 8593
+docker run -p 8593:8593 -v /path/to/project:/app/code code-scalpel:3.0.0 \
+    code-scalpel mcp --transport streamable-http --host 0.0.0.0 --port 8593 --root /app/code
 
 # Or directly
-code-scalpel mcp --http --port 8593 --allow-lan
+code-scalpel mcp --transport streamable-http --host 0.0.0.0 --port 8593 --root /path/to/project
 ```
 
-**Health Check (v2.0.0+)**:
+**Endpoint Verification**:
 ```bash
-# Verify container is healthy
-curl http://localhost:8594/health
-# {"status": "healthy", "version": "3.0.0", "timestamp": "2025-12-18T12:00:00Z"}
+# Verify the MCP endpoint is present
+curl -i http://localhost:8593/mcp \
+    -H "Accept: application/json, text/event-stream"
+# Expected before MCP initialize: negotiation response such as HTTP 406
 ```
+
+Operational note:
+
+- The current MCP runtime does not expose a native `/health` endpoint.
+- For platform probes, use a TCP port check or a small MCP initialize probe from your supervising service.
 
 **Docker Compose** (recommended for production):
 ```yaml
@@ -102,12 +110,11 @@ services:
   code-scalpel:
     image: code-scalpel:3.0.0
     ports:
-      - "8593:8593"  # SSE endpoint
-      - "8594:8594"  # Health endpoint
+            - "8593:8593"  # MCP streamable-http endpoint at /mcp
     volumes:
       - ./:/app/code
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8594/health"]
+            test: ["CMD", "python", "-c", "import socket; s = socket.create_connection(('127.0.0.1', 8593), 2); s.close()"]
       interval: 30s
       timeout: 10s
       retries: 3

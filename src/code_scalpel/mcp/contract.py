@@ -344,6 +344,22 @@ def _maybe_get_success_and_error(payload: Any) -> tuple[bool | None, str | None]
     return None, None
 
 
+def _maybe_get_warnings(payload: Any) -> list[str]:
+    """Best-effort extraction of non-fatal warnings from a tool payload."""
+    try:
+        if isinstance(payload, BaseModel):
+            warnings = getattr(payload, "warnings", None)
+            if isinstance(warnings, list):
+                return [str(item) for item in warnings]
+        if isinstance(payload, dict):
+            warnings = payload.get("warnings")
+            if isinstance(warnings, list):
+                return [str(item) for item in warnings]
+    except Exception:
+        return []
+    return []
+
+
 def _classify_failure_message(message: str | None) -> ErrorCode | None:
     if not message:
         return None
@@ -482,8 +498,15 @@ def envelop_tool_function(
             if inspect.isawaitable(result):
                 result = await result
 
+            # [20260311_BUGFIX] Preserve pre-built envelopes returned by tool
+            # implementations instead of wrapping them again and corrupting
+            # any nested ToolError payload.
+            if isinstance(result, ToolResponseEnvelope):
+                return result
+
             duration_ms = int((time.perf_counter() - started) * 1000)
             success, err_msg = _maybe_get_success_and_error(result)
+            payload_warnings = _maybe_get_warnings(result)
 
             error_obj: ToolError | None = None
             if success is False:
@@ -526,6 +549,7 @@ def envelop_tool_function(
                 duration_ms=duration_ms,
                 error=error_obj,
                 upgrade_hints=[],
+                warnings=payload_warnings,
                 data=_filtered,
             )
         except BaseException as exc:  # noqa: BLE001

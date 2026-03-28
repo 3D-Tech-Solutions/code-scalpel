@@ -771,8 +771,8 @@ Contains runnable example code for all integrations:
 
 ## Project Context
 
-# [20260224_DOCS] Updated for v2.0.0 "Polyglot Expansion" release
-Code Scalpel v2.0.0 is an MCP server toolkit for AI-driven surgical code operations.
+# [20260327_DOCS] Updated for v2.1.2 "PHP & Oracle Patch" release
+Code Scalpel v2.1.2 is an MCP server toolkit for AI-driven surgical code operations.
 
 | Module | Status | Coverage |
 |--------|--------|----------|
@@ -782,48 +782,49 @@ Code Scalpel v2.0.0 is an MCP server toolkit for AI-driven surgical code operati
 | PDG Slicer | Stable | 100% |
 | Symbolic Engine | Stable | 100% |
 | Security Analysis | Stable | 100% |
-| MCP Server | Stable | 23 tools |
+| MCP Server | Stable | 22 tools |
 | Polyglot Parsers | Stable | 90%+ |
 | Autonomy Engine | Stable | 90%+ |
 | Unified Cache | Stable | 95%+ |
 
-**Test Suite:** 7,575+ tests passing (100% pass rate)
+**Version:** 2.1.2 (March 27, 2026)
+**Test Suite:** 7,700+ tests passing (100% pass rate)
 **Coverage Gate:** ≥90% combined (statement + branch)
-**Current Coverage:** 94.86% combined (96.28% stmt, 90.95% branch)
+**Current Coverage:** 94.86%+ combined (96%+ stmt, 90%+ branch)
 
-**MCP Tools (Current - v2.0.0 - 23 tools):**
-- `analyze_code` - Parse and extract code structure (Python, JS, TS, Java, C, C++, C#)
-- `extract_code` - Surgical extraction by symbol name with cross-file deps
+**MCP Tools (Current - v2.1.2 - 22 tools):**
+- `analyze_code` - Parse and extract code structure (13 languages: Python, JS, TS, Java, Go, Kotlin, PHP, Ruby, Swift, Rust, C, C++, C#)
+- `extract_code` - Surgical extraction by symbol name with cross-file deps (polyglot)
 - `update_symbol` - Safely replace functions/classes/methods in files
 - `rename_symbol` - Rename functions/classes/methods throughout codebase
-- `security_scan` - Taint-based vulnerability detection
-- `unified_sink_detect` - Unified polyglot sink detection with confidence
-- `cross_file_security_scan` - Cross-module taint tracking
+- `security_scan` - Taint-based vulnerability detection (polyglot)
+- `unified_sink_detect` - Unified polyglot sink detection with confidence (13 languages)
+- `cross_file_security_scan` - Cross-module taint tracking (polyglot)
 - `generate_unit_tests` - Symbolic execution test generation
 - `simulate_refactor` - Verify refactor preserves behavior
 - `symbolic_execute` - Symbolic path exploration with Z3
-- `crawl_project` - Project-wide analysis
+- `crawl_project` - Project-wide analysis (Python-first, expanding)
 - `scan_dependencies` - Scan for vulnerable dependencies (OSV API)
-- `get_file_context` - Get surrounding context for code locations
-- `get_symbol_references` - Find all uses of a symbol
-- `get_cross_file_dependencies` - Analyze cross-file dependency chains
-- `get_call_graph` - Generate call graphs and trace execution flow
-- `get_graph_neighborhood` - Extract k-hop neighborhood subgraph
+- `get_file_context` - Get surrounding context for code locations (polyglot)
+- `get_symbol_references` - Find all uses of a symbol (Python-first)
+- `get_cross_file_dependencies` - Analyze cross-file dependency chains (Python-first, JS/TS slice)
+- `get_call_graph` - Generate call graphs and trace execution flow (Python + JS/TS function parity)
+- `get_graph_neighborhood` - Extract k-hop neighborhood subgraph (Python + JS/TS)
 - `get_project_map` - Generate comprehensive project structure map
 - `validate_paths` - Validate path accessibility for Docker deployments
 - `verify_policy_integrity` - Cryptographic policy file verification
 - `code_policy_check` - Check code against style guides and compliance standards
 - `type_evaporation_scan` - Detect TypeScript type evaporation vulnerabilities
 
-**Latest Release:** v2.0.0
-- Release Date: February 24, 2026
+**Latest Release:** v2.1.2
+- Release Date: March 27, 2026
+- Previous Release: v2.1.0 (March 2, 2026) - Go language support
 - Release Notes: `docs/release_notes/RELEASE_NOTES_v2.0.0.md`
-- Evidence Files: `release_artifacts/v2.0.0/`
-- **Key Changes:**
-  - Full C, C++, and C# language support (tree-sitter parsers, IR normalizers, adapters)
-  - 262 new language-specific tests; 7,575 total tests passing
-  - Real-world pattern test suites for each language family
-  - Four normalizer bug fixes (IRIf/IRWhile `test` kwarg, tuple return types, C# operator declarations, C++ nested class extraction)
+- Evidence Files: `release_artifacts/v2.0.0/`, `release_artifacts/v2.1.0/`
+- **Recent Changes:**
+  - v2.1.2: CLI Oracle patch for error recovery
+  - v2.1.1: Metadata sync for PyPI packaging
+  - v2.1.0: Go language support added (13 total languages)
 
 ## Communication
 

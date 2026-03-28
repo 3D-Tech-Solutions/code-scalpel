@@ -251,14 +251,14 @@ class TestCallGraphResultModel:
     def test_result_with_polyglot_parity_metadata(self):
         """[20260308_TEST] Call graph result exposes explicit polyglot parity metadata."""
         result = CallGraphResultModel(
-            language_parity={"python": "advanced", "go": "method_local_slice"},
-            parity_legend={"advanced": "deep", "method_local_slice": "local"},
+            language_parity={"python": "advanced", "go": "runtime_slice"},
+            parity_legend={"advanced": "deep", "runtime_slice": "runtime"},
             runtime_scope_summary="summary",
         )
 
         assert result.language_parity["python"] == "advanced"
-        assert result.language_parity["go"] == "method_local_slice"
-        assert result.parity_legend["method_local_slice"] == "local"
+        assert result.language_parity["go"] == "runtime_slice"
+        assert result.parity_legend["runtime_slice"] == "runtime"
         assert result.runtime_scope_summary == "summary"
 
 
@@ -370,7 +370,7 @@ if __name__ == \"__main__\":
         assert result.language_parity["javascript"] == "runtime_slice"
         assert result.language_parity["typescript"] == "runtime_slice"
         assert result.language_parity["java"] == "runtime_slice"
-        assert result.language_parity["go"] == "method_local_slice"
+        assert result.language_parity["go"] == "runtime_slice"
         assert result.language_parity["rust"] == "method_local_slice"
         assert "advanced" in result.parity_legend
         assert "method_local_slice" in result.parity_legend
@@ -672,7 +672,7 @@ main();
         assert result.language_parity["javascript"] == "runtime_slice"
         assert result.language_parity["typescript"] == "runtime_slice"
         assert result.language_parity["java"] == "runtime_slice"
-        assert result.language_parity["go"] == "method_local_slice"
+        assert result.language_parity["go"] == "runtime_slice"
 
         files = {n.file for n in result.nodes}
         assert "index.ts" in files
@@ -1632,6 +1632,1003 @@ public class Child extends Base {
         assert len(child_matches) >= 2
         assert not base_matches
 
+    @pytest.mark.asyncio
+    async def test_java_project_tracks_this_constructor_chain(self, tmp_path):
+        """[20260309_TEST] Java call graph should capture this(...) constructor chaining within the same class."""
+        (tmp_path / "Helper.java").write_text("""
+public class Helper {
+    public Helper() {
+        this(1);
+    }
+
+    public Helper(int value) {
+    }
+}
+""")
+
+        with patch(
+            "code_scalpel.mcp.tools.graph._get_current_tier", return_value="pro"
+        ):
+            result = await get_call_graph(
+                project_root=str(tmp_path), include_circular_import_check=False
+            )
+
+        assert result.error is None
+        matches = [
+            edge
+            for edge in result.edges
+            if edge.caller == "Helper.java:Helper.Helper()"
+            and edge.callee == "Helper.java:Helper.Helper(int)"
+        ]
+        assert len(matches) == 1
+
+    @pytest.mark.asyncio
+    async def test_java_project_tracks_super_constructor_chain_across_files(
+        self, tmp_path
+    ):
+        """[20260309_TEST] Pro Java call graph should capture super(...) constructor chaining to superclass constructors."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+
+        (package_dir / "Base.java").write_text("""
+package demo;
+
+public class Base {
+    public Base(String value) {
+    }
+
+    public Base(int value) {
+    }
+}
+""")
+
+        (package_dir / "Child.java").write_text("""
+package demo;
+
+public class Child extends Base {
+    public Child() {
+        super(1);
+    }
+}
+""")
+
+        with patch(
+            "code_scalpel.mcp.tools.graph._get_current_tier", return_value="pro"
+        ):
+            result = await get_call_graph(
+                project_root=str(tmp_path), include_circular_import_check=False
+            )
+
+        assert result.error is None
+        matches = [
+            edge
+            for edge in result.edges
+            if edge.caller == "demo/Child.java:Child.Child"
+            and edge.callee == "demo/Base.java:Base.Base(int)"
+        ]
+        assert len(matches) == 1
+
+    @pytest.mark.asyncio
+    async def test_java_project_infers_var_locals_for_overloaded_calls(self, tmp_path):
+        """[20260309_TEST] Java call graph should infer var local types from initializers when selecting overloaded call targets."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+
+        (package_dir / "Helper.java").write_text("""
+package demo;
+
+public class Helper {
+    public static void tool(int value) {
+    }
+
+    public static void tool(String value) {
+    }
+}
+""")
+
+        (package_dir / "App.java").write_text("""
+package demo;
+
+public class App {
+    public void run() {
+        var value = make();
+        Helper.tool(value);
+    }
+
+    public String make() {
+        return "ok";
+    }
+}
+""")
+
+        with patch(
+            "code_scalpel.mcp.tools.graph._get_current_tier", return_value="pro"
+        ):
+            result = await get_call_graph(
+                project_root=str(tmp_path), include_circular_import_check=False
+            )
+
+        assert result.error is None
+        assert any(
+            edge.caller == "demo/App.java:App.run"
+            and edge.callee == "demo/App.java:App.make"
+            for edge in result.edges
+        )
+        assert any(
+            edge.caller == "demo/App.java:App.run"
+            and edge.callee == "demo/Helper.java:Helper.tool(String)"
+            for edge in result.edges
+        )
+        assert not any(
+            edge.caller == "demo/App.java:App.run"
+            and edge.callee == "demo/Helper.java:Helper.tool(int)"
+            for edge in result.edges
+        )
+
+    @pytest.mark.asyncio
+    async def test_java_project_infers_field_access_types_for_overloaded_calls(
+        self, tmp_path
+    ):
+        """[20260309_TEST] Java call graph should use field-access types like this.name when selecting overloaded call targets."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+
+        (package_dir / "Helper.java").write_text("""
+package demo;
+
+public class Helper {
+    public static void tool(int value) {
+    }
+
+    public static void tool(String value) {
+    }
+}
+""")
+
+        (package_dir / "App.java").write_text("""
+package demo;
+
+public class App {
+    private String name;
+
+    public void run() {
+        Helper.tool(this.name);
+    }
+}
+""")
+
+        with patch(
+            "code_scalpel.mcp.tools.graph._get_current_tier", return_value="pro"
+        ):
+            result = await get_call_graph(
+                project_root=str(tmp_path), include_circular_import_check=False
+            )
+
+        assert result.error is None
+        assert any(
+            edge.caller == "demo/App.java:App.run"
+            and edge.callee == "demo/Helper.java:Helper.tool(String)"
+            for edge in result.edges
+        )
+        assert not any(
+            edge.caller == "demo/App.java:App.run"
+            and edge.callee == "demo/Helper.java:Helper.tool(int)"
+            for edge in result.edges
+        )
+
+    @pytest.mark.asyncio
+    async def test_java_project_matches_boxed_arguments_for_overloaded_method_calls(
+        self, tmp_path
+    ):
+        """[20260309_TEST] Java call graph should treat boxed and primitive types as compatible when selecting overloaded method call targets."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+
+        (package_dir / "Helper.java").write_text("""
+package demo;
+
+public class Helper {
+    public static void tool(int value) {
+    }
+
+    public static void tool(String value) {
+    }
+}
+""")
+
+        (package_dir / "App.java").write_text("""
+package demo;
+
+public class App {
+    public void run() {
+        Integer value = 7;
+        Helper.tool(value);
+    }
+}
+""")
+
+        with patch(
+            "code_scalpel.mcp.tools.graph._get_current_tier", return_value="pro"
+        ):
+            result = await get_call_graph(
+                project_root=str(tmp_path), include_circular_import_check=False
+            )
+
+        assert result.error is None
+        assert any(
+            edge.caller == "demo/App.java:App.run"
+            and edge.callee == "demo/Helper.java:Helper.tool(int)"
+            for edge in result.edges
+        )
+        assert not any(
+            edge.caller == "demo/App.java:App.run"
+            and edge.callee == "demo/Helper.java:Helper.tool(String)"
+            for edge in result.edges
+        )
+
+    @pytest.mark.asyncio
+    async def test_java_project_matches_boxed_arguments_for_overloaded_constructors(
+        self, tmp_path
+    ):
+        """[20260309_TEST] Java call graph should treat boxed and primitive types as compatible when selecting overloaded constructors from direct object creation."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+
+        (package_dir / "Box.java").write_text("""
+package demo;
+
+public class Box {
+    public Box(int value) {
+    }
+
+    public Box(String value) {
+    }
+}
+""")
+
+        (package_dir / "App.java").write_text("""
+package demo;
+
+public class App {
+    public void run() {
+        Integer value = 7;
+        new Box(value);
+    }
+}
+""")
+
+        with patch(
+            "code_scalpel.mcp.tools.graph._get_current_tier", return_value="pro"
+        ):
+            result = await get_call_graph(
+                project_root=str(tmp_path), include_circular_import_check=False
+            )
+
+        assert result.error is None
+        assert any(
+            edge.caller == "demo/App.java:App.run"
+            and edge.callee == "demo/Box.java:Box.Box(int)"
+            for edge in result.edges
+        )
+        assert not any(
+            edge.caller == "demo/App.java:App.run"
+            and edge.callee == "demo/Box.java:Box.Box(String)"
+            for edge in result.edges
+        )
+
+    @pytest.mark.asyncio
+    async def test_java_project_infers_functional_interface_return_types_for_overloaded_calls(
+        self, tmp_path
+    ):
+        """[20260309_TEST] Java call graph should use functional-interface generic return types when method-reference-backed abstractions feed overloaded call targets."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+
+        (package_dir / "Helper.java").write_text("""
+package demo;
+
+public class Helper {
+    public static void tool(int value) {
+    }
+
+    public static void tool(String value) {
+    }
+}
+""")
+
+        (package_dir / "App.java").write_text("""
+package demo;
+
+import java.util.function.Supplier;
+
+public class App {
+    public void run() {
+        Supplier<String> supplier = this::make;
+        Helper.tool(supplier.get());
+    }
+
+    public String make() {
+        return "ok";
+    }
+}
+""")
+
+        with patch(
+            "code_scalpel.mcp.tools.graph._get_current_tier", return_value="pro"
+        ):
+            result = await get_call_graph(
+                project_root=str(tmp_path), include_circular_import_check=False
+            )
+
+        assert result.error is None
+        assert any(
+            edge.caller == "demo/App.java:App.run"
+            and edge.callee == "demo/Helper.java:Helper.tool(String)"
+            for edge in result.edges
+        )
+        assert not any(
+            edge.caller == "demo/App.java:App.run"
+            and edge.callee == "demo/Helper.java:Helper.tool(int)"
+            for edge in result.edges
+        )
+
+    @pytest.mark.asyncio
+    async def test_java_project_tracks_simple_method_reference_edges(self, tmp_path):
+        """[20260309_TEST] Java call graph should emit direct edges for simple method references like this::make."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+
+        (package_dir / "App.java").write_text("""
+package demo;
+
+public class App {
+    public void run() {
+        Runnable runnable = this::make;
+    }
+
+    public void make() {
+    }
+}
+""")
+
+        with patch(
+            "code_scalpel.mcp.tools.graph._get_current_tier", return_value="pro"
+        ):
+            result = await get_call_graph(
+                project_root=str(tmp_path), include_circular_import_check=False
+            )
+
+        assert result.error is None
+        assert any(
+            edge.caller == "demo/App.java:App.run"
+            and edge.callee == "demo/App.java:App.make"
+            for edge in result.edges
+        )
+
+    @pytest.mark.asyncio
+    async def test_java_project_infers_lambda_parameter_types_for_overloaded_calls(
+        self, tmp_path
+    ):
+        """[20260309_TEST] Java call graph should use functional-interface parameter types inside lambda bodies when selecting overloaded call targets."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+
+        (package_dir / "Helper.java").write_text("""
+package demo;
+
+public class Helper {
+    public static void tool(int value) {
+    }
+
+    public static void tool(String value) {
+    }
+}
+""")
+
+        (package_dir / "App.java").write_text("""
+package demo;
+
+import java.util.function.Consumer;
+
+public class App {
+    public void run() {
+        Consumer<String> consumer = value -> Helper.tool(value);
+    }
+}
+""")
+
+        with patch(
+            "code_scalpel.mcp.tools.graph._get_current_tier", return_value="pro"
+        ):
+            result = await get_call_graph(
+                project_root=str(tmp_path), include_circular_import_check=False
+            )
+
+        assert result.error is None
+        assert any(
+            edge.caller == "demo/App.java:App.run"
+            and edge.callee == "demo/Helper.java:Helper.tool(String)"
+            for edge in result.edges
+        )
+        assert not any(
+            edge.caller == "demo/App.java:App.run"
+            and edge.callee == "demo/Helper.java:Helper.tool(int)"
+            for edge in result.edges
+        )
+
+    @pytest.mark.asyncio
+    async def test_java_project_preserves_lambda_block_local_flow_for_overloaded_calls(
+        self, tmp_path
+    ):
+        """[20260309_TEST] Java call graph should keep lambda block bodies selector-aware after local declaration and assignment flow."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+
+        (package_dir / "Helper.java").write_text("""
+package demo;
+
+public class Helper {
+    public static void tool(int value) {
+    }
+
+    public static void tool(String value) {
+    }
+}
+""")
+
+        (package_dir / "App.java").write_text("""
+package demo;
+
+import java.util.function.Consumer;
+
+public class App {
+    public void run() {
+        Consumer<String> consumer = value -> {
+            String local;
+            local = value;
+            Helper.tool(local);
+        };
+    }
+}
+""")
+
+        with patch(
+            "code_scalpel.mcp.tools.graph._get_current_tier", return_value="pro"
+        ):
+            result = await get_call_graph(
+                project_root=str(tmp_path), include_circular_import_check=False
+            )
+
+        assert result.error is None
+        assert any(
+            edge.caller == "demo/App.java:App.run"
+            and edge.callee == "demo/Helper.java:Helper.tool(String)"
+            for edge in result.edges
+        )
+        assert not any(
+            edge.caller == "demo/App.java:App.run"
+            and edge.callee == "demo/Helper.java:Helper.tool(int)"
+            for edge in result.edges
+        )
+
+    @pytest.mark.asyncio
+    async def test_java_project_preserves_multi_parameter_lambda_block_local_flow(
+        self, tmp_path
+    ):
+        """[20260309_TEST] Java call graph should keep multi-parameter lambda block bodies selector-aware after mixed local flow refinements."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+
+        (package_dir / "Helper.java").write_text("""
+package demo;
+
+public class Helper {
+    public static void tool(int left, String right) {
+    }
+
+    public static void tool(String left, String right) {
+    }
+}
+""")
+
+        (package_dir / "App.java").write_text("""
+package demo;
+
+import java.util.function.BiConsumer;
+
+public class App {
+    public void run() {
+        BiConsumer<Integer, String> consumer = (left, right) -> {
+            Integer localLeft = left;
+            String localRight;
+            localRight = right;
+            Helper.tool(localLeft, localRight);
+        };
+    }
+}
+""")
+
+        with patch(
+            "code_scalpel.mcp.tools.graph._get_current_tier", return_value="pro"
+        ):
+            result = await get_call_graph(
+                project_root=str(tmp_path), include_circular_import_check=False
+            )
+
+        assert result.error is None
+        assert any(
+            edge.caller == "demo/App.java:App.run"
+            and edge.callee == "demo/Helper.java:Helper.tool(int, String)"
+            for edge in result.edges
+        )
+        assert not any(
+            edge.caller == "demo/App.java:App.run"
+            and edge.callee == "demo/Helper.java:Helper.tool(String, String)"
+            for edge in result.edges
+        )
+
+    @pytest.mark.asyncio
+    async def test_java_project_tracks_constructor_method_reference_edges(
+        self, tmp_path
+    ):
+        """[20260309_TEST] Java call graph should resolve constructor references like Box::new to canonical constructor selectors."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+
+        (package_dir / "Box.java").write_text("""
+package demo;
+
+public class Box {
+    public Box() {
+    }
+}
+""")
+
+        (package_dir / "App.java").write_text("""
+package demo;
+
+import java.util.function.Supplier;
+
+public class App {
+    public void run() {
+        Supplier<Box> supplier = Box::new;
+    }
+}
+""")
+
+        with patch(
+            "code_scalpel.mcp.tools.graph._get_current_tier", return_value="pro"
+        ):
+            result = await get_call_graph(
+                project_root=str(tmp_path), include_circular_import_check=False
+            )
+
+        assert result.error is None
+        assert any(
+            edge.caller == "demo/App.java:App.run"
+            and edge.callee == "demo/Box.java:Box.Box"
+            for edge in result.edges
+        )
+
+    @pytest.mark.asyncio
+    async def test_java_project_tracks_overloaded_function_constructor_reference_edges(
+        self, tmp_path
+    ):
+        """[20260309_TEST] Java call graph should use Function<T, R> parameter types to select overloaded constructor references."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+
+        (package_dir / "Box.java").write_text("""
+package demo;
+
+public class Box {
+    public Box(int value) {
+    }
+
+    public Box(String value) {
+    }
+}
+""")
+
+        (package_dir / "App.java").write_text("""
+package demo;
+
+import java.util.function.Function;
+
+public class App {
+    public void run() {
+        Function<String, Box> factory = Box::new;
+    }
+}
+""")
+
+        with patch(
+            "code_scalpel.mcp.tools.graph._get_current_tier", return_value="pro"
+        ):
+            result = await get_call_graph(
+                project_root=str(tmp_path), include_circular_import_check=False
+            )
+
+        assert result.error is None
+        assert any(
+            edge.caller == "demo/App.java:App.run"
+            and edge.callee == "demo/Box.java:Box.Box(String)"
+            for edge in result.edges
+        )
+        assert not any(
+            edge.caller == "demo/App.java:App.run"
+            and edge.callee == "demo/Box.java:Box.Box(int)"
+            for edge in result.edges
+        )
+
+    @pytest.mark.asyncio
+    async def test_java_project_tracks_overloaded_bifunction_constructor_reference_edges(
+        self, tmp_path
+    ):
+        """[20260309_TEST] Java call graph should use BiFunction<A, B, R> parameter types, including boxed primitives, to select overloaded constructor references."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+
+        (package_dir / "Box.java").write_text("""
+package demo;
+
+public class Box {
+    public Box(int left, String right) {
+    }
+
+    public Box(String left, String right) {
+    }
+}
+""")
+
+        (package_dir / "App.java").write_text("""
+package demo;
+
+import java.util.function.BiFunction;
+
+public class App {
+    public void run() {
+        BiFunction<Integer, String, Box> factory = Box::new;
+    }
+}
+""")
+
+        with patch(
+            "code_scalpel.mcp.tools.graph._get_current_tier", return_value="pro"
+        ):
+            result = await get_call_graph(
+                project_root=str(tmp_path), include_circular_import_check=False
+            )
+
+        assert result.error is None
+        assert any(
+            edge.caller == "demo/App.java:App.run"
+            and edge.callee == "demo/Box.java:Box.Box(int, String)"
+            for edge in result.edges
+        )
+        assert not any(
+            edge.caller == "demo/App.java:App.run"
+            and edge.callee == "demo/Box.java:Box.Box(String, String)"
+            for edge in result.edges
+        )
+
+    @pytest.mark.asyncio
+    async def test_java_project_tracks_qualified_static_method_reference_edges(
+        self, tmp_path
+    ):
+        """[20260309_TEST] Java call graph should resolve imported or qualified static method references to canonical targets."""
+        util_dir = tmp_path / "util"
+        util_dir.mkdir()
+        (util_dir / "Factory.java").write_text("""
+package util;
+
+public class Factory {
+    public static String make() {
+        return "ok";
+    }
+}
+""")
+
+        demo_dir = tmp_path / "demo"
+        demo_dir.mkdir()
+        (demo_dir / "App.java").write_text("""
+package demo;
+
+import java.util.function.Supplier;
+import util.Factory;
+
+public class App {
+    public void run() {
+        Supplier<String> supplier = Factory::make;
+    }
+}
+""")
+
+        with patch(
+            "code_scalpel.mcp.tools.graph._get_current_tier", return_value="pro"
+        ):
+            result = await get_call_graph(
+                project_root=str(tmp_path), include_circular_import_check=False
+            )
+
+        assert result.error is None
+        assert any(
+            edge.caller == "demo/App.java:App.run"
+            and edge.callee == "util/Factory.java:Factory.make"
+            for edge in result.edges
+        )
+
+    @pytest.mark.asyncio
+    async def test_java_project_infers_custom_sam_lambda_parameter_types_for_overloaded_calls(
+        self, tmp_path
+    ):
+        """[20260309_TEST] Java call graph should use project-local generic SAM interfaces to type lambda parameters for overloaded call targets."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+
+        (package_dir / "Helper.java").write_text("""
+package demo;
+
+public class Helper {
+    public static void tool(int value) {
+    }
+
+    public static void tool(String value) {
+    }
+}
+""")
+
+        (package_dir / "App.java").write_text("""
+package demo;
+
+interface Mapper<T> {
+    void apply(T value);
+}
+
+public class App {
+    public void run() {
+        Mapper<String> mapper = value -> Helper.tool(value);
+    }
+}
+""")
+
+        with patch(
+            "code_scalpel.mcp.tools.graph._get_current_tier", return_value="pro"
+        ):
+            result = await get_call_graph(
+                project_root=str(tmp_path), include_circular_import_check=False
+            )
+
+        assert result.error is None
+        assert any(
+            edge.caller == "demo/App.java:App.run"
+            and edge.callee == "demo/Helper.java:Helper.tool(String)"
+            for edge in result.edges
+        )
+        assert not any(
+            edge.caller == "demo/App.java:App.run"
+            and edge.callee == "demo/Helper.java:Helper.tool(int)"
+            for edge in result.edges
+        )
+
+    @pytest.mark.asyncio
+    async def test_java_project_tracks_custom_sam_constructor_reference_edges(
+        self, tmp_path
+    ):
+        """[20260309_TEST] Java call graph should use project-local generic SAM interfaces to select overloaded constructor references."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+
+        (package_dir / "Box.java").write_text("""
+package demo;
+
+public class Box {
+    public Box(int value) {
+    }
+
+    public Box(String value) {
+    }
+}
+""")
+
+        (package_dir / "App.java").write_text("""
+package demo;
+
+interface Factory<T, R> {
+    R create(T value);
+}
+
+public class App {
+    public void run() {
+        Factory<String, Box> factory = Box::new;
+    }
+}
+""")
+
+        with patch(
+            "code_scalpel.mcp.tools.graph._get_current_tier", return_value="pro"
+        ):
+            result = await get_call_graph(
+                project_root=str(tmp_path), include_circular_import_check=False
+            )
+
+        assert result.error is None
+        assert any(
+            edge.caller == "demo/App.java:App.run"
+            and edge.callee == "demo/Box.java:Box.Box(String)"
+            for edge in result.edges
+        )
+        assert not any(
+            edge.caller == "demo/App.java:App.run"
+            and edge.callee == "demo/Box.java:Box.Box(int)"
+            for edge in result.edges
+        )
+
+    @pytest.mark.asyncio
+    async def test_java_project_infers_multi_parameter_custom_sam_lambda_types(
+        self, tmp_path
+    ):
+        """[20260309_TEST] Java call graph should use project-local multi-parameter SAM interfaces to type lambda parameters for overloaded call targets."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+
+        (package_dir / "Helper.java").write_text("""
+package demo;
+
+public class Helper {
+    public static void tool(int left, String right) {
+    }
+
+    public static void tool(String left, String right) {
+    }
+}
+""")
+
+        (package_dir / "App.java").write_text("""
+package demo;
+
+interface Combiner<A, B> {
+    void apply(A left, B right);
+}
+
+public class App {
+    public void run() {
+        Combiner<Integer, String> combiner = (left, right) -> Helper.tool(left, right);
+    }
+}
+""")
+
+        with patch(
+            "code_scalpel.mcp.tools.graph._get_current_tier", return_value="pro"
+        ):
+            result = await get_call_graph(
+                project_root=str(tmp_path), include_circular_import_check=False
+            )
+
+        assert result.error is None
+        assert any(
+            edge.caller == "demo/App.java:App.run"
+            and edge.callee == "demo/Helper.java:Helper.tool(int, String)"
+            for edge in result.edges
+        )
+        assert not any(
+            edge.caller == "demo/App.java:App.run"
+            and edge.callee == "demo/Helper.java:Helper.tool(String, String)"
+            for edge in result.edges
+        )
+
+    @pytest.mark.asyncio
+    async def test_java_project_infers_inherited_custom_sam_lambda_types(
+        self, tmp_path
+    ):
+        """[20260309_TEST] Java call graph should resolve inherited project-local SAM signatures for lambdas."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+
+        (package_dir / "Helper.java").write_text("""
+package demo;
+
+public class Helper {
+    public static void tool(int value) {
+    }
+
+    public static void tool(String value) {
+    }
+}
+""")
+
+        (package_dir / "App.java").write_text("""
+package demo;
+
+interface BaseMapper<T> {
+    void apply(T value);
+}
+
+interface Mapper<T> extends BaseMapper<T> {
+}
+
+public class App {
+    public void run() {
+        Mapper<String> mapper = value -> Helper.tool(value);
+    }
+}
+""")
+
+        with patch(
+            "code_scalpel.mcp.tools.graph._get_current_tier", return_value="pro"
+        ):
+            result = await get_call_graph(
+                project_root=str(tmp_path), include_circular_import_check=False
+            )
+
+        assert result.error is None
+        assert any(
+            edge.caller == "demo/App.java:App.run"
+            and edge.callee == "demo/Helper.java:Helper.tool(String)"
+            for edge in result.edges
+        )
+        assert not any(
+            edge.caller == "demo/App.java:App.run"
+            and edge.callee == "demo/Helper.java:Helper.tool(int)"
+            for edge in result.edges
+        )
+
+    @pytest.mark.asyncio
+    async def test_java_project_tracks_inherited_custom_sam_constructor_reference_edges(
+        self, tmp_path
+    ):
+        """[20260309_TEST] Java call graph should resolve inherited project-local SAM signatures for constructor references."""
+        package_dir = tmp_path / "demo"
+        package_dir.mkdir()
+
+        (package_dir / "Box.java").write_text("""
+package demo;
+
+public class Box {
+    public Box(int value) {
+    }
+
+    public Box(String value) {
+    }
+}
+""")
+
+        (package_dir / "App.java").write_text("""
+package demo;
+
+interface BaseFactory<T, R> {
+    R create(T value);
+}
+
+interface Factory<T, R> extends BaseFactory<T, R> {
+}
+
+public class App {
+    public void run() {
+        Factory<String, Box> factory = Box::new;
+    }
+}
+""")
+
+        with patch(
+            "code_scalpel.mcp.tools.graph._get_current_tier", return_value="pro"
+        ):
+            result = await get_call_graph(
+                project_root=str(tmp_path), include_circular_import_check=False
+            )
+
+        assert result.error is None
+        assert any(
+            edge.caller == "demo/App.java:App.run"
+            and edge.callee == "demo/Box.java:Box.Box(String)"
+            for edge in result.edges
+        )
+        assert not any(
+            edge.caller == "demo/App.java:App.run"
+            and edge.callee == "demo/Box.java:Box.Box(int)"
+            for edge in result.edges
+        )
+
 
 class TestGenericPolyglotSupport:
     """Generic IR-backed call graph coverage for the broader polyglot set."""
@@ -1769,7 +2766,7 @@ class TestGenericPolyglotSupport:
             )
 
         assert result.error is None
-        assert result.language_parity["go"] == "method_local_slice"
+        assert result.language_parity["go"] == "runtime_slice"
         assert {node.name for node in result.nodes} >= {"Worker.run", "Worker.help"}
         assert any(
             edge.caller.endswith(":Worker.run") and edge.callee.endswith(":Worker.help")

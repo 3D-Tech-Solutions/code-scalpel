@@ -105,3 +105,63 @@ def create_user():
     assert result.schema_coverage is not None
     # Custom rules
     assert len(result.custom_rule_violations) >= 1
+
+
+@pytest.mark.asyncio
+async def test_type_evaporation_scan_resolves_malformed_windows_paths(monkeypatch):
+    """Malformed '/K:/...' file paths should resolve before scanning."""
+    frontend_real = "/tmp/frontend.ts"
+    backend_real = "/tmp/backend.py"
+
+    def _fake_resolve(path: str, project_root: str | None = None) -> str:
+        if path.endswith("frontend.ts"):
+            return frontend_real
+        if path.endswith("backend.py"):
+            return backend_real
+        return path
+
+    monkeypatch.setattr("code_scalpel.mcp.tools.security.resolve_path", _fake_resolve)
+    monkeypatch.setattr(
+        "builtins.open",
+        lambda path, mode="r", encoding=None: __import__("io").StringIO(
+            "const payload = JSON.parse('{}');"
+            if str(path).endswith("frontend.ts")
+            else "def handler():\n    return {}\n"
+        ),
+    )
+
+    result = await security.type_evaporation_scan(
+        frontend_file_path="/K:/backup/Develop/code-scalpel-ninja-warrior/frontend.ts",
+        backend_file_path="/K:/backup/Develop/code-scalpel-ninja-warrior/backend.py",
+    )
+
+    assert result.error is None
+    assert result.success is True
+
+
+@pytest.mark.asyncio
+async def test_type_evaporation_scan_returns_correction_needed_for_unresolvable_windows_path(
+    monkeypatch,
+):
+    """Unresolvable '/K:/...' file paths should return correction_needed."""
+    resolver_error = FileNotFoundError(
+        "Cannot access file: /K:/backup/Develop/code-scalpel-ninja-warrior/frontend.ts (not found)\n\n"
+        "Suggestion:\n"
+        "Windows path detected but file not accessible.\n"
+        "If running in WSL, the path should be accessible at:\n\n"
+        "  /mnt/k/backup/Develop/code-scalpel-ninja-warrior/frontend.ts"
+    )
+
+    monkeypatch.setattr(
+        "code_scalpel.mcp.tools.security.resolve_path",
+        lambda path, project_root=None: (_ for _ in ()).throw(resolver_error),
+    )
+
+    result = await security.type_evaporation_scan(
+        frontend_file_path="/K:/backup/Develop/code-scalpel-ninja-warrior/frontend.ts",
+        backend_code="def handler():\n    return {}\n",
+    )
+
+    assert result.error is not None
+    assert result.error.error_code == "correction_needed"
+    assert "/mnt/k/backup/Develop/code-scalpel-ninja-warrior/frontend.ts" in result.error.error

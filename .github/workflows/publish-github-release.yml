@@ -1,9 +1,6 @@
 name: Publish GitHub Release
 
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
     inputs:
       tag:

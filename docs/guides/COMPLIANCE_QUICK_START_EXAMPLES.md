@@ -322,6 +322,8 @@ def bill_patient(patient_email, card_number, medical_charges):
 
 **Get a PDF report for auditors:**
 
+> [20260310_DOCS] PDF compliance reports are Enterprise-only. If Community or Pro callers request `generate_report=True` or `compliance_standards=[...]`, the MCP tool now returns an explicit `upgrade_required` error instead of silently degrading to a basic scan. See [../compliance/README.md](../compliance/README.md) for the live runtime contract.
+
 ```bash
 # AI agent calls: code_policy_check(
 #     paths=["src/"], 

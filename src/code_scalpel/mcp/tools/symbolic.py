@@ -21,8 +21,10 @@ from code_scalpel.mcp.oracle_middleware import (
     with_oracle_resilience,
     GenerateTestsStrategy,
 )
+from code_scalpel.mcp.path_resolver import resolve_path
 from code_scalpel import __version__ as _pkg_version
 from code_scalpel.mcp.protocol import _get_current_tier
+from code_scalpel.mcp.validators.core import ValidationError
 
 _ORIG_SYM_GENERATE_TESTS = sym_helpers._generate_tests_sync
 _ORIG_SYM_SYMBOLIC = sym_helpers._symbolic_execute_sync
@@ -38,12 +40,18 @@ mcp = import_module("code_scalpel.mcp.protocol").mcp
 )
 async def symbolic_execute(
     code: str,
+    language: str = "python",
     max_paths: int | None = None,
     max_depth: int | None = None,
 ) -> ToolResponseEnvelope:
-    """Perform symbolic execution on Python code.
+    """Perform symbolic execution on source code.
 
-    Analyzes Python code symbolically to explore execution paths, discover constraints,
+    [20260309_FEATURE] Added source-language routing so the public symbolic tool
+    can expose the existing Java IR-backed engine path. Python still has the
+    deepest support; Java currently uses the shared IR path plus a narrow
+    fallback branch analysis when needed.
+
+    Analyzes source code symbolically to explore execution paths, discover constraints,
     and identify potential issues without concrete execution.
 
     **Tier Behavior:**
@@ -57,7 +65,9 @@ async def symbolic_execute(
     - Enterprise: All Pro + distributed execution, memory modeling (max_paths=unlimited, max_depth=unlimited)
 
     **Args:**
-        code (str): Python code to symbolically execute.
+        code (str): Source code to symbolically execute.
+        language (str): Source language. Supported runtime frontends: ``python``, ``javascript``, ``typescript``, ``java``.
+            The TypeScript slice is bounded to IR-backed control-flow and does not model full runtime semantics.
         max_paths (int, optional): Maximum execution paths to explore (subject to tier limits).
         max_depth (int, optional): Maximum loop unrolling depth (subject to tier limits).
 
@@ -82,7 +92,82 @@ async def symbolic_execute(
     """
     started = time.perf_counter()
     try:
+        # [20260311_BUGFIX] Validate shape and language at the public wrapper so
+        # callers receive guided invalid_argument responses instead of internal_error.
         tier = _get_current_tier()
+        supported_languages = {"python", "javascript", "typescript", "java"}
+
+        if not code or not code.strip():
+            error_obj = ToolError(
+                error="'code' must be a non-empty source string.",
+                error_code="invalid_argument",
+                error_details={"hint": "Provide source code to symbolically execute."},
+            )
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            return make_envelope(
+                data=None,
+                tool_id="symbolic_execute",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=duration_ms,
+                error=error_obj,
+            )
+
+        normalized_language = (language or "python").lower()
+        if normalized_language == "ts":
+            normalized_language = "typescript"
+
+        if normalized_language not in supported_languages:
+            error_obj = ToolError(
+                error=(
+                    f"Unsupported language: {language}. Must be one of "
+                    f"{sorted(supported_languages)}"
+                ),
+                error_code="invalid_argument",
+                error_details={"supported_languages": sorted(supported_languages)},
+            )
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            return make_envelope(
+                data=None,
+                tool_id="symbolic_execute",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=duration_ms,
+                error=error_obj,
+            )
+
+        if max_paths is not None and max_paths <= 0:
+            error_obj = ToolError(
+                error="'max_paths' must be a positive integer when provided.",
+                error_code="invalid_argument",
+                error_details={"max_paths": max_paths},
+            )
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            return make_envelope(
+                data=None,
+                tool_id="symbolic_execute",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=duration_ms,
+                error=error_obj,
+            )
+
+        if max_depth is not None and max_depth <= 0:
+            error_obj = ToolError(
+                error="'max_depth' must be a positive integer when provided.",
+                error_code="invalid_argument",
+                error_details={"max_depth": max_depth},
+            )
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            return make_envelope(
+                data=None,
+                tool_id="symbolic_execute",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=duration_ms,
+                error=error_obj,
+            )
+
         caps = feature_caps.get_tool_capabilities("symbolic_execute", tier)
         limits = caps.get("limits", {}) if isinstance(caps, dict) else {}
 
@@ -122,6 +207,7 @@ async def symbolic_execute(
             effective_max_paths,
             effective_max_depth,
             constraint_types,
+            language,
             tier=tier,
             capabilities=caps,
         )
@@ -155,11 +241,17 @@ async def generate_unit_tests(
     code: str | None = None,
     file_path: str | None = None,
     function_name: str | None = None,
+    language: str = "python",
     framework: str = "pytest",
     data_driven: bool = False,
     crash_log: str | None = None,
 ) -> ToolResponseEnvelope:
     """Generate unit tests from code using symbolic execution.
+
+        [20260309_FEATURE] Added source-language routing so the public test
+        generation tool can reach the existing Java-aware generator path.
+        Python remains the deepest path; Java currently uses the partial
+        generator support already present underneath this MCP wrapper.
 
         **Tier Behavior:**
         - Community: Max 5 test cases, pytest framework only
@@ -172,14 +264,16 @@ async def generate_unit_tests(
         - Enterprise: All Pro + bug reproduction (max_test_cases=unlimited)
 
         Input Methods (choose one):
-        - `code`: Direct Python code string to analyze
-        - `file_path`: Path to Python file containing the code
+        - `code`: Direct source code string to analyze
+        - `file_path`: Path to source file containing the code
         - `function_name`: Name of function to generate tests for (requires file_path)
 
         **Args:**
-            code (str, optional): Python code string to generate tests for.
-            file_path (str, optional): Path to Python file to analyze.
+            code (str, optional): Source code string to generate tests for.
+            file_path (str, optional): Path to source file to analyze.
             function_name (str, optional): Specific function name to target.
+            language (str): Source language. Supported: ``python``, ``javascript``, ``java``, ``typescript``.
+                The TypeScript path is contract-only and returns a scaffold, not symbolic test semantics.
             framework (str): Test framework. Default: "pytest".
             data_driven (bool): Generate parameterized data-driven tests (Pro+). Default: False.
             crash_log (str, optional): Crash log for bug reproduction tests (Enterprise only).
@@ -209,76 +303,110 @@ async def generate_unit_tests(
         limits = caps.get("limits", {})
         cap_set = caps.get("capabilities", set())
 
+        supported_languages = {"python", "javascript", "java", "typescript"}
+
+        if code is None and file_path is None:
+            return make_envelope(
+                data=None,
+                tool_id="generate_unit_tests",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=int((time.perf_counter() - started) * 1000),
+                error=ToolError(
+                    error="Either 'code' or 'file_path' must be provided.",
+                    error_code="invalid_argument",
+                    error_details={"hint": "Provide source code directly or pass a file_path for test generation."},
+                ),
+            )
+
+        normalized_language = (language or "python").lower()
+        if normalized_language == "ts":
+            normalized_language = "typescript"
+        if normalized_language not in supported_languages:
+            return make_envelope(
+                data=None,
+                tool_id="generate_unit_tests",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=int((time.perf_counter() - started) * 1000),
+                error=ToolError(
+                    error=(
+                        f"Unsupported language: {language}. Must be one of "
+                        f"{sorted(supported_languages)}"
+                    ),
+                    error_code="invalid_argument",
+                    error_details={"supported_languages": sorted(supported_languages)},
+                ),
+            )
+
         max_test_cases = limits.get("max_test_cases")
         allowed_frameworks = limits.get("test_frameworks")
         data_driven_supported = "data_driven_tests" in cap_set
         bug_reproduction_supported = "bug_reproduction" in cap_set
 
         if data_driven and not data_driven_supported:
-            result = TestGenerationResult(
-                success=False,
-                function_name=function_name or "unknown",
-                test_count=0,
-                total_test_cases=0,
-                error="Data-driven test generation requires Pro tier or higher.",
-                tier_applied=tier,
-                framework_used=framework,
-                max_test_cases_limit=max_test_cases,
-                data_driven_enabled=False,
-                bug_reproduction_enabled=False,
-            )
-            duration_ms = int((time.perf_counter() - started) * 1000)
             return make_envelope(
-                data=result,
+                data=None,
                 tool_id="generate_unit_tests",
                 tool_version=_pkg_version,
                 tier=tier,
-                duration_ms=duration_ms,
+                duration_ms=int((time.perf_counter() - started) * 1000),
+                error=ToolError(
+                    error="Data-driven test generation requires Pro tier or higher.",
+                    error_code="upgrade_required",
+                    error_details={"feature": "data_driven_tests", "current_tier": tier},
+                ),
             )
 
         if crash_log and not bug_reproduction_supported:
-            result = TestGenerationResult(
-                success=False,
-                function_name=function_name or "unknown",
-                test_count=0,
-                total_test_cases=0,
-                error="Bug reproduction test generation requires Enterprise tier.",
-                tier_applied=tier,
-                framework_used=framework,
-                max_test_cases_limit=max_test_cases,
-                data_driven_enabled=data_driven,
-                bug_reproduction_enabled=False,
-            )
-            duration_ms = int((time.perf_counter() - started) * 1000)
             return make_envelope(
-                data=result,
+                data=None,
                 tool_id="generate_unit_tests",
                 tool_version=_pkg_version,
                 tier=tier,
-                duration_ms=duration_ms,
+                duration_ms=int((time.perf_counter() - started) * 1000),
+                error=ToolError(
+                    error="Bug reproduction test generation requires Enterprise tier.",
+                    error_code="upgrade_required",
+                    error_details={"feature": "bug_reproduction", "current_tier": tier},
+                ),
             )
 
-        if isinstance(allowed_frameworks, list) and framework not in allowed_frameworks:
-            result = TestGenerationResult(
-                success=False,
-                function_name=function_name or "unknown",
-                test_count=0,
-                total_test_cases=0,
-                error=f"Unsupported framework: {framework}",
-                tier_applied=tier,
-                framework_used=framework,
-                max_test_cases_limit=max_test_cases,
-                data_driven_enabled=data_driven,
-                bug_reproduction_enabled=crash_log is not None,
-            )
-            duration_ms = int((time.perf_counter() - started) * 1000)
+        if isinstance(allowed_frameworks, (list, tuple, set)) and framework not in allowed_frameworks:
             return make_envelope(
-                data=result,
+                data=None,
                 tool_id="generate_unit_tests",
                 tool_version=_pkg_version,
                 tier=tier,
-                duration_ms=duration_ms,
+                duration_ms=int((time.perf_counter() - started) * 1000),
+                error=ToolError(
+                    error=f"Unsupported framework: {framework}",
+                    error_code="invalid_argument",
+                    error_details={"framework": framework, "allowed_frameworks": allowed_frameworks},
+                ),
             )
+
+        # [20260311_BUGFIX] Normalize file_path before helper dispatch so malformed
+        # Windows/WSL drive paths return correction-aware errors instead of generic failures.
+        if file_path is not None:
+            from code_scalpel.mcp.helpers.session import _get_project_root
+
+            try:
+                file_path = resolve_path(file_path, str(_get_project_root()))
+            except FileNotFoundError as exc:
+                duration_ms = int((time.perf_counter() - started) * 1000)
+                return make_envelope(
+                    data=None,
+                    tool_id="generate_unit_tests",
+                    tool_version=_pkg_version,
+                    tier=tier,
+                    duration_ms=duration_ms,
+                    error=ToolError(
+                        error=str(exc),
+                        error_code="correction_needed",
+                        error_details={"hint": str(exc)},
+                    ),
+                )
 
         helper = sym_helpers._generate_tests_sync
         if sym_helpers._generate_tests_sync is not _ORIG_SYM_GENERATE_TESTS:
@@ -301,16 +429,42 @@ async def generate_unit_tests(
                     # If signature cannot be inspected, fall back to sym_helpers
                     helper = sym_helpers._generate_tests_sync
 
-        result = await asyncio.to_thread(
-            helper,
-            code,
-            file_path,
-            function_name,
-            framework,
-            max_test_cases,
-            data_driven,
-            crash_log,
-        )
+        try:
+            result = await asyncio.to_thread(
+                helper,
+                code,
+                file_path,
+                function_name,
+                framework,
+                max_test_cases,
+                data_driven,
+                crash_log,
+                language,
+            )
+        except ValidationError as exc:
+            suggestions = GenerateTestsStrategy.suggest(
+                exc,
+                {
+                    "file_path": file_path,
+                    "code": code,
+                    "function_name": function_name,
+                },
+            )
+            return make_envelope(
+                data=None,
+                tool_id="generate_unit_tests",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=int((time.perf_counter() - started) * 1000),
+                error=ToolError(
+                    error=str(exc),
+                    error_code="correction_needed",
+                    error_details={
+                        "suggestions": suggestions,
+                        "hint": str(exc),
+                    },
+                ),
+            )
         duration_ms = int((time.perf_counter() - started) * 1000)
         return make_envelope(
             data=result,
@@ -346,6 +500,10 @@ async def simulate_refactor(
 
     Verifies code changes are safe before applying them by detecting security issues
     and structural changes that could break functionality.
+
+    [20260315_DOCS] The wrapper infers language from the provided source text.
+    Python remains the deepest path; JavaScript, TypeScript, and Java currently
+    use bounded structural/security checks rather than full semantic parity.
 
     **Tier Behavior:**
       - Community: Basic refactor simulation (max 5MB file size, basic analysis depth)
@@ -385,7 +543,47 @@ async def simulate_refactor(
     """
     started = time.perf_counter()
     try:
+        # [20260311_BUGFIX] Validate refactor request shape up front so malformed
+        # inputs return explicit invalid_argument results.
         tier = _get_current_tier()
+
+        if not original_code or not original_code.strip():
+            error_obj = ToolError(
+                error="'original_code' must be a non-empty source string.",
+                error_code="invalid_argument",
+                error_details={"hint": "Provide the original code to compare against."},
+            )
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            return make_envelope(
+                data=None,
+                tool_id="simulate_refactor",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=duration_ms,
+                error=error_obj,
+            )
+
+        if (new_code is None and patch is None) or (
+            new_code is not None and patch is not None
+        ):
+            error_obj = ToolError(
+                error="Provide exactly one of 'new_code' or 'patch'.",
+                error_code="invalid_argument",
+                error_details={
+                    "new_code_provided": new_code is not None,
+                    "patch_provided": patch is not None,
+                },
+            )
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            return make_envelope(
+                data=None,
+                tool_id="simulate_refactor",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=duration_ms,
+                error=error_obj,
+            )
+
         caps = feature_caps.get_tool_capabilities("simulate_refactor", tier)
         limits = caps.get("limits", {})
         tool_caps = caps.get("capabilities", set())

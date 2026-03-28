@@ -3,6 +3,7 @@ from unittest.mock import MagicMock
 
 from code_scalpel.ir.nodes import (
     IRAssign,
+    IRAttribute,
     IRCall,
     IRClassDef,
     IRConstant,
@@ -318,6 +319,41 @@ class TestJavaNormalizer(unittest.TestCase):
 
 # [20251215_TEST] Java generics, nested classes, annotations integration tests
 class TestJavaNormalizerIntegration(unittest.TestCase):
+    def test_method_invocation_preserves_structured_receiver_metadata(self):
+        source = """
+        public class UserController {
+            private UserFactory factory = new UserFactory();
+
+            public String handle(String user) {
+                return this.factory.create(user).run();
+            }
+        }
+        """
+
+        ir = JavaNormalizer().normalize(source)
+        controller = next(n for n in ir.body if isinstance(n, IRClassDef))
+        handle = next(
+            n
+            for n in controller.body
+            if isinstance(n, IRFunctionDef) and n.name == "handle"
+        )
+        return_stmt = next(n for n in handle.body if isinstance(n, IRReturn))
+        run_call = return_stmt.value
+
+        self.assertIsInstance(run_call, IRCall)
+
+        receiver_expr = run_call._metadata.get("java_receiver_expr")
+        self.assertIsInstance(receiver_expr, IRCall)
+        self.assertEqual(
+            run_call._metadata.get("java_receiver_text"), "this.factory.create(user)"
+        )
+
+        nested_receiver = receiver_expr._metadata.get("java_receiver_expr")
+        self.assertIsInstance(nested_receiver, IRAttribute)
+        self.assertIsInstance(nested_receiver.value, IRName)
+        self.assertEqual(nested_receiver.value.id, "this")
+        self.assertEqual(nested_receiver.attr, "factory")
+
     def test_class_extends_implements_and_nested_with_generics(self):
         source = """
         package com.acme;

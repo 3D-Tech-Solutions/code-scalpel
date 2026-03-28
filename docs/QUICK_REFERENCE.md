@@ -174,9 +174,9 @@ Both should be:
 ### Pricing Enforcement (Automated)
 
 Every release will verify:
-- ✅ COMMUNITY tier limited to 1000 files (not 5000)
+- ✅ COMMUNITY scanner/crawl tier limited to 500 files (not 5000)
 - ✅ PRO tier can cross-file scan (COMMUNITY can't)
-- ✅ ENTERPRISE can do symbolic execution (PRO can't)
+- ✅ PRO and ENTERPRISE both support symbolic execution; ENTERPRISE adds deeper/formal capabilities
 - ✅ 22 tools always available (none hidden per tier)
 
 ### Capability Documentation (Executable)

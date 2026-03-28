@@ -1,17 +1,18 @@
 # Code Scalpel Server - Docker Compose v3.0.0
-# Supports MCP-compliant server with HTTP and HTTPS
+# Supports MCP-compliant server with streamable HTTP and HTTPS
 # [20251218_DOCS] Updated to v3.0.0 Autonomy release
+# [20260310_DOCS] Corrected MCP transport references and removed non-existent MCP health endpoint assumptions.
 #
 # For governed agent deployments, run Code Scalpel under Aegis-OS:
 #   https://github.com/tescolopio/aegis-os
 # Code Scalpel is included in the Aegis-OS docker-compose.yml as the default MCP toolkit.
-#   Service: code-scalpel  |  Port: 18090  |  SSE endpoint: http://localhost:18090/sse
+#   Service: code-scalpel  |  Port: 18090  |  MCP endpoint: http://localhost:18090/mcp
 #   docker-compose up  (from the aegis-os repo) starts the full governed stack.
 
 version: '3.8'
 
 services:
-  # MCP server with HTTP (for local development)
+  # MCP server with streamable HTTP (for local development)
   # Use this for local testing without SSL certificates
   mcp-server:
     build:
@@ -22,7 +23,6 @@ services:
     restart: unless-stopped
     ports:
       - "8593:8593"
-      - "8594:8594"  # Health endpoint
     volumes:
       # Mount your project directory to /workspace for analysis
       - ${CODE_SCALPEL_WORKSPACE:-.}:/workspace
@@ -34,7 +34,7 @@ services:
       - SCALPEL_ROOT=/workspace
       - PYTHONUNBUFFERED=1
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8594/health"]
+      test: ["CMD", "python", "-c", "import socket; s = socket.create_connection(('127.0.0.1', 8593), 2); s.close()"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -57,7 +57,6 @@ services:
     restart: unless-stopped
     ports:
       - "8443:8593"   # HTTPS MCP endpoint
-      - "8444:8594"   # HTTPS Health endpoint
     volumes:
       # Mount your project directory
       - ${CODE_SCALPEL_WORKSPACE:-.}:/workspace
@@ -74,8 +73,8 @@ services:
       - SSL_CERT=/certs/cert.pem
       - SSL_KEY=/certs/key.pem
     healthcheck:
-      # Use HTTPS for health check when SSL is enabled
-      test: ["CMD", "curl", "-f", "-k", "https://localhost:8594/health"]
+      # Verify the TLS listener is accepting connections.
+      test: ["CMD", "python", "-c", "import socket; s = socket.create_connection(('127.0.0.1', 8593), 2); s.close()"]
       interval: 30s
       timeout: 10s
       retries: 3

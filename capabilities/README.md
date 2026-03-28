@@ -62,15 +62,15 @@ Each file contains:
   "tier": "pro",
   "generated_at": "2026-01-27T14:09:07.492883Z",
   "tool_count": 22,
-  "available_count": 19,
+  "available_count": 22,
   "capabilities": {
     "tool_id": {
       "tool_id": "analyze_code",
       "tier": "pro",
       "available": true,
       "limits": {
-        "max_file_size_mb": 10,
-        "languages": ["python", "javascript", "typescript", "java", "c", "cpp", "csharp"]
+        "max_file_size_mb": 100,
+        "languages": ["python", "javascript", "typescript", "java", "c", "cpp", "csharp", "go", "kotlin", "php", "ruby", "swift", "rust"]
       }
     },
     ...
@@ -100,7 +100,7 @@ All 22 core tools are available in all tiers (Community, Pro, Enterprise). The t
 - scan_dependencies, security_scan, simulate_refactor, symbolic_execute
 - type_evaporation_scan, unified_sink_detect, update_symbol
 
-**2 Core System Tools** (no tier gating):
+**2 Policy/System Tools** (present at all tiers, with tier-specific capabilities):
 - validate_paths, verify_policy_integrity
 
 ### Limit Escalation Example
@@ -135,7 +135,7 @@ Tool: validate_paths (System Tool)
 
 | Category | Community | Pro | Enterprise |
 |----------|-----------|-----|------------|
-| Development Tools (20) | ✓ Solo dev limits (≤500 files) | ✓ Unlimited | ✓ Unlimited + Governance |
-| System Tools (2) | ✓ Standard | ✓ Standard | ✓ Standard |
+| Development Tools (20) | ✓ Solo-dev limits on many surfaces | ✓ Expanded features, often Enterprise-scale limits | ✓ Expanded features plus governance/compliance |
+| Policy/System Tools (2) | ✓ Basic validation/integrity | ✓ Signature validation and richer policy capabilities | ✓ Audit, compliance, and reporting capabilities |
 | **Total Core Tools** | **22** | **22** | **22** |
 | **Unique Capabilities** | 78 | 217 | 356 (139 governance-only) |

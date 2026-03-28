@@ -469,6 +469,7 @@ def detect_language(
             ".rb": Language.RUBY,
             ".swift": Language.SWIFT,
             ".php": Language.PHP,
+            ".rs": Language.RUST,
         }
         if ext in ext_map:
             return ext_map[ext]
@@ -572,6 +573,8 @@ class UnifiedExtractor:
             self.language = language
 
         self._impl = None  # Lazy-loaded language-specific implementation
+        self._ir_module = None
+        self._parsed = False
 
     @classmethod
     def from_file(
@@ -598,6 +601,41 @@ class UnifiedExtractor:
         code = path.read_text(encoding=encoding)
         return cls(code, file_path=str(path.resolve()), language=language)
 
+    def _parse(self) -> None:
+        """Parse non-Python code into IR for discovery helpers."""
+        if self._parsed or self.language == Language.PYTHON:
+            return
+
+        from code_scalpel.code_parsers.extractor import (
+            Language as ParserLanguage,
+            PolyglotExtractor as ParserExtractor,
+        )
+
+        lang_map = {
+            Language.JAVASCRIPT: ParserLanguage.JAVASCRIPT,
+            Language.TYPESCRIPT: ParserLanguage.TYPESCRIPT,
+            Language.JAVA: ParserLanguage.JAVA,
+            Language.C: ParserLanguage.C,
+            Language.CPP: ParserLanguage.CPP,
+            Language.CSHARP: ParserLanguage.CSHARP,
+            Language.GO: ParserLanguage.GO,
+            Language.KOTLIN: ParserLanguage.KOTLIN,
+            Language.RUBY: ParserLanguage.RUBY,
+            Language.SWIFT: ParserLanguage.SWIFT,
+            Language.PHP: ParserLanguage.PHP,
+            Language.RUST: ParserLanguage.RUST,
+        }
+
+        parser_language = lang_map.get(self.language)
+        if parser_language is None:
+            self._parsed = True
+            return
+
+        parser = ParserExtractor(self.code, self.file_path, parser_language)
+        parser._parse()
+        self._ir_module = parser._ir_module
+        self._parsed = True
+
     def list_symbols(
         self, symbol_types: Optional[list[str]] = None
     ) -> list[SymbolInfo]:
@@ -621,10 +659,7 @@ class UnifiedExtractor:
         """
         if self.language == Language.PYTHON:
             return self._list_symbols_python(symbol_types)
-        elif self.language in (Language.JAVASCRIPT, Language.TYPESCRIPT, Language.JAVA):
-            return self._list_symbols_polyglot(symbol_types)
-        else:
-            return []  # Not yet implemented for other languages
+        return self._list_symbols_ir(symbol_types)
 
     def _list_symbols_python(
         self, symbol_types: Optional[list[str]]
@@ -735,30 +770,93 @@ class UnifiedExtractor:
         visitor.visit(tree)
         return symbols
 
-    def _list_symbols_polyglot(
-        self, symbol_types: Optional[list[str]]
-    ) -> list[SymbolInfo]:
-        """List symbols in JS/TS/Java code."""
-        # Delegate to polyglot if available
+    def _list_symbols_ir(self, symbol_types: Optional[list[str]]) -> list[SymbolInfo]:
+        """List symbols in IR-backed languages."""
         try:
-            from code_scalpel.polyglot import Language as PolyglotLang
-            from code_scalpel.polyglot import PolyglotExtractor
-
-            lang_map = {
-                Language.JAVASCRIPT: PolyglotLang.JAVASCRIPT,
-                Language.TYPESCRIPT: PolyglotLang.TYPESCRIPT,
-                Language.JAVA: PolyglotLang.JAVA,
-            }
-
-            poly = PolyglotExtractor(self.code, self.file_path, lang_map[self.language])
-            # Use polyglot's list_symbols if available
-            list_symbols_method = getattr(poly, "list_symbols", None)
-            if list_symbols_method is not None:
-                return list_symbols_method(symbol_types)  # type: ignore[no-any-return]
+            from code_scalpel.ir.nodes import IRClassDef, IRExport, IRFunctionDef
         except ImportError:
             pass
 
-        return []  # Fallback: not implemented
+        try:
+            self._parse()
+        except Exception:
+            return []
+
+        if not self._ir_module:
+            return []
+
+        symbols: list[SymbolInfo] = []
+
+        def add_symbol(
+            name: str,
+            symbol_type: str,
+            start_line: int,
+            end_line: int,
+            parent: Optional[str] = None,
+            is_async: bool = False,
+        ) -> None:
+            if symbol_types is not None and symbol_type not in symbol_types:
+                return
+            symbols.append(
+                SymbolInfo(
+                    name=name,
+                    symbol_type=symbol_type,
+                    line_start=start_line,
+                    line_end=end_line,
+                    parent=parent,
+                    is_async=is_async,
+                )
+            )
+
+        def node_lines(node) -> tuple[int, int]:
+            loc = getattr(node, "loc", None)
+            if not loc:
+                return (0, 0)
+            return (loc.line, loc.end_line or loc.line)
+
+        def receiver_name(function_node) -> Optional[str]:
+            raw_receiver = getattr(function_node, "_metadata", {}).get("receiver")
+            if not isinstance(raw_receiver, str) or not raw_receiver.strip():
+                return None
+
+            normalized = raw_receiver.strip().strip("()")
+            normalized = normalized.replace("*", " ")
+            tokens = [token for token in normalized.replace("::", " ").split() if token]
+            if not tokens:
+                return None
+            for token in reversed(tokens):
+                if token[:1].isupper():
+                    return token
+            return tokens[-1]
+
+        def visit_ir(node, current_class: Optional[str] = None) -> None:
+            actual_node = node.declaration if isinstance(node, IRExport) else node
+
+            if isinstance(actual_node, IRClassDef):
+                start_line, end_line = node_lines(actual_node)
+                add_symbol(actual_node.name, "class", start_line, end_line)
+                for member in actual_node.body:
+                    visit_ir(member, current_class=actual_node.name)
+                return
+
+            if isinstance(actual_node, IRFunctionDef):
+                start_line, end_line = node_lines(actual_node)
+                parent = current_class or receiver_name(actual_node)
+                symbol_type = "method" if parent else "function"
+                add_symbol(
+                    actual_node.name,
+                    symbol_type,
+                    start_line,
+                    end_line,
+                    parent=parent,
+                    is_async=bool(getattr(actual_node, "is_async", False)),
+                )
+                return
+
+        for node in getattr(self._ir_module, "body", []) or []:
+            visit_ir(node)
+
+        return symbols
 
     def extract_multiple(
         self,
@@ -896,8 +994,51 @@ class UnifiedExtractor:
         """
         if self.language == Language.PYTHON:
             return self._get_imports_python()
-        # Future: Add JS/TS import detection
-        return []
+        return self._get_imports_ir()
+
+    def _get_imports_ir(self) -> list[ImportInfo]:
+        """Get imports from IR-backed languages."""
+        try:
+            from code_scalpel.ir.nodes import IRExport, IRImport
+        except ImportError:
+            return []
+
+        try:
+            self._parse()
+        except Exception:
+            return []
+
+        if not self._ir_module:
+            return []
+
+        imports: list[ImportInfo] = []
+
+        for node in getattr(self._ir_module, "body", []) or []:
+            actual_node = node.declaration if isinstance(node, IRExport) else node
+            if not isinstance(actual_node, IRImport):
+                continue
+
+            module = actual_node.module or ""
+            level = (
+                len(module) - len(module.lstrip(".")) if module.startswith(".") else 0
+            )
+            imports.append(
+                ImportInfo(
+                    module=module,
+                    names=list(actual_node.names),
+                    alias=actual_node.alias,
+                    is_from_import=bool(
+                        actual_node.names
+                        or actual_node.is_star
+                        or actual_node.is_default
+                    ),
+                    is_relative=module.startswith("."),
+                    level=level,
+                    line_number=getattr(getattr(actual_node, "loc", None), "line", 0),
+                )
+            )
+
+        return imports
 
     def _get_imports_python(self) -> list[ImportInfo]:
         """Get imports from Python code."""

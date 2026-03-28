@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import logging
 import re
 from pathlib import Path
@@ -51,6 +52,7 @@ _GRAPH_LANGUAGE_EXTENSIONS: dict[str, tuple[str, ...]] = {
     "javascript": (".js", ".jsx", ".mjs", ".cjs"),
     "typescript": (".ts", ".tsx"),
     "java": (".java",),
+    "go": (".go",),
 }
 
 _GRAPH_SUFFIX_TO_LANGUAGE = {
@@ -72,10 +74,104 @@ _PROJECT_MAP_JS_TS_SUFFIXES: tuple[str, ...] = (
 )
 
 _PROJECT_MAP_JAVA_SUFFIXES: tuple[str, ...] = (".java",)
+_PROJECT_MAP_GO_SUFFIXES: tuple[str, ...] = (".go",)
 
 _PROJECT_MAP_JS_TS_COMPLEXITY_PATTERN = re.compile(
     r"\b(if|for|while|switch|catch|case|function|class)\b|=>|&&|\|\|"
 )
+_PROJECT_MAP_GO_COMPLEXITY_PATTERN = re.compile(
+    r"\b(if|for|switch|select|case|go|defer)\b|&&|\|\|"
+)
+
+
+@dataclass
+class _JavaProjectMapModuleScan:
+    """[20260314_FEATURE] Internal Java project-map scan metadata."""
+
+    module: ModuleInfo
+    package_name: str | None
+    relation_hints: list[str]
+    qualified_aliases: list[str]
+
+
+def _normalize_java_project_map_reference(raw_name: str) -> str:
+    """Return a stable Java type/import reference for project-map resolution."""
+    normalized = raw_name.strip()
+    if not normalized:
+        return ""
+    normalized = re.sub(r"<[^>]+>", "", normalized)
+    normalized = normalized.replace("[]", "")
+    return normalized.strip()
+
+
+def _collect_java_same_package_reference_hints(code: str) -> list[str]:
+    """Return bounded Java type-reference hints from simple same-package usages.
+
+    [20260315_FEATURE] Project-map Java relationships need a conservative signal
+    for same-package type references because those do not appear in import lists.
+    This intentionally covers only obvious static access, constructor calls, and
+    local type declarations so unresolved hints remain harmless.
+    """
+    builtin_types = {
+        "String",
+        "Object",
+        "Class",
+        "System",
+        "Math",
+        "Integer",
+        "Long",
+        "Double",
+        "Float",
+        "Boolean",
+        "Character",
+        "List",
+        "Map",
+        "Set",
+        "Optional",
+        "Runtime",
+        "ProcessBuilder",
+    }
+
+    hints: set[str] = set()
+    for pattern in (
+        re.compile(r"\bnew\s+([A-Z][A-Za-z0-9_]*)\b"),
+        re.compile(r"\b([A-Z][A-Za-z0-9_]*)\s*\."),
+        re.compile(
+            r"\b(?:public|protected|private)?\s*(?:static\s+)?([A-Z][A-Za-z0-9_]*)\s+[a-z_][A-Za-z0-9_]*\s*(?:[=;,)])"
+        ),
+    ):
+        for match in pattern.finditer(code):
+            candidate = _normalize_java_project_map_reference(match.group(1))
+            if candidate and candidate not in builtin_types:
+                hints.add(candidate)
+
+    return sorted(hints)
+
+
+def _register_project_map_package(
+    packages: dict[str, PackageInfo],
+    package_path: str,
+    rel_path: str,
+) -> None:
+    """[20260314_FEATURE] Register a logical package and its ancestors."""
+    normalized_path = package_path.strip("/")
+    if not normalized_path:
+        return
+
+    parts = [part for part in normalized_path.split("/") if part]
+    for index in range(len(parts)):
+        current_path = "/".join(parts[: index + 1])
+        package_name = parts[index]
+        if current_path not in packages:
+            packages[current_path] = PackageInfo(
+                name=package_name,
+                path=current_path,
+                modules=[],
+                subpackages=[],
+            )
+
+    if rel_path not in packages[normalized_path].modules:
+        packages[normalized_path].modules.append(rel_path)
 
 
 def _project_map_detect_language(rel_path: str) -> str:
@@ -89,12 +185,43 @@ def _project_map_detect_language(rel_path: str) -> str:
         )
     if suffix in _PROJECT_MAP_JAVA_SUFFIXES:
         return "java"
+    if suffix in _PROJECT_MAP_GO_SUFFIXES:
+        return "go"
     return "other"
 
 
 def _calculate_js_ts_project_map_complexity(code: str) -> int:
     """Return a lightweight complexity heuristic for local JS/TS project-map scans."""
     return max(1, 1 + len(_PROJECT_MAP_JS_TS_COMPLEXITY_PATTERN.findall(code)))
+
+
+def _calculate_go_project_map_complexity(code: str) -> int:
+    """Return a lightweight complexity heuristic for local Go project-map scans."""
+    return max(1, 1 + len(_PROJECT_MAP_GO_COMPLEXITY_PATTERN.findall(code)))
+
+
+def _read_go_project_map_module_name(root_path: Path) -> str | None:
+    """Return the declared Go module path from go.mod when available.
+
+    [20260311_FEATURE] Project-map Go import resolution uses the local go.mod
+    module prefix to connect package imports back to workspace files.
+    """
+    go_mod = root_path / "go.mod"
+    if not go_mod.exists():
+        return None
+
+    try:
+        for raw_line in go_mod.read_text(encoding="utf-8", errors="ignore").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("//"):
+                continue
+            if line.startswith("module "):
+                module_name = line.split(None, 1)[1].strip()
+                return module_name or None
+    except Exception:
+        return None
+
+    return None
 
 
 def _scan_js_ts_project_map_module(
@@ -165,7 +292,7 @@ def _scan_java_project_map_module(
     file_path: Path,
     root_path: Path,
     include_complexity: bool,
-) -> ModuleInfo | None:
+) -> _JavaProjectMapModuleScan | None:
     """Build ModuleInfo for a local Java source file.
 
     [20260308_FEATURE] Narrow Stage 10 Java slice for get_project_map.
@@ -180,6 +307,7 @@ def _scan_java_project_map_module(
     classes: list[str] = []
     imports: list[str] = []
     entry_points: list[str] = []
+    relation_hints: list[str] = []
 
     try:
         from code_scalpel.code_parsers.java_parsers import TreeSitterJavaParser
@@ -191,12 +319,25 @@ def _scan_java_project_map_module(
     except Exception:
         return None
 
-    class_stack = list(parsed.classes)
-    while class_stack:
-        java_class = class_stack.pop()
-        classes.append(java_class.name)
+    def add_class(java_class, prefix: str | None = None) -> None:
+        qualified_class = f"{prefix}.{java_class.name}" if prefix else java_class.name
+        classes.append(qualified_class)
+        if java_class.superclass:
+            relation_hints.append(
+                _normalize_java_project_map_reference(java_class.superclass)
+            )
+        relation_hints.extend(
+            _normalize_java_project_map_reference(interface_name)
+            for interface_name in java_class.interfaces
+            if _normalize_java_project_map_reference(interface_name)
+        )
         for java_method in java_class.methods:
-            qualified_name = f"{java_class.name}.{java_method.name}"
+            method_name = (
+                java_class.name
+                if getattr(java_method, "is_constructor", False)
+                else java_method.name
+            )
+            qualified_name = f"{qualified_class}.{method_name}"
             functions.append(qualified_name)
             if java_method.name == "main" or (
                 java_method.name == "entry"
@@ -204,12 +345,196 @@ def _scan_java_project_map_module(
                 and "static" in java_method.modifiers
             ):
                 entry_points.append(f"{rel_path}:{qualified_name}")
-        class_stack.extend(java_class.inner_classes)
+        for inner_class in getattr(java_class, "inner_classes", []) or []:
+            add_class(inner_class, qualified_class)
+        for inner_record in getattr(java_class, "inner_records", []) or []:
+            add_record(inner_record, qualified_class)
+        for inner_enum in getattr(java_class, "inner_enums", []) or []:
+            add_enum(inner_enum, qualified_class)
+
+    def add_record(java_record, prefix: str | None = None) -> None:
+        qualified_record = (
+            f"{prefix}.{java_record.name}" if prefix else java_record.name
+        )
+        classes.append(qualified_record)
+        relation_hints.extend(
+            _normalize_java_project_map_reference(interface_name)
+            for interface_name in getattr(java_record, "interfaces", []) or []
+            if _normalize_java_project_map_reference(interface_name)
+        )
+        for java_method in getattr(java_record, "methods", []) or []:
+            method_name = (
+                java_record.name
+                if getattr(java_method, "is_constructor", False)
+                else java_method.name
+            )
+            qualified_name = f"{qualified_record}.{method_name}"
+            functions.append(qualified_name)
+            if java_method.name == "main" or (
+                java_method.name == "entry"
+                and "public" in java_method.modifiers
+                and "static" in java_method.modifiers
+            ):
+                entry_points.append(f"{rel_path}:{qualified_name}")
+
+    def add_interface(java_interface, prefix: str | None = None) -> None:
+        qualified_interface = (
+            f"{prefix}.{java_interface.name}" if prefix else java_interface.name
+        )
+        classes.append(qualified_interface)
+        relation_hints.extend(
+            _normalize_java_project_map_reference(interface_name)
+            for interface_name in getattr(java_interface, "extends", []) or []
+            if _normalize_java_project_map_reference(interface_name)
+        )
+
+    def add_enum(java_enum, prefix: str | None = None) -> None:
+        qualified_enum = f"{prefix}.{java_enum.name}" if prefix else java_enum.name
+        classes.append(qualified_enum)
+
+    for java_class in parsed.classes:
+        add_class(java_class)
+
+    for java_record in getattr(parsed, "records", []) or []:
+        add_record(java_record)
+
+    for java_interface in getattr(parsed, "interfaces", []) or []:
+        add_interface(java_interface)
+
+    for java_enum in getattr(parsed, "enums", []) or []:
+        add_enum(java_enum)
 
     imports.extend(parsed.imports)
     imports.extend(parsed.static_imports)
+    relation_hints.extend(
+        _normalize_java_project_map_reference(import_name)
+        for import_name in parsed.imports
+        if _normalize_java_project_map_reference(import_name)
+    )
+    relation_hints.extend(
+        _normalize_java_project_map_reference(import_name)
+        for import_name in parsed.static_imports
+        if _normalize_java_project_map_reference(import_name)
+    )
+    relation_hints.extend(_collect_java_same_package_reference_hints(code))
 
     complexity = parsed.total_complexity if include_complexity else 0
+
+    module = ModuleInfo(
+        path=rel_path,
+        functions=sorted(set(functions)),
+        classes=sorted(set(classes)),
+        imports=sorted(set(imports)),
+        entry_points=sorted(set(entry_points)),
+        line_count=lines,
+        complexity_score=complexity,
+    )
+
+    qualified_aliases: list[str] = []
+    if parsed.package:
+        qualified_aliases.extend(
+            f"{parsed.package}.{class_name}" for class_name in module.classes
+        )
+
+    return _JavaProjectMapModuleScan(
+        module=module,
+        package_name=parsed.package,
+        relation_hints=sorted(set(relation_hints)),
+        qualified_aliases=sorted(set(qualified_aliases)),
+    )
+
+
+def _scan_go_project_map_module(
+    file_path: Path,
+    root_path: Path,
+    include_complexity: bool,
+) -> ModuleInfo | None:
+    """Build ModuleInfo for a local Go source file.
+
+    [20260311_FEATURE] Narrow Stage 10 Go slice for get_project_map.
+    Uses GoNormalizer so the project map can inventory Go functions, methods,
+    types, and imports without broadening beyond the current runtime slice.
+    """
+    rel_path = str(file_path.relative_to(root_path))
+    code = file_path.read_text(encoding="utf-8", errors="ignore")
+    lines = code.count("\n") + 1
+
+    functions: list[str] = []
+    classes: list[str] = []
+    imports: list[str] = []
+    entry_points: list[str] = []
+
+    def fallback_scan() -> ModuleInfo:
+        function_pattern = re.compile(r"\bfunc\s+(?:\([^)]*\)\s*)?([A-Za-z_][A-Za-z0-9_]*)\s*\(")
+        type_pattern = re.compile(r"\btype\s+([A-Za-z_][A-Za-z0-9_]*)\s+(?:struct|interface)\b")
+        import_block_pattern = re.compile(r"(?ms)^import\s*\((.*?)\)")
+        import_line_pattern = re.compile(r'^import\s+(?:[A-Za-z_][A-Za-z0-9_]*\s+)?"([^"]+)"$', re.MULTILINE)
+        import_path_pattern = re.compile(r'"([^"]+)"')
+
+        local_functions = sorted(set(function_pattern.findall(code)))
+        local_classes = sorted(set(type_pattern.findall(code)))
+        local_imports: list[str] = []
+
+        for match in import_line_pattern.finditer(code):
+            local_imports.append(match.group(1))
+
+        for block_match in import_block_pattern.finditer(code):
+            local_imports.extend(import_path_pattern.findall(block_match.group(1)))
+
+        local_entry_points = [
+            f"{rel_path}:main" for function_name in local_functions if function_name == "main"
+        ]
+        complexity = _calculate_go_project_map_complexity(code) if include_complexity else 0
+
+        return ModuleInfo(
+            path=rel_path,
+            functions=local_functions,
+            classes=local_classes,
+            imports=sorted(set(local_imports)),
+            entry_points=local_entry_points,
+            line_count=lines,
+            complexity_score=complexity,
+        )
+
+    try:
+        from code_scalpel.ir.nodes import IRClassDef, IRFunctionDef, IRImport
+        from code_scalpel.ir.normalizers.go_normalizer import GoNormalizer
+    except Exception:
+        return fallback_scan()
+
+    def normalize_receiver(raw_receiver: Any) -> str | None:
+        if not isinstance(raw_receiver, str):
+            return None
+        normalized = raw_receiver.strip().strip("()")
+        if not normalized:
+            return None
+        parts = [part for part in normalized.replace("*", " ").split() if part]
+        if not parts:
+            return None
+        return parts[-1]
+
+    try:
+        parsed = GoNormalizer().normalize(code)
+    except Exception:
+        return fallback_scan()
+
+    for node in parsed.body:
+        if isinstance(node, IRFunctionDef):
+            receiver_name = normalize_receiver(
+                getattr(node, "_metadata", {}).get("receiver")
+            )
+            qualified_name = (
+                f"{receiver_name}.{node.name}" if receiver_name else node.name
+            )
+            functions.append(qualified_name)
+            if node.name == "main" and receiver_name is None:
+                entry_points.append(f"{rel_path}:{qualified_name}")
+        elif isinstance(node, IRClassDef):
+            classes.append(node.name)
+        elif isinstance(node, IRImport) and node.module:
+            imports.append(node.module)
+
+    complexity = _calculate_go_project_map_complexity(code) if include_complexity else 0
 
     return ModuleInfo(
         path=rel_path,
@@ -226,11 +551,17 @@ def _resolve_project_map_import_target(
     import_name: str,
     source_path: str,
     module_index: dict[str, str],
-) -> str | None:
+    *,
+    root_path: Path | None = None,
+    known_module_paths: set[str] | None = None,
+    js_ts_alias_resolver: Any | None = None,
+    package_index: dict[str, set[str]] | None = None,
+    java_package_by_module: dict[str, str] | None = None,
+) -> list[str]:
     """Resolve a project-map import string to a known module path.
 
-    [20260308_FEATURE] Supports Python dotted imports, local JS/TS relative imports,
-    and Java dotted/static imports.
+    [20260314_FEATURE] Supports Python dotted imports, local JS/TS relative and
+    alias-backed imports, and Java dotted/static imports.
     """
     source_suffix = Path(source_path).suffix.lower()
 
@@ -248,17 +579,67 @@ def _resolve_project_map_import_target(
         ]
         for candidate in candidates:
             if candidate in module_index:
-                return module_index[candidate]
-        return None
+                return [module_index[candidate]]
+        return []
+
+    if (
+        source_suffix in _PROJECT_MAP_JS_TS_SUFFIXES
+        and js_ts_alias_resolver is not None
+        and root_path is not None
+        and known_module_paths is not None
+        and not import_name.startswith(".")
+    ):
+        try:
+            resolved_file = js_ts_alias_resolver.resolve_to_file(import_name)
+        except Exception:
+            resolved_file = None
+
+        if resolved_file is not None:
+            try:
+                resolved_rel = str(resolved_file.relative_to(root_path)).replace(
+                    "\\", "/"
+                )
+            except ValueError:
+                resolved_rel = ""
+
+            if resolved_rel and resolved_rel in known_module_paths:
+                return [resolved_rel]
+
+    if source_suffix in _PROJECT_MAP_JAVA_SUFFIXES:
+        normalized_import = _normalize_java_project_map_reference(import_name)
+        if not normalized_import:
+            return []
+
+        if normalized_import.endswith(".*") and package_index is not None:
+            package_name = normalized_import[:-2]
+            return sorted(package_index.get(package_name, set()))
+
+        if normalized_import in module_index:
+            return [module_index[normalized_import]]
+
+        source_package = None
+        if java_package_by_module is not None:
+            source_package = java_package_by_module.get(source_path)
+
+        if source_package and "." not in normalized_import:
+            qualified_local = f"{source_package}.{normalized_import}"
+            if qualified_local in module_index:
+                return [module_index[qualified_local]]
+
+        for alias, path_value in module_index.items():
+            if normalized_import == alias or normalized_import.startswith(f"{alias}."):
+                return [path_value]
+
+        return []
 
     if import_name in module_index:
-        return module_index[import_name]
+        return [module_index[import_name]]
 
     for alias, path_value in module_index.items():
-        if import_name.startswith(alias):
-            return path_value
+        if import_name == alias or import_name.startswith(f"{alias}."):
+            return [path_value]
 
-    return None
+    return []
 
 
 def _get_project_root() -> Path:
@@ -335,10 +716,10 @@ _CALL_GRAPH_LANGUAGE_PARITY: dict[str, str] = {
     "javascript": "runtime_slice",
     "typescript": "runtime_slice",
     "java": "runtime_slice",
+    "go": "runtime_slice",
     "c": "local_slice",
     "cpp": "method_local_slice",
     "csharp": "method_local_slice",
-    "go": "method_local_slice",
     "kotlin": "method_local_slice",
     "php": "method_local_slice",
     "ruby": "method_local_slice",
@@ -348,8 +729,8 @@ _CALL_GRAPH_LANGUAGE_PARITY: dict[str, str] = {
 
 _CALL_GRAPH_RUNTIME_SCOPE_SUMMARY = (
     "Python currently has the deepest get_call_graph semantics. JavaScript, "
-    "TypeScript, and Java have dedicated runtime slices. C remains on basic local "
-    "callable parity. C++, C#, Go, Kotlin, PHP, Ruby, Swift, and Rust now expose "
+    "TypeScript, Java, and Go have dedicated runtime slices. C remains on basic local "
+    "callable parity. C++, C#, Kotlin, PHP, Ruby, Swift, and Rust now expose "
     "receiver-aware local callable nodes, and advanced mode adds conservative "
     "import-aware edges through the shared IR-backed fallback."
 )
@@ -373,6 +754,93 @@ def _get_call_graph_sync(
     if capabilities is None:
         capabilities = {}
     from code_scalpel.ast_tools.call_graph import CallGraphBuilder
+
+    def _extract_go_symbol_name(signature: str) -> str:
+        receiver = signature.strip()
+        if not receiver:
+            return ""
+        receiver_name = receiver.split()[-1].lstrip("*")
+        return receiver_name
+
+    def _find_go_block_end(lines: list[str], start_index: int) -> int:
+        brace_depth = 0
+        saw_open = False
+        for index in range(start_index, len(lines)):
+            line = lines[index]
+            opens = line.count("{")
+            closes = line.count("}")
+            if opens:
+                saw_open = True
+            brace_depth += opens
+            brace_depth -= closes
+            if saw_open and brace_depth <= 0:
+                return index + 1
+        return len(lines)
+
+    def _build_go_runtime_slice(root: Path) -> tuple[list[CallNodeModel], list[CallEdgeModel]]:
+        # [20260315_BUGFIX] Provide a bounded local Go call-graph fallback when
+        # optional Go parser support is unavailable in the active runtime.
+        function_pattern = re.compile(
+            r"^\s*func\s+(?:\((?P<receiver>[^)]+)\)\s*)?(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*\(",
+            re.MULTILINE,
+        )
+        nodes_out: list[CallNodeModel] = []
+        edges_out: list[CallEdgeModel] = []
+        known_symbols: dict[str, tuple[str, int, bool]] = {}
+        function_bodies: list[tuple[str, str, str]] = []
+
+        for file_path in sorted(root.rglob("*.go")):
+            if not file_path.is_file():
+                continue
+            try:
+                code = file_path.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            rel_path = str(file_path.relative_to(root)).replace("\\", "/")
+            lines = code.splitlines()
+            for match in function_pattern.finditer(code):
+                raw_name = match.group("name")
+                receiver = match.group("receiver")
+                symbol_name = raw_name
+                if receiver:
+                    owner = _extract_go_symbol_name(receiver)
+                    if owner:
+                        symbol_name = f"{owner}.{raw_name}"
+                line_number = code.count("\n", 0, match.start()) + 1
+                end_line = _find_go_block_end(lines, max(0, line_number - 1))
+                is_entry_point = raw_name == "main"
+                known_symbols[symbol_name] = (rel_path, line_number, is_entry_point)
+                nodes_out.append(
+                    CallNodeModel(
+                        name=symbol_name,
+                        file=rel_path,
+                        line=line_number,
+                        end_line=end_line,
+                        is_entry_point=is_entry_point,
+                        source_uri=str(file_path),
+                    )
+                )
+                body = "\n".join(lines[line_number - 1 : end_line])
+                function_bodies.append((rel_path, symbol_name, body))
+
+        for rel_path, caller_name, body in function_bodies:
+            for callee_name, (callee_file, _callee_line, _is_entry) in known_symbols.items():
+                base_name = callee_name.split(".", 1)[-1]
+                if callee_file != rel_path:
+                    continue
+                if caller_name == callee_name:
+                    continue
+                if re.search(rf"(?<![A-Za-z0-9_]){re.escape(base_name)}\s*\(", body):
+                    edges_out.append(
+                        CallEdgeModel(
+                            caller=f"{rel_path}:{caller_name}",
+                            callee=f"{callee_file}:{callee_name}",
+                            confidence=0.7,
+                            inference_source="go_runtime_slice",
+                        )
+                    )
+
+        return nodes_out, edges_out
 
     # [20251226_BUGFIX] Ensure deterministic truncation and advanced resolution enrichment.
     # [20260119_FEATURE] Uses unified parser for deterministic behavior.
@@ -469,6 +937,14 @@ def _get_call_graph_sync(
                     context=context_model,
                 )
             )
+
+        if not nodes:
+            go_nodes, go_edges = _build_go_runtime_slice(root_path)
+            if go_nodes:
+                nodes = go_nodes
+                edges = go_edges
+                total_nodes = len(nodes)
+                total_edges = len(edges)
 
         # [20251226_FEATURE] Add heuristic polymorphism edges when enabled.
         if advanced_resolution:
@@ -707,6 +1183,8 @@ def _normalize_graph_center_node_id(center_node_id: str) -> str:
     - javascript::<path/module>::function::<name>
     - typescript::<path/module>::function::<name>
     - java::<path/module>::method::<owner>:<name>
+    - go::<path/module>::function::<name>
+    - go::<path/module>::method::<owner>:<name>
     - javascript::<path/module>::method::<owner>:<name>
     - typescript::<path/module>::method::<owner>:<name>
 
@@ -760,6 +1238,11 @@ def _normalize_graph_center_node_id(center_node_id: str) -> str:
                     if "." in name:
                         method_owner, method_name = name.split(".", 1)
                     return f"java::{module}::method::{method_owner}:{method_name}"
+                if js_ts_language == "go":
+                    if "." in name:
+                        method_owner, method_name = name.split(".", 1)
+                        return f"go::{module}::method::{method_owner}:{method_name}"
+                    return f"go::{module}::function::{name}"
                 return f"{js_ts_language}::{module}::function::{name}"
 
         # If this looks like a bare module name.
@@ -791,7 +1274,7 @@ def _resolve_graph_module_candidate(
                 return candidate
         return None
 
-    if language not in {"javascript", "typescript"}:
+    if language not in {"javascript", "typescript", "go"}:
         return None
 
     normalized = module.replace("\\", "/").strip("/")
@@ -967,7 +1450,8 @@ def _fast_validate_java_graph_node_exists(
     except Exception:
         return True, None
 
-    # [20260308_FEATURE] Match both top-level and nested Java classes.
+    # [20260309_FEATURE] Match both Java classes and records so canonical
+    # record method nodes can round-trip through get_graph_neighborhood.
     class_stack = list(parsed.classes)
     while class_stack:
         java_class = class_stack.pop()
@@ -993,7 +1477,69 @@ def _fast_validate_java_graph_node_exists(
             return True, None
         class_stack.extend(java_class.inner_classes)
 
+    record_stack = list(getattr(parsed, "records", []) or [])
+    while record_stack:
+        java_record = record_stack.pop()
+        overload_counts: dict[str, int] = {}
+        for java_method in getattr(java_record, "methods", []) or []:
+            member_name = (
+                java_record.name
+                if getattr(java_method, "is_constructor", False)
+                else java_method.name
+            )
+            overload_counts[member_name] = overload_counts.get(member_name, 0) + 1
+        overloaded_names = {
+            member_name for member_name, count in overload_counts.items() if count > 1
+        }
+        if java_record.name == owner and any(
+            method_name == java_method.name
+            or method_name
+            == _java_method_selector(
+                java_record.name, java_method, overloaded_names
+            ).split(".", 1)[1]
+            for java_method in getattr(java_record, "methods", []) or []
+        ):
+            return True, None
+
     return False, f"Center node Java method '{name}' not found in {candidate}"
+
+
+def _fast_validate_go_graph_node_exists(
+    candidate: Path, kind: str, name: str
+) -> tuple[bool, str | None]:
+    """Best-effort validation for local Go function and method nodes.
+
+    [20260311_FEATURE] Accept canonical Go function and receiver-method IDs in
+    get_graph_neighborhood without forcing a full graph build for obvious misses.
+    """
+    try:
+        code = candidate.read_text(encoding="utf-8")
+    except Exception:
+        return True, None
+
+    if kind == "function":
+        if re.search(rf"\bfunc\s+{re.escape(name)}\s*\(", code):
+            return True, None
+        return False, f"Center node Go function '{name}' not found in {candidate}"
+
+    if kind != "method":
+        return (
+            False,
+            "get_graph_neighborhood currently supports Go function and method nodes only. "
+            f"Received Go {kind} node '{name}'.",
+        )
+
+    if ":" not in name:
+        return False, f"Invalid Go method node '{name}'; expected Owner:method"
+
+    owner, method_name = name.split(":", 1)
+    method_pattern = re.compile(
+        rf"\bfunc\s*\(\s*[^)]*\*?\s*{re.escape(owner)}\s*\)\s*{re.escape(method_name)}\s*\(",
+    )
+    if method_pattern.search(code):
+        return True, None
+
+    return False, f"Center node Go method '{name}' not found in {candidate}"
 
 
 def _parse_graph_center_node_id(
@@ -1024,8 +1570,8 @@ def _fast_validate_graph_center_node_exists(
 ) -> tuple[bool, str | None]:
     """Best-effort fast validation for supported graph-neighborhood node IDs.
 
-    [20260308_FEATURE] Supports Python function nodes, JS/TS function and
-    method nodes, and canonical Java method nodes.
+    [20260311_FEATURE] Supports Python function nodes, JS/TS function and
+    method nodes, canonical Java method nodes, and canonical Go function/method nodes.
     """
     parsed = _parse_graph_center_node_id(center_node_id)
     if parsed is None:
@@ -1033,8 +1579,9 @@ def _fast_validate_graph_center_node_exists(
             False,
             "Invalid center_node_id format; expected language::module::type::name. "
             "get_graph_neighborhood currently accepts canonical Python, JavaScript, "
-            "TypeScript, and Java node IDs such as python::app.routes::function::handle_request, "
-            "typescript::src/api/client::function::fetchUsers, or java::demo/App::method::App:main.",
+            "TypeScript, Java, and Go node IDs such as python::app.routes::function::handle_request, "
+            "typescript::src/api/client::function::fetchUsers, java::demo/App::method::App:main, "
+            "or go::cmd/main::function::main.",
         )
 
     lang, module, kind, name = parsed
@@ -1042,21 +1589,21 @@ def _fast_validate_graph_center_node_exists(
     if kind not in {"function", "method"}:
         return (
             False,
-            "get_graph_neighborhood currently supports local Python function nodes, JavaScript/TypeScript function and method nodes, and Java method nodes only. "
+            "get_graph_neighborhood currently supports local Python function nodes, JavaScript/TypeScript function and method nodes, Java method nodes, and Go function/method nodes only. "
             f"Received '{center_node_id}'.",
         )
 
-    if lang not in {"python", "javascript", "typescript", "java"}:
+    if lang not in {"python", "javascript", "typescript", "java", "go"}:
         return (
             False,
-            "get_graph_neighborhood currently supports local Python function nodes plus local JavaScript, TypeScript, and Java method nodes only. "
+            "get_graph_neighborhood currently supports local Python function nodes plus local JavaScript, TypeScript, Java, and Go graph nodes only. "
             f"Received '{center_node_id}'.",
         )
 
     if kind == "method" and lang == "python":
         return (
             False,
-            "get_graph_neighborhood currently exposes canonical method-node support for JavaScript, TypeScript, and Java only. "
+            "get_graph_neighborhood currently exposes canonical method-node support for JavaScript, TypeScript, Java, and Go only. "
             f"Received '{center_node_id}'.",
         )
 
@@ -1086,6 +1633,9 @@ def _fast_validate_graph_center_node_exists(
 
     if lang == "java":
         return _fast_validate_java_graph_node_exists(candidate, kind, name)
+
+    if lang == "go":
+        return _fast_validate_go_graph_node_exists(candidate, kind, name)
 
     return _fast_validate_js_ts_graph_node_exists(candidate, kind, name)
 
@@ -1144,6 +1694,13 @@ def _get_java_symbol_base_name(symbol_name: str) -> str:
     """Return the base member name from a Java selector or canonical method name."""
     tail = symbol_name.rsplit(".", 1)[-1]
     return tail.split("(", 1)[0]
+
+
+def _get_java_symbol_argument_block(symbol_name: str) -> str | None:
+    """Return the argument block for a Java selector, including parentheses."""
+    if "(" not in symbol_name or not symbol_name.endswith(")"):
+        return None
+    return symbol_name[symbol_name.index("(") :]
 
 
 def _read_node_code_slice(
@@ -1266,11 +1823,11 @@ def _get_js_ts_cross_file_dependencies_sync(
     max_depth_limit: int | None,
     max_files_limit: int | None,
 ) -> CrossFileDependenciesResult:
-    """Graph-backed JS/TS/Java dependency slice for get_cross_file_dependencies.
+    """Graph-backed JS/TS/Java/Go dependency slice for get_cross_file_dependencies.
 
-    [20260308_FEATURE] Extend the narrow graph-backed dependency path to Java
-    method symbols, reusing the shared call-graph runtime while keeping the
-    existing result contract intact.
+    [20260311_FEATURE] Extend the graph-backed dependency path to Go symbols in
+    addition to JS/TS/Java, reusing the shared call-graph runtime while keeping
+    the existing result contract intact.
     """
     from collections import defaultdict, deque
 
@@ -1284,9 +1841,9 @@ def _get_js_ts_cross_file_dependencies_sync(
     # [20260307_FEATURE] Stage 10.1 metadata parity for graph-backed dependency slices.
     pro_features_enabled = tier in {"pro", "enterprise"}
     enterprise_features_enabled = tier == "enterprise"
-    # [20260308_FEATURE] JS/TS requires advanced imported-identifier resolution
-    # for useful cross-file payloads; Java keeps Community local-only and relies
-    # on the existing Pro/Enterprise advanced builder for cross-file imports.
+    # [20260311_FEATURE] JS/TS requires advanced imported-identifier resolution
+    # for useful cross-file payloads; Java and Go keep Community local-only and
+    # rely on the existing Pro/Enterprise advanced builder for richer cross-file imports.
     advanced_resolution = target_language in {"javascript", "typescript"} or tier in {
         "pro",
         "enterprise",
@@ -1327,6 +1884,10 @@ def _get_js_ts_cross_file_dependencies_sync(
     if target_language == "java":
         # [20260308_FEATURE] Allow Java callers to pass bare method names while
         # the graph runtime exposes canonical Class.method node names.
+        normalized_target = target_symbol.replace(":", ".", 1)
+        target_base = _get_java_symbol_base_name(normalized_target)
+        target_arg_block = _get_java_symbol_argument_block(normalized_target)
+
         java_matches = sorted(
             key
             for key, node in node_lookup.items()
@@ -1336,6 +1897,14 @@ def _get_js_ts_cross_file_dependencies_sync(
                 or node.name.endswith(f".{target_symbol}")
                 or node.name == target_symbol.replace(":", ".", 1)
                 or _get_java_symbol_base_name(node.name) == target_symbol
+                or (
+                    target_arg_block is not None
+                    and _get_java_symbol_base_name(node.name) == target_base
+                    and (
+                        node.name.endswith(f".{target_base}{target_arg_block}")
+                        or node.name == f"{target_base}.{target_base}"
+                    )
+                )
             )
         )
         if len(java_matches) == 1:
@@ -1741,16 +2310,35 @@ def _get_graph_neighborhood_sync(
         graph = _get_cached_graph(root_path, cache_variant=cache_variant)
 
         if graph is None:
-            # Cache miss - build the graph
-            from code_scalpel.ast_tools.call_graph import CallGraphBuilder
-
-            builder = CallGraphBuilder(root_path)
-            call_graph_result = builder.build_with_details(
+            # Cache miss - build the graph.
+            # [20260315_BUGFIX] Reuse the shared call-graph helper so bounded
+            # polyglot runtime slices (notably Go) produce the same node/edge
+            # surface here as they do for public get_call_graph contracts.
+            call_graph_result = _get_call_graph_sync(
+                str(root_path),
                 entry_point=None,
-                depth=10,
+                depth=max(10, actual_k + 2),
+                include_circular_import_check=False,
                 max_nodes=None,
                 advanced_resolution=advanced_resolution,
+                include_enterprise_metrics=False,
+                paths_from=None,
+                paths_to=None,
+                focus_functions=None,
+                tier=tier,
+                capabilities=caps,
             )
+
+            if not call_graph_result.success:
+                return GraphNeighborhoodResult(
+                    success=False,
+                    tier_applied=tier,
+                    max_k_applied=max_k_hops,
+                    max_nodes_applied=max_nodes_limit,
+                    advanced_resolution_enabled=advanced_resolution,
+                    enterprise_features_enabled=include_enterprise_metrics,
+                    error=call_graph_result.error or "Failed to build call graph.",
+                )
 
             # Convert call graph to UniversalGraph
             from code_scalpel.graph_engine import EdgeType, GraphEdge, GraphNode
@@ -2111,6 +2699,9 @@ def _get_project_map_sync(
         all_entry_points: list[str] = []
         complexity_hotspots: list[str] = []
         total_lines = 0
+        java_relation_hints_by_module: dict[str, list[str]] = {}
+        java_package_by_module: dict[str, str] = {}
+        java_package_index: dict[str, set[str]] = {}
 
         # Entry point detection patterns
         entry_decorators = {
@@ -2172,8 +2763,8 @@ def _get_project_map_sync(
                     complexity += len(node.values) - 1
             return complexity
 
-        # [20260307_FEATURE] Initial local JS/TS parity slice for get_project_map.
-        # Keep Python as the primary path, but include local JS/TS source files.
+        # [20260311_FEATURE] Extend local parity slices to Go for get_project_map.
+        # Keep Python as the primary path, but include local JS/TS/Java/Go source files.
         source_files = [
             f
             for f in root_path.rglob("*")
@@ -2183,6 +2774,7 @@ def _get_project_map_sync(
                 {".py"}
                 | set(_PROJECT_MAP_JS_TS_SUFFIXES)
                 | set(_PROJECT_MAP_JAVA_SUFFIXES)
+                | set(_PROJECT_MAP_GO_SUFFIXES)
             )
         ]
 
@@ -2253,13 +2845,15 @@ def _get_project_map_sync(
                     continue
 
                 if file_path.suffix.lower() in _PROJECT_MAP_JAVA_SUFFIXES:
-                    java_module = _scan_java_project_map_module(
+                    java_scan = _scan_java_project_map_module(
                         file_path,
                         root_path,
                         include_complexity,
                     )
-                    if java_module is None:
+                    if java_scan is None:
                         continue
+
+                    java_module = java_scan.module
 
                     total_lines += java_module.line_count
                     if (
@@ -2272,6 +2866,43 @@ def _get_project_map_sync(
 
                     all_entry_points.extend(java_module.entry_points)
                     modules.append(java_module)
+
+                    java_relation_hints_by_module[java_module.path] = list(
+                        java_scan.relation_hints
+                    )
+                    if java_scan.package_name:
+                        java_package_by_module[java_module.path] = java_scan.package_name
+                        package_path = java_scan.package_name.replace(".", "/")
+                        _register_project_map_package(
+                            packages,
+                            package_path,
+                            java_module.path,
+                        )
+                        java_package_index.setdefault(java_scan.package_name, set()).add(
+                            java_module.path
+                        )
+                    continue
+
+                if file_path.suffix.lower() in _PROJECT_MAP_GO_SUFFIXES:
+                    go_module = _scan_go_project_map_module(
+                        file_path,
+                        root_path,
+                        include_complexity,
+                    )
+                    if go_module is None:
+                        continue
+
+                    total_lines += go_module.line_count
+                    if (
+                        include_complexity
+                        and go_module.complexity_score >= complexity_threshold
+                    ):
+                        complexity_hotspots.append(
+                            f"{rel_path} (complexity: {go_module.complexity_score})"
+                        )
+
+                    all_entry_points.extend(go_module.entry_points)
+                    modules.append(go_module)
                     continue
 
                 with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
@@ -2372,7 +3003,11 @@ def _get_project_map_sync(
             if detected_language != "other":
                 languages[detected_language] = languages.get(detected_language, 0) + 1
 
-        # Also count other common file types
+        # Also count other common file types.
+        # [20260315_BUGFIX] Aggregate by language first so variants like
+        # .yaml/.yml contribute cumulatively instead of the later extension being
+        # canceled out by the earlier language total.
+        extra_file_counts: dict[str, int] = {}
         for ext, lang in [
             (".js", "javascript"),
             (".ts", "typescript"),
@@ -2384,13 +3019,14 @@ def _get_project_map_sync(
             (".html", "html"),
             (".css", "css"),
         ]:
-            len(list(root_path.rglob(f"*{ext}")))
-            # Exclude common ignored dirs
             actual_count = sum(
                 1
                 for f in root_path.rglob(f"*{ext}")
                 if not any(p in exclude_patterns for p in f.parts)
             )
+            extra_file_counts[lang] = extra_file_counts.get(lang, 0) + actual_count
+
+        for lang, actual_count in extra_file_counts.items():
             analyzed_count = languages.get(lang, 0)
             remainder = max(actual_count - analyzed_count, 0)
             if remainder > 0:
@@ -2402,6 +3038,32 @@ def _get_project_map_sync(
             else min(len(modules), int(effective_max_modules))
         )
         diagram_limit = modules_in_diagram
+
+        go_module_name = _read_go_project_map_module_name(root_path)
+        java_resolver = None
+        if any(Path(mod.path).suffix.lower() in _PROJECT_MAP_JAVA_SUFFIXES for mod in modules):
+            try:
+                from code_scalpel.ast_tools.java_import_resolver import JavaImportResolver
+
+                # [20260315_FEATURE] Reuse JavaImportResolver edges so project-map
+                # Java relationships honor explicit, static, and wildcard imports.
+                java_resolver = JavaImportResolver(root_path)
+                java_resolver.build()
+            except Exception:
+                java_resolver = None
+
+        js_ts_alias_resolver = None
+        try:
+            from code_scalpel.code_parsers.typescript_parsers.alias_resolver import (
+                create_alias_resolver,
+            )
+
+            # [20260314_FEATURE] Reuse the shared TS alias resolver so
+            # get_project_map can navigate tsconfig-backed local imports in
+            # relationship-aware tiers.
+            js_ts_alias_resolver = create_alias_resolver(root_path)
+        except Exception:
+            js_ts_alias_resolver = None
 
         # [20251226_FEATURE] Tier-aware relationship + analytics construction
         module_index: dict[str, str] = {}
@@ -2425,6 +3087,24 @@ def _get_project_map_sync(
                     str(path_obj.with_suffix("")).replace("\\", "/").replace("/", ".")
                 )
                 module_index[dotted] = mod.path
+                declared_package = java_package_by_module.get(mod.path)
+                if declared_package:
+                    for class_name in mod.classes:
+                        module_index[f"{declared_package}.{class_name}"] = mod.path
+                continue
+
+            if suffix in _PROJECT_MAP_GO_SUFFIXES:
+                stem = str(path_obj.with_suffix("")).replace("\\", "/")
+                module_index[stem] = mod.path
+                package_dir = str(path_obj.parent).replace("\\", "/")
+                if package_dir not in {"", "."}:
+                    module_index[package_dir] = mod.path
+                    if go_module_name:
+                        module_index[f"{go_module_name}/{package_dir}".strip("/")] = mod.path
+                elif go_module_name:
+                    module_index[go_module_name] = mod.path
+
+        known_module_paths = {mod.path for mod in modules}
 
         module_relationships: list[dict[str, str]] | None = None
         dependency_diagram: str | None = None
@@ -2495,14 +3175,52 @@ def _get_project_map_sync(
             or enable_city
         ):
             for mod in modules:
-                for imp in mod.imports:
-                    target_path = _resolve_project_map_import_target(
+                relationship_hints = mod.imports
+                mod_suffix = Path(mod.path).suffix.lower()
+                if mod_suffix in _PROJECT_MAP_JAVA_SUFFIXES:
+                    if java_resolver is not None:
+                        try:
+                            abs_path = str((root_path / mod.path).resolve())
+                            source_module = java_resolver.file_to_module.get(abs_path)
+                            if source_module:
+                                for target_module in sorted(
+                                    java_resolver.edges.get(source_module, set())
+                                ):
+                                    target_file = java_resolver.module_to_file.get(
+                                        target_module
+                                    )
+                                    if target_file:
+                                        rel_target = str(
+                                            Path(target_file)
+                                            .resolve()
+                                            .relative_to(root_path)
+                                        ).replace("\\", "/")
+                                        if rel_target != mod.path:
+                                            edges.append((mod.path, rel_target))
+                        except Exception:
+                            pass
+
+                    relationship_hints = java_relation_hints_by_module.get(
+                        mod.path,
+                        mod.imports,
+                    )
+
+                for imp in relationship_hints:
+                    target_paths = _resolve_project_map_import_target(
                         imp,
                         mod.path,
                         module_index,
+                        root_path=root_path,
+                        known_module_paths=known_module_paths,
+                        js_ts_alias_resolver=js_ts_alias_resolver,
+                        package_index=java_package_index,
+                        java_package_by_module=java_package_by_module,
                     )
-                    if target_path:
-                        edges.append((mod.path, target_path))
+                    for target_path in target_paths:
+                        if target_path != mod.path:
+                            edges.append((mod.path, target_path))
+
+            edges = list(dict.fromkeys(edges))
 
         if enable_relationships:
             module_relationships = [
@@ -3136,7 +3854,7 @@ def _get_cross_file_dependencies_sync(
 
     caps_set = set(caps.get("capabilities", set()) or [])
 
-    if target_language in {"javascript", "typescript", "java"}:
+    if target_language in {"javascript", "typescript", "java", "go"}:
         return _get_js_ts_cross_file_dependencies_sync(
             root_path=root_path,
             target_path=target_path,
@@ -4029,6 +4747,27 @@ def _cross_file_security_scan_sync(
 
         # Determine risk level
         vuln_count = len(vulnerabilities)
+        warnings: list[str] = list(result.warnings)
+        java_file = next(root_path.rglob("*.java"), None)
+        if java_file is not None:
+            if getattr(tracker, "_resolver_language", "python") == "python":
+                if result.modules_analyzed == 0:
+                    warnings.append(
+                        "Cross-file security scan currently analyzes Python module graphs only; detected Java files were not analyzed."
+                    )
+                else:
+                    warnings.append(
+                        "Cross-file security scan analyzed Python modules but skipped detected Java files because cross-file Java module analysis is not implemented yet."
+                    )
+            elif not any(
+                "Java cross-file security scan currently supports a bounded IR-based subset"
+                in warning
+                for warning in warnings
+            ):
+                warnings.append(
+                    "Java cross-file security scan currently supports a bounded IR-based subset: common sources/sinks plus direct/static-import flows. Broader Java patterns are not implemented yet."
+                )
+
         if vuln_count == 0:
             risk_level = "low"
         elif vuln_count <= 2:
@@ -4226,6 +4965,7 @@ def _cross_file_security_scan_sync(
             taint_flows=taint_flows,
             taint_sources=taint_sources,
             dangerous_sinks=dangerous_sinks,
+            warnings=warnings,
             mermaid=mermaid,
             framework_contexts=framework_contexts,
             dependency_chains=dependency_chains,

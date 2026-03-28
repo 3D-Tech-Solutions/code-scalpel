@@ -13,6 +13,7 @@
 #   bash scripts/build_docs.sh --serve  # local preview at http://127.0.0.1:8000
 #   bash scripts/build_docs.sh --deploy # build + deploy to Hostinger
 #   bash scripts/build_docs.sh --strict # build with strict mode (treat warnings as errors)
+#   bash scripts/build_docs_local.sh    # strict local build without git revision warnings
 
 set -euo pipefail
 

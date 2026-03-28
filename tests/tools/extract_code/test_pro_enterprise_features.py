@@ -58,10 +58,20 @@ class TestProTierFeatures:
         )
 
         assert result.success is True
-        # Pro tier should have confidence metadata (either as field or in context_items)
-        assert hasattr(result, "confidence_scores") or hasattr(result, "context_items")
-        assert len(result.context_items) > 0 or hasattr(
-            result, "cross_file_dependencies"
+        # [20260309_TEST] Assert the concrete Pro cross-file extraction metadata and emitted context.
+        assert result.tier_applied == "pro"
+        assert result.language_detected == "python"
+        assert result.cross_file_deps_enabled is True
+        assert result.max_depth_applied is None
+        assert result.line_start == 3
+        assert result.line_end == 4
+        assert result.target_code == "def process():\n    helper()"
+        assert len(result.context_items) == 1
+        assert result.context_items[0].endswith("lib.py)")
+        assert result.context_items[0].startswith("helper (")
+        assert (
+            result.context_code
+            == "# From " + str(tmp_path / "lib.py") + "\n\ndef helper():\n    pass"
         )
 
     @pytest.mark.asyncio
@@ -154,9 +164,15 @@ class TestProTierFeatures:
         )
 
         assert result.success is True
-        assert "List[str]" in result.target_code, "Type hints should be preserved"
-        assert "Dict[str, int]" in result.target_code
-        assert "def process_items" in result.target_code
+        # [20260309_TEST] Assert the exact typed Python extraction slice and bounds.
+        assert result.tier_applied == "pro"
+        assert result.language_detected == "python"
+        assert result.line_start == 3
+        assert result.line_end == 4
+        assert (
+            result.target_code
+            == "def process_items(items: List[str]) -> Dict[str, int]:\n    return {item: len(item) for item in items}"
+        )
 
     @pytest.mark.asyncio
     async def test_pro_tier_depth_unlimited(self, monkeypatch, tmp_path: Path):
@@ -188,8 +204,18 @@ class TestProTierFeatures:
         )
 
         assert result.success is True
-        # Should include some dependencies
-        assert len(result.context_items) > 0
+        # [20260309_TEST] Pro should preserve the requested unlimited depth semantics.
+        assert result.tier_applied == "pro"
+        assert result.cross_file_deps_enabled is True
+        assert result.max_depth_applied is None
+        assert result.context_items == [
+            f"c ({tmp_path / 'c.py'})",
+            f"b ({tmp_path / 'b.py'})",
+            f"a ({tmp_path / 'a.py'})",
+        ]
+        assert "# From " + str(tmp_path / "c.py") in result.context_code
+        assert "# From " + str(tmp_path / "b.py") in result.context_code
+        assert "# From " + str(tmp_path / "a.py") in result.context_code
 
 
 class TestEnterpriseTierFeatures:
@@ -245,8 +271,20 @@ class TestEnterpriseTierFeatures:
         )
 
         assert result.success is True
-        # Enterprise should resolve across package boundaries
-        assert len(result.context_items) > 0
+        # [20260309_TEST] Enterprise resolution should emit the concrete imported dependency.
+        assert result.tier_applied == "enterprise"
+        assert result.language_detected == "python"
+        assert result.cross_file_deps_enabled is True
+        assert result.target_code == "def handle_request(id):\n    return get_user(id)"
+        assert result.context_items == [
+            f"get_user ({tmp_path / 'services' / 'user.py'})"
+        ]
+        assert (
+            result.context_code
+            == "# From "
+            + str(tmp_path / "services" / "user.py")
+            + "\n\ndef get_user(id):\n    return {'id': id}"
+        )
 
     @pytest.mark.asyncio
     async def test_enterprise_tier_custom_extraction_patterns(
@@ -319,11 +357,14 @@ class TestEnterpriseTierFeatures:
         )
 
         assert result.success is True
-        # Enterprise should detect HTTP service boundaries
+        # [20260310_TEST] Current Enterprise behavior preserves the HTTP call in the extracted slice.
+        assert result.tier_applied == "enterprise"
+        assert result.language_detected == "python"
         assert (
-            hasattr(result, "service_boundaries")
-            or "requests.get" in result.target_code
+            result.target_code
+            == "def get_orders():\n    return requests.get('http://user-service/users')"
         )
+        assert getattr(result, "service_boundaries", None) is None
 
     @pytest.mark.asyncio
     async def test_enterprise_tier_unlimited_depth(self, monkeypatch, tmp_path: Path):

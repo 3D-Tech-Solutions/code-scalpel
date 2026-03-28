@@ -18,6 +18,7 @@ from code_scalpel.mcp.oracle_middleware import (
     SymbolStrategy,
     RenameSymbolStrategy,
 )
+from code_scalpel.mcp.path_resolver import resolve_path
 from code_scalpel import __version__ as _pkg_version
 
 _extract_code = getattr(_helpers, "extract_code", None) or getattr(
@@ -121,6 +122,58 @@ async def extract_code(
     """
     started = time.perf_counter()
     try:
+        # [20260311_BUGFIX] Validate extract request shape before helper/result-model handling.
+        if file_path is None and (code is None or not str(code).strip()):
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            tier = _get_current_tier()
+            return make_envelope(
+                data=None,
+                tool_id="extract_code",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=duration_ms,
+                error=ToolError(
+                    error="Provide either 'file_path' or non-empty 'code'.",
+                    error_code="invalid_argument",
+                    error_details={"file_path": file_path, "code_provided": code is not None},
+                ),
+            )
+        if target_type not in {"function", "class", "method"}:
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            tier = _get_current_tier()
+            return make_envelope(
+                data=None,
+                tool_id="extract_code",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=duration_ms,
+                error=ToolError(
+                    error=(
+                        f"Invalid target_type '{target_type}' (unknown target_type). Use 'function', 'class', or 'method'."
+                    ),
+                    error_code="invalid_argument",
+                    error_details={"target_type": target_type},
+                ),
+            )
+        # [20260311_BUGFIX] Normalize file paths here so malformed Windows/WSL paths become correction_needed.
+        if file_path is not None:
+            try:
+                file_path = resolve_path(file_path)
+            except FileNotFoundError as exc:
+                duration_ms = int((time.perf_counter() - started) * 1000)
+                tier = _get_current_tier()
+                return make_envelope(
+                    data=None,
+                    tool_id="extract_code",
+                    tool_version=_pkg_version,
+                    tier=tier,
+                    duration_ms=duration_ms,
+                    error=ToolError(
+                        error=str(exc),
+                        error_code="correction_needed",
+                        error_details={"hint": str(exc)},
+                    ),
+                )
         if _extract_code is None:
             from code_scalpel.mcp.models.core import ContextualExtractionResult
 
@@ -224,6 +277,57 @@ async def rename_symbol(
     """
     started = time.perf_counter()
     try:
+        # [20260311_BUGFIX] Validate rename request shape before helper/result-model handling.
+        if target_type not in {"function", "class", "method"}:
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            tier = _get_current_tier()
+            return make_envelope(
+                data=None,
+                tool_id="rename_symbol",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=duration_ms,
+                error=ToolError(
+                    error=(
+                        f"Invalid target_type '{target_type}' (unknown target_type). Use 'function', 'class', or 'method'."
+                    ),
+                    error_code="invalid_argument",
+                    error_details={"target_type": target_type},
+                ),
+            )
+        if not new_name.strip():
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            tier = _get_current_tier()
+            return make_envelope(
+                data=None,
+                tool_id="rename_symbol",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=duration_ms,
+                error=ToolError(
+                    error="Parameter 'new_name' cannot be empty.",
+                    error_code="invalid_argument",
+                    error_details={"new_name": new_name},
+                ),
+            )
+        # [20260311_BUGFIX] Normalize file paths here so malformed Windows/WSL paths become correction_needed.
+        try:
+            file_path = resolve_path(file_path)
+        except FileNotFoundError as exc:
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            tier = _get_current_tier()
+            return make_envelope(
+                data=None,
+                tool_id="rename_symbol",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=duration_ms,
+                error=ToolError(
+                    error=str(exc),
+                    error_code="correction_needed",
+                    error_details={"hint": str(exc)},
+                ),
+            )
         if _rename_symbol is None:
             result = PatchResultModel(
                 success=False,
@@ -312,6 +416,88 @@ async def update_symbol(
     """
     started = time.perf_counter()
     try:
+        # [20260311_BUGFIX] Validate update request shape before helper/result-model handling.
+        normalized_operation = (operation or "replace").strip().lower()
+        if normalized_operation not in {"replace", "rename"}:
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            tier = _get_current_tier()
+            return make_envelope(
+                data=None,
+                tool_id="update_symbol",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=duration_ms,
+                error=ToolError(
+                    error="Invalid operation. Use 'replace' or 'rename'.",
+                    error_code="invalid_argument",
+                    error_details={"operation": operation},
+                ),
+            )
+        if target_type not in {"function", "class", "method"}:
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            tier = _get_current_tier()
+            return make_envelope(
+                data=None,
+                tool_id="update_symbol",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=duration_ms,
+                error=ToolError(
+                    error=(
+                        f"Invalid target_type '{target_type}' (unknown target_type). Use 'function', 'class', or 'method'."
+                    ),
+                    error_code="invalid_argument",
+                    error_details={"target_type": target_type},
+                ),
+            )
+        if normalized_operation == "replace" and (new_code is None or not str(new_code).strip()):
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            tier = _get_current_tier()
+            return make_envelope(
+                data=None,
+                tool_id="update_symbol",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=duration_ms,
+                error=ToolError(
+                    error="Parameter 'new_code' cannot be empty for operation='replace'.",
+                    error_code="invalid_argument",
+                    error_details={"operation": normalized_operation},
+                ),
+            )
+        if normalized_operation == "rename" and (new_name is None or not new_name.strip()):
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            tier = _get_current_tier()
+            return make_envelope(
+                data=None,
+                tool_id="update_symbol",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=duration_ms,
+                error=ToolError(
+                    error="Parameter 'new_name' is required for operation='rename'.",
+                    error_code="invalid_argument",
+                    error_details={"operation": normalized_operation},
+                ),
+            )
+        # [20260311_BUGFIX] Normalize file paths here so malformed Windows/WSL paths become correction_needed.
+        try:
+            file_path = resolve_path(file_path)
+        except FileNotFoundError as exc:
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            tier = _get_current_tier()
+            return make_envelope(
+                data=None,
+                tool_id="update_symbol",
+                tool_version=_pkg_version,
+                tier=tier,
+                duration_ms=duration_ms,
+                error=ToolError(
+                    error=str(exc),
+                    error_code="correction_needed",
+                    error_details={"hint": str(exc)},
+                ),
+            )
         debug_print(
             f"DEBUG:update_symbol: start file_path={file_path!r} target_type={target_type!r} target_name={target_name!r} operation={operation!r}"
         )

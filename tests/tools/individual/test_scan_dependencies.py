@@ -276,6 +276,55 @@ class TestScanDependenciesAsync:
         # Should succeed (may or may not find deps in cwd)
         assert result.success is True
 
+    @pytest.mark.asyncio
+    async def test_async_uses_shared_path_resolver_for_malformed_windows_path(
+        self, tmp_path, monkeypatch
+    ):
+        """Malformed '/K:/...' project paths should resolve before scanning."""
+        req_path = tmp_path / "requirements.txt"
+        req_path.write_text("requests==2.25.0\n")
+
+        monkeypatch.setattr(
+            "code_scalpel.mcp.tools.security.resolve_path",
+            lambda path, project_root=None: str(tmp_path),
+        )
+
+        result = await scan_dependencies(
+            project_root="/K:/backup/Develop/code-scalpel-ninja-warrior/project",
+            scan_vulnerabilities=False,
+        )
+
+        assert result.error is None
+        assert result.success is True
+        assert result.total_dependencies >= 1
+
+    @pytest.mark.asyncio
+    async def test_async_returns_correction_needed_for_unresolvable_windows_path(
+        self, monkeypatch
+    ):
+        """Unresolvable '/K:/...' dependency paths should not become internal_error."""
+        resolver_error = FileNotFoundError(
+            "Cannot access file: /K:/backup/Develop/code-scalpel-ninja-warrior/project (not found)\n\n"
+            "Suggestion:\n"
+            "Windows path detected but file not accessible.\n"
+            "If running in WSL, the path should be accessible at:\n\n"
+            "  /mnt/k/backup/Develop/code-scalpel-ninja-warrior/project"
+        )
+
+        monkeypatch.setattr(
+            "code_scalpel.mcp.tools.security.resolve_path",
+            lambda path, project_root=None: (_ for _ in ()).throw(resolver_error),
+        )
+
+        result = await scan_dependencies(
+            project_root="/K:/backup/Develop/code-scalpel-ninja-warrior/project",
+            scan_vulnerabilities=False,
+        )
+
+        assert result.error is not None
+        assert result.error.error_code == "correction_needed"
+        assert "/mnt/k/backup/Develop/code-scalpel-ninja-warrior/project" in result.error.error
+
 
 class TestSeveritySummary:
     """Tests for severity summary aggregation."""
