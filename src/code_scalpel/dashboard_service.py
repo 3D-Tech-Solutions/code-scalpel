@@ -760,6 +760,85 @@ def get_dashboard_html() -> str:
             margin-bottom: 5px;
             font-size: 13px;
         }
+
+        .filters-bar {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            align-items: flex-end;
+        }
+
+        .filter-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .filter-group label {
+            font-size: 12px;
+            font-weight: 600;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .filter-group input,
+        .filter-group select {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 13px;
+            font-family: inherit;
+            min-width: 150px;
+        }
+
+        .filter-group input:focus,
+        .filter-group select:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .filter-button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 8px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 13px;
+            transition: background 0.3s;
+        }
+
+        .filter-button:hover {
+            background: #764ba2;
+        }
+
+        .filter-button.secondary {
+            background: #f0f0f0;
+            color: #333;
+        }
+
+        .filter-button.secondary:hover {
+            background: #e0e0e0;
+        }
+
+        .most-used-badge {
+            display: inline-block;
+            background: #d1ecf1;
+            color: #0c5460;
+            padding: 2px 6px;
+            border-radius: 2px;
+            font-size: 10px;
+            font-weight: 600;
+            margin-left: 5px;
+        }
     </style>
 </head>
 <body>
@@ -843,9 +922,28 @@ def get_dashboard_html() -> str:
                 <div class="stat-value" id="stat-duration">0ms</div>
             </div>
             <div class="stat-card">
-                <div class="stat-label">Connection</div>
-                <div class="status-badge status-disconnected" id="status-badge">Disconnected</div>
+                <div class="stat-label">Most Used <span class="most-used-badge" id="most-used-tool">—</span></div>
+                <div style="color: #999; font-size: 12px; margin-top: 5px;">Tool</div>
             </div>
+        </div>
+
+        <!-- Filters Bar -->
+        <div class="filters-bar">
+            <div class="filter-group">
+                <label for="filter-tool">Tool Name</label>
+                <input type="text" id="filter-tool" placeholder="e.g., security_scan" />
+            </div>
+            <div class="filter-group">
+                <label for="filter-status">Status</label>
+                <select id="filter-status">
+                    <option value="">All</option>
+                    <option value="success">Success</option>
+                    <option value="failure">Failure</option>
+                </select>
+            </div>
+            <div style="flex: 1; min-width: 100px;"></div>
+            <button class="filter-button" onclick="applyFilters()">🔍 Apply Filters</button>
+            <button class="filter-button secondary" onclick="clearFilters()">✕ Clear Filters</button>
         </div>
 
         <div class="events-container">
@@ -928,32 +1026,59 @@ def get_dashboard_html() -> str:
                 ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length)
                 : 0;
 
+            // Calculate most used tool
+            const toolCounts = {};
+            events.forEach(e => {
+                toolCounts[e.tool_name] = (toolCounts[e.tool_name] || 0) + 1;
+            });
+            const mostUsedTool = Object.keys(toolCounts).length > 0
+                ? Object.entries(toolCounts).sort((a, b) => b[1] - a[1])[0][0]
+                : '—';
+
             document.getElementById('stat-total').textContent = total;
             document.getElementById('stat-success').textContent = successRate + '%';
             document.getElementById('stat-duration').textContent = avgDuration + 'ms';
+            document.getElementById('most-used-tool').textContent = mostUsedTool;
         }
 
-        function formatTime(timestamp) {
-            const date = new Date(timestamp * 1000);
-            return date.toLocaleTimeString();
+        let filteredEvents = [];
+
+        function applyFilters() {
+            const toolFilter = document.getElementById('filter-tool').value.toLowerCase().trim();
+            const statusFilter = document.getElementById('filter-status').value;
+
+            filteredEvents = events.filter(e => {
+                const toolMatch = toolFilter === '' || e.tool_name.toLowerCase().includes(toolFilter);
+                const statusMatch = statusFilter === '' || e.status === statusFilter;
+                return toolMatch && statusMatch;
+            });
+
+            renderFilteredEvents();
         }
 
-        function renderEvents() {
+        function clearFilters() {
+            document.getElementById('filter-tool').value = '';
+            document.getElementById('filter-status').value = '';
+            filteredEvents = [...events];
+            renderFilteredEvents();
+        }
+
+        function renderFilteredEvents() {
             const list = document.getElementById('events-list');
 
-            if (events.length === 0) {
+            if (filteredEvents.length === 0) {
                 list.innerHTML = `
                     <div class="empty-state">
-                        <div class="empty-state-icon">📭</div>
-                        <p>Waiting for tool calls...</p>
+                        <div class="empty-state-icon">🔍</div>
+                        <p>No tool calls match your filters.</p>
                     </div>
                 `;
                 return;
             }
 
-            list.innerHTML = events.map((event, index) => `
+            list.innerHTML = filteredEvents.map((event, index) => `
                 <div class="event-item">
-                    <div class="event-header" onclick="toggleEventDetails('event-${index}')" style="cursor: pointer;">
+                    <div class="event-header" onclick="toggleEventDetails('event-filtered-${index}')" style="cursor: pointer;">
                         <div class="event-info">
                             <div class="event-tool">${event.tool_name}</div>
                             <div class="event-details">
@@ -970,7 +1095,7 @@ def get_dashboard_html() -> str:
                             <span style="cursor: pointer; margin-left: 10px; font-weight: bold;">▼</span>
                         </div>
                     </div>
-                    <div class="event-details-panel" id="event-${index}" style="display: none; padding: 15px; background: #f5f5f5; border-top: 1px solid #ddd; margin-top: 5px;">
+                    <div class="event-details-panel" id="event-filtered-${index}" style="display: none; padding: 15px; background: #f5f5f5; border-top: 1px solid #ddd; margin-top: 5px;">
                         ${event.input_summary ? `
                             <div style="margin-bottom: 15px;">
                                 <div style="font-weight: bold; color: #333; margin-bottom: 5px;">📥 Input</div>
@@ -999,6 +1124,31 @@ def get_dashboard_html() -> str:
                     </div>
                 </div>
             `).join('');
+        }
+
+        function formatTime(timestamp) {
+            const date = new Date(timestamp * 1000);
+            return date.toLocaleTimeString();
+        }
+
+        function renderEvents() {
+            // Update filtered events to match current state
+            const toolFilter = document.getElementById('filter-tool').value.toLowerCase().trim();
+            const statusFilter = document.getElementById('filter-status').value;
+
+            if (toolFilter === '' && statusFilter === '') {
+                // No filters active, render all events
+                filteredEvents = [...events];
+            } else {
+                // Apply filters
+                filteredEvents = events.filter(e => {
+                    const toolMatch = toolFilter === '' || e.tool_name.toLowerCase().includes(toolFilter);
+                    const statusMatch = statusFilter === '' || e.status === statusFilter;
+                    return toolMatch && statusMatch;
+                });
+            }
+
+            renderFilteredEvents();
         }
 
         function toggleEventDetails(eventId) {
