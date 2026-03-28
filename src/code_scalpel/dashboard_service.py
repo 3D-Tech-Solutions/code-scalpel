@@ -7,14 +7,19 @@ Provides WebSocket endpoint for live event streaming and HTTP endpoint for fetch
 from __future__ import annotations
 
 import asyncio
+import csv
+import glob
+import io
 import json
 import logging
 import socket
 import threading
+from datetime import datetime
+from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from uvicorn import Server, Config
 
 logger = logging.getLogger(__name__)
@@ -347,6 +352,128 @@ def create_app() -> tuple[FastAPI, int]:
         except Exception as e:
             logger.error(f"Error getting audit status: {e}")
             return {"error": str(e), "status": "error"}
+
+    @app.get("/api/audit/export/csv")
+    async def export_events_csv(
+        tool_name: Optional[str] = None,
+        status: Optional[str] = None,
+        limit: int = 500,
+    ) -> StreamingResponse:
+        """Export recent events as a CSV download."""
+        from code_scalpel import telemetry
+
+        # Prefer audit log, fall back to in-memory telemetry queue
+        events = []
+        try:
+            if telemetry._AUDIT_LOG is not None:
+                events = telemetry._AUDIT_LOG.get_events(
+                    limit=limit, tool_name=tool_name, status=status
+                )
+            else:
+                raw = telemetry.get_recent_events(limit=min(limit, 50))
+                # Apply optional filters manually (in-memory path)
+                if tool_name:
+                    raw = [e for e in raw if tool_name.lower() in e["tool_name"].lower()]
+                if status:
+                    raw = [e for e in raw if e["status"] == status]
+                events = raw
+        except Exception as e:
+            logger.warning(f"CSV export error: {e}")
+            events = telemetry.get_recent_events(limit=50)
+
+        # Build CSV in-memory
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow([
+            "timestamp_iso", "tool_name", "status", "duration_ms",
+            "tier_applied", "error", "event_id", "request_id",
+        ])
+        for ev in events:
+            ts = ev.get("timestamp_iso") or str(ev.get("timestamp", ""))
+            writer.writerow([
+                ts,
+                ev.get("tool_name", ""),
+                ev.get("status", ""),
+                ev.get("duration_ms", ""),
+                ev.get("tier_applied", ""),
+                ev.get("error") or "",
+                ev.get("event_id", ""),
+                ev.get("request_id", ""),
+            ])
+
+        output.seek(0)
+        return StreamingResponse(
+            iter([output.getvalue()]),
+            media_type="text/csv",
+            headers={"Content-Disposition": "attachment; filename=code_scalpel_audit.csv"},
+        )
+
+    @app.get("/api/audit/sessions")
+    async def list_audit_sessions() -> dict[str, Any]:
+        """List available past audit session files."""
+        home_dir = Path.home() / ".code-scalpel"
+        sessions = []
+        pattern = str(home_dir / "audit_*.jsonl")
+        for filepath in sorted(glob.glob(pattern), reverse=True)[:20]:
+            try:
+                p = Path(filepath)
+                size = p.stat().st_size
+                # Count lines = event count
+                with open(filepath) as f:
+                    count = sum(1 for _ in f)
+                sessions.append({
+                    "filename": p.name,
+                    "path": str(p),
+                    "size_bytes": size,
+                    "event_count": count,
+                    "modified": p.stat().st_mtime,
+                    "modified_iso": datetime.fromtimestamp(p.stat().st_mtime).isoformat(),
+                })
+            except Exception:
+                pass
+        return {"sessions": sessions, "count": len(sessions)}
+
+    @app.get("/api/audit/historical")
+    async def get_historical_events(
+        filename: str,
+        tool_name: Optional[str] = None,
+        status: Optional[str] = None,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        """Load events from a historical JSONL archive file."""
+        home_dir = Path.home() / ".code-scalpel"
+        # Safety: only allow files directly in ~/.code-scalpel (no path traversal)
+        safe_name = Path(filename).name
+        if not safe_name.startswith("audit_") or not safe_name.endswith(".jsonl"):
+            return {"error": "Invalid filename", "events": []}
+
+        filepath = home_dir / safe_name
+        if not filepath.exists():
+            return {"error": "File not found", "events": []}
+
+        events = []
+        try:
+            with open(filepath) as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        ev = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    # Apply filters
+                    if tool_name and tool_name.lower() not in ev.get("tool_name", "").lower():
+                        continue
+                    if status and ev.get("status") != status:
+                        continue
+                    events.append(ev)
+        except Exception as e:
+            return {"error": str(e), "events": []}
+
+        # newest first, capped at limit
+        events.reverse()
+        return {"events": events[:limit], "total": len(events), "filename": safe_name}
 
     @app.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket) -> None:
@@ -1057,6 +1184,65 @@ def get_dashboard_html() -> str:
             color: #666;
             font-size: 13px;
         }
+
+        /* Historical Sessions Styles */
+        .historical-section {
+            background: #1e1e1e;
+            border: 1px solid #333;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            overflow: hidden;
+        }
+
+        .historical-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 16px;
+            cursor: pointer;
+            font-size: 13px;
+            color: #aaa;
+            user-select: none;
+        }
+
+        .historical-header:hover {
+            background: #252525;
+            color: #fff;
+        }
+
+        .historical-body {
+            padding: 12px 16px;
+            border-top: 1px solid #2a2a2a;
+        }
+
+        .sessions-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .session-chip {
+            background: #2a2a2a;
+            border: 1px solid #444;
+            border-radius: 4px;
+            padding: 4px 10px;
+            font-size: 11px;
+            color: #aaa;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+
+        .session-chip:hover {
+            background: #333;
+            color: #fff;
+            border-color: #007bff;
+        }
+
+        .session-chip.active {
+            background: #0056b3;
+            border-color: #007bff;
+            color: #fff;
+        }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 </head>
@@ -1187,6 +1373,21 @@ def get_dashboard_html() -> str:
             <div style="flex: 1; min-width: 100px;"></div>
             <button class="filter-button" onclick="applyFilters()">🔍 Apply Filters</button>
             <button class="filter-button secondary" onclick="clearFilters()">✕ Clear Filters</button>
+            <button class="filter-button secondary" onclick="exportCSV()">📥 Export CSV</button>
+        </div>
+
+        <!-- Historical Sessions Panel -->
+        <div class="historical-section" id="historical-section">
+            <div class="historical-header" onclick="toggleHistoricalPanel()">
+                <span>📁 Historical Sessions</span>
+                <span class="historical-toggle" id="historical-toggle">▶</span>
+            </div>
+            <div class="historical-body" id="historical-body" style="display:none;">
+                <div id="sessions-list" class="sessions-list">
+                    <span style="color: #666; font-size: 12px;">Loading sessions...</span>
+                </div>
+                <div id="historical-loaded-info" style="display:none; margin-top:8px; font-size:12px; color:#888;"></div>
+            </div>
         </div>
 
         <div class="events-container">
@@ -1742,6 +1943,71 @@ def get_dashboard_html() -> str:
                 alert(`Failed to shutdown server: ${e.message}`);
             }
         }
+
+        // ── CSV Export & Historical Sessions ────────────────────────────────────────
+        let historicalPanelLoaded = false;
+
+        function exportCSV() {
+            const toolFilter = document.getElementById('filter-tool').value.trim();
+            const statusFilter = document.getElementById('filter-status').value;
+            let url = '/api/audit/export/csv?limit=500';
+            if (toolFilter) url += '&tool_name=' + encodeURIComponent(toolFilter);
+            if (statusFilter) url += '&status=' + encodeURIComponent(statusFilter);
+            window.open(url, '_blank');
+        }
+
+        async function toggleHistoricalPanel() {
+            const body = document.getElementById('historical-body');
+            const toggle = document.getElementById('historical-toggle');
+            const open = body.style.display === 'none';
+            body.style.display = open ? 'block' : 'none';
+            toggle.textContent = open ? '▼' : '▶';
+            if (open && !historicalPanelLoaded) {
+                historicalPanelLoaded = true;
+                await loadSessionsList();
+            }
+        }
+
+        async function loadSessionsList() {
+            try {
+                const resp = await fetch('/api/audit/sessions');
+                const data = await resp.json();
+                const container = document.getElementById('sessions-list');
+                if (!data.sessions || data.sessions.length === 0) {
+                    container.innerHTML = '<span style="color:#666;font-size:12px;">No past sessions found.</span>';
+                    return;
+                }
+                container.innerHTML = data.sessions.map(s => `
+                    <div class="session-chip" onclick="loadHistoricalSession('${s.filename}', this)"
+                         title="${s.modified_iso}">
+                        ${s.filename.replace('audit_','').replace('.jsonl','')} (${s.event_count} events)
+                    </div>
+                `).join('');
+            } catch (e) {
+                document.getElementById('sessions-list').innerHTML =
+                    '<span style="color:#dc3545;font-size:12px;">Failed to load sessions.</span>';
+            }
+        }
+
+        async function loadHistoricalSession(filename, chip) {
+            document.querySelectorAll('.session-chip').forEach(c => c.classList.remove('active'));
+            chip.classList.add('active');
+            try {
+                const resp = await fetch(`/api/audit/historical?filename=${encodeURIComponent(filename)}&limit=100`);
+                const data = await resp.json();
+                if (data.error) { alert('Error: ' + data.error); return; }
+                // Replace live events list with historical events (no WebSocket updates)
+                events = data.events;
+                renderEvents();
+                updateStats();
+                document.getElementById('historical-loaded-info').style.display = 'block';
+                document.getElementById('historical-loaded-info').textContent =
+                    `Showing ${data.events.length} of ${data.total} events from ${filename}`;
+            } catch (e) {
+                alert('Failed to load historical session.');
+            }
+        }
+        // ─────────────────────────────────────────────────────────────────────────────
 
         // Initialize
         loadLicenseStatus();
