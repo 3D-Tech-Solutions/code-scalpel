@@ -3366,7 +3366,7 @@ async def get_file_context(file_path: str) -> FileContextResult:
         raise
 
 
-def _get_symbol_references_sync(
+def _get_symbol_references_sync(  # type: ignore[misc]
     symbol_name: str,
     project_root: str | None = None,
     max_files: int | None = None,

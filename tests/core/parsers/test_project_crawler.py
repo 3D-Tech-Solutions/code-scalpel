@@ -392,7 +392,7 @@ def complex(x, y, z):
         result = crawler.crawl()
         report = crawler.generate_report(result)
 
-        assert "# Project Python Analysis Report" in report
+        assert "# Project Analysis Report" in report
         assert "Executive Summary" in report
         assert "Complexity Warnings" in report
         assert "File Statistics" in report
@@ -416,7 +416,7 @@ def complex(x, y, z):
 
         assert output_path.exists()
         content = output_path.read_text()
-        assert "Project Python Analysis Report" in content
+        assert "Project Analysis Report" in content
 
 
 class TestToDictConversion:

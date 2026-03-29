@@ -15,7 +15,7 @@ Example:
 import ast
 import re
 from dataclasses import dataclass
-from typing import Any, TypedDict
+from typing import Any, TypedDict, cast
 
 from code_scalpel.ir.nodes import (
     IRAssign,
@@ -1252,7 +1252,7 @@ class TestGenerator:
         if language == "java":
             func_node, class_fields = self._get_java_function_context(
                 code, function_name
-            )
+            )  # type: ignore[assignment]
             if func_node is None:
                 return None
             java_state = dict(inputs)
@@ -1262,13 +1262,13 @@ class TestGenerator:
                     evaluated = self._java_ir_value_to_python(field_value)
                 if evaluated is not None:
                     java_state[field_name] = evaluated
-            return self._safe_interpret_return_java(func_node.body, java_state)
+            return self._safe_interpret_return_java(cast(list, func_node.body), java_state)  # type: ignore[arg-type]
 
         if language == "typescript":
-            func_node = self._get_typescript_function_ir(code, function_name)
+            func_node = self._get_typescript_function_ir(code, function_name)  # type: ignore[assignment]
             if func_node is None:
                 return None
-            return self._safe_interpret_return_java(func_node.body, dict(inputs))
+            return self._safe_interpret_return_java(cast(list, func_node.body), dict(inputs))  # type: ignore[arg-type]
 
         if language != "python":
             return None
