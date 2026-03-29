@@ -302,7 +302,7 @@ def generate_unit_tests(
     code: str | None = None,
     file_path: str | None = None,
     function_name: str | None = None,
-    language: str | None = None,
+    language: str = "python",
     framework: str = "pytest",
 ):
     """[20251228_FEATURE] Sync wrapper for MCP generate_unit_tests tool."""

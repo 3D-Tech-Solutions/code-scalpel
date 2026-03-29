@@ -856,19 +856,30 @@ class TestPathResolutionParityAcrossTools:
         )
 
         def fake_generate(*args):
+            from code_scalpel.mcp.models.core import (
+                TestGenerationResult,
+                GeneratedTestCase,
+            )
+
             assert args[1] == expected_file
-            return {
-                "success": True,
-                "function_name": "helper",
-                "test_count": 1,
-                "total_test_cases": 1,
-                "framework_used": "pytest",
-                "data_driven_enabled": False,
-                "bug_reproduction_enabled": False,
-                "test_cases": [{"name": "test_helper"}],
-                "warnings": [],
-                "coverage_estimate": 75.0,
-            }
+            return TestGenerationResult(
+                success=True,
+                function_name="helper",
+                test_count=1,
+                total_test_cases=1,
+                framework_used="pytest",
+                data_driven_enabled=False,
+                bug_reproduction_enabled=False,
+                test_cases=[
+                    GeneratedTestCase(
+                        path_id=0,
+                        function_name="test_helper",
+                        inputs={},
+                        description="Test case",
+                        path_conditions=[],
+                    )
+                ],
+            )
 
         monkeypatch.setattr(
             "code_scalpel.mcp.tools.symbolic.sym_helpers._generate_tests_sync",
