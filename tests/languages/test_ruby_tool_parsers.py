@@ -583,9 +583,6 @@ class TestRubyASTParser:
         try:
             RubyASTParser, RubyClass, RubyMethod = _import_ast()
             parser = RubyASTParser()
-            from code_scalpel.ir.normalizers.ruby_normalizer import (
-                RubyNormalizer,
-            )  # noqa
         except ImportError:
             pytest.skip("tree-sitter-ruby not installed")
         result = parser.parse_code("def hello; 'world'; end")
@@ -594,7 +591,7 @@ class TestRubyASTParser:
     def test_extract_classes_from_ir(self):
         """extract_classes reads IRClass nodes correctly."""
         try:
-            from code_scalpel.ir.normalizers.ruby_normalizer import RubyNormalizer
+            import code_scalpel.ir.normalizers.ruby_normalizer  # noqa: F401
         except ImportError:
             pytest.skip("tree-sitter-ruby not installed")
         RubyASTParser, RubyClass, RubyMethod = _import_ast()
@@ -606,7 +603,7 @@ class TestRubyASTParser:
     def test_extract_methods_from_ir(self):
         """extract_methods returns top-level methods."""
         try:
-            from code_scalpel.ir.normalizers.ruby_normalizer import RubyNormalizer
+            import code_scalpel.ir.normalizers.ruby_normalizer  # noqa: F401
         except ImportError:
             pytest.skip("tree-sitter-ruby not installed")
         RubyASTParser, RubyClass, RubyMethod = _import_ast()
@@ -618,7 +615,7 @@ class TestRubyASTParser:
     def test_generate_report_returns_json(self):
         """generate_report returns valid JSON."""
         try:
-            from code_scalpel.ir.normalizers.ruby_normalizer import RubyNormalizer
+            import code_scalpel.ir.normalizers.ruby_normalizer  # noqa: F401
         except ImportError:
             pytest.skip("tree-sitter-ruby not installed")
         RubyASTParser, RubyClass, RubyMethod = _import_ast()

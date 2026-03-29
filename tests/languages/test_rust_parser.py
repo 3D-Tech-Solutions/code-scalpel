@@ -304,7 +304,7 @@ class TestRustNormalizer:
         m = self.norm.normalize("fn f() { loop { break; } }")
         fn = next(n for n in m.body if isinstance(n, IRFunctionDef))
         loops = [n for n in fn.body if isinstance(n, IRWhile)]
-        loop_nodes = [l for l in loops if l._metadata.get("kind") == "loop"]
+        loop_nodes = [loop_node for loop_node in loops if loop_node._metadata.get("kind") == "loop"]
         assert len(loop_nodes) >= 1
 
     def test_match_expression(self):

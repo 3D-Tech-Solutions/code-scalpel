@@ -226,11 +226,9 @@ class TestSwiftNormalizerProperty:
     """[20260304_TEST] var/let declarations → IRAssign."""
 
     def test_var_declaration(self):
-        from code_scalpel.ir.nodes import IRAssign
         from code_scalpel.ir.normalizers.swift_normalizer import SwiftNormalizer
 
         mod = SwiftNormalizer().normalize("var count: Int = 0")
-        assigns = [n for n in mod.body if isinstance(n, IRAssign)]
         # Property may be emitted as top-level assign
         assert mod is not None  # normalization succeeded without exception
 
