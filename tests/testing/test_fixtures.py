@@ -8,7 +8,7 @@ Tests all fixture injection functionality:
 - Parametrization via @tier_aware marker
 
 [20260301_TEST] Rewritten for feature-gating architecture.
-All tiers have 22 tools available; tiers differ in limits and features only.
+All tiers have 23 tools available; tiers differ in limits and features only.
 Cache clearing uses config_loader.clear_cache() (resolver._LIMITS_CACHE removed).
 License files located in tests/licenses/.
 """
@@ -57,9 +57,9 @@ class TestTierAdapterFixture:
         assert tier_adapter.get_tier() == "community"
 
     def test_tier_adapter_has_all_community_tools(self, tier_adapter: TierAdapter):
-        """Community tier should have all 22 tools available."""
+        """Community tier should have all 23 tools available."""
         available = tier_adapter.get_available_tools()
-        assert len(available) == 22
+        assert len(available) == 23
         assert all(isinstance(tool, str) for tool in available)
 
     def test_tier_adapter_no_locked_tools_community(self, tier_adapter: TierAdapter):
@@ -71,24 +71,24 @@ class TestTierAdapterFixture:
 class TestSpecificAdapterFixtures:
     """Test tier-specific adapter fixtures.
 
-    [20260301_TEST] Feature-gating model: all tiers have 22 tools.
+    [20260301_TEST] Feature-gating model: all tiers have 23 tools.
     Differences are in limits, not tool availability.
     """
 
     def test_community_adapter(self, community_adapter: TierAdapter):
-        """Community adapter should be community tier with all 22 tools."""
+        """Community adapter should be community tier with all 23 tools."""
         assert community_adapter.get_tier() == "community"
-        assert len(community_adapter.get_available_tools()) == 22
+        assert len(community_adapter.get_available_tools()) == 23
 
     def test_pro_adapter(self, pro_adapter: TierAdapter):
-        """[20260301_TEST] Pro adapter should be pro tier with all 22 tools."""
+        """[20260301_TEST] Pro adapter should be pro tier with all 23 tools."""
         assert pro_adapter.get_tier() == "pro"
-        assert len(pro_adapter.get_available_tools()) == 22
+        assert len(pro_adapter.get_available_tools()) == 23
 
     def test_enterprise_adapter(self, enterprise_adapter: TierAdapter):
-        """[20260301_TEST] Enterprise adapter should be enterprise tier with all 22 tools."""
+        """[20260301_TEST] Enterprise adapter should be enterprise tier with all 23 tools."""
         assert enterprise_adapter.get_tier() == "enterprise"
-        assert len(enterprise_adapter.get_available_tools()) == 22
+        assert len(enterprise_adapter.get_available_tools()) == 23
 
     def test_each_adapter_is_independent(
         self, community_adapter, pro_adapter, enterprise_adapter
@@ -124,12 +124,12 @@ class TestAllAdaptersFixture:
         assert tiers == {"community", "pro", "enterprise"}
 
     def test_all_adapters_correct_tool_counts(self, all_adapters: list[TierAdapter]):
-        """[20260301_TEST] Each adapter should have 22 tools (feature-gating)."""
+        """[20260301_TEST] Each adapter should have 23 tools (feature-gating)."""
         for adapter in all_adapters:
             available_count = len(adapter.get_available_tools())
             assert (
-                available_count == 22
-            ), f"{adapter.get_tier()} should have 22 tools, got {available_count}"
+                available_count == 23
+            ), f"{adapter.get_tier()} should have 23 tools, got {available_count}"
 
 
 class TestLicensePathFixtures:
@@ -241,11 +241,11 @@ class TestTierAwareParametrization:
         tier = tier_adapter.get_tier()
         assert tier in ("community", "pro", "enterprise")
 
-        # All tiers have 22 tools in the feature-gating model
+        # All tiers have 23 tools in the feature-gating model
         available_count = len(tier_adapter.get_available_tools())
         assert (
-            available_count == 22
-        ), f"{tier} should have 22 tools, got {available_count}"
+            available_count == 23
+        ), f"{tier} should have 23 tools, got {available_count}"
 
     @pytest.mark.tier_aware
     def test_tier_aware_with_tier_specific_assertions(self, tier_adapter: TierAdapter):
@@ -273,14 +273,14 @@ class TestFixtureIntegration:
     def test_multiple_adapters_independently_available(
         self, community_adapter, pro_adapter, enterprise_adapter
     ):
-        """[20260301_TEST] All adapters should have all 22 tools available."""
+        """[20260301_TEST] All adapters should have all 23 tools available."""
         # All tools available at all tiers (feature-gating model)
         for adapter in [community_adapter, pro_adapter, enterprise_adapter]:
             adapter.assert_tool_available("analyze_code")
             adapter.assert_tool_available("get_file_context")
             adapter.assert_tool_available("security_scan")
             adapter.assert_tool_available("get_call_graph")
-            assert len(adapter.get_available_tools()) == 22
+            assert len(adapter.get_available_tools()) == 23
 
     def test_clear_all_caches_with_adapters(
         self, clear_all_caches, community_adapter, pro_adapter

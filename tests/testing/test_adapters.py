@@ -43,22 +43,22 @@ class TestTierAdapter:
             TierAdapter("invalid")  # type: ignore[arg-type]
 
     def test_community_has_all_tools(self):
-        """Community tier has all 22 tools available."""
+        """Community tier has all 23 tools available."""
         adapter = TierAdapter("community")
         available = adapter.get_available_tools()
-        assert len(available) == 22
+        assert len(available) == 23
 
     def test_pro_has_all_tools(self):
-        """Pro tier has all 22 tools available (limits/capabilities differ)."""
+        """Pro tier has all 23 tools available (limits/capabilities differ)."""
         pro = TierAdapter("pro")
         pro_available = len(pro.get_available_tools())
-        assert pro_available == 22
+        assert pro_available == 23
 
     def test_enterprise_has_all_tools(self):
-        """Enterprise tier has all 22 tools available (limits/capabilities differ)."""
+        """Enterprise tier has all 23 tools available (limits/capabilities differ)."""
         enterprise = TierAdapter("enterprise")
         available = enterprise.get_available_tools()
-        assert len(available) == 22
+        assert len(available) == 23
 
     def test_tool_available_true(self):
         """tool_available returns True for available tools."""
@@ -83,7 +83,7 @@ class TestTierAdapter:
         """get_unavailable_tools returns empty set (all tools available)."""
         adapter = TierAdapter("enterprise")
         unavailable = adapter.get_unavailable_tools()
-        assert len(unavailable) == 0  # All 22 tools available
+        assert len(unavailable) == 0  # All 23 tools available
 
     def test_get_tool_limits(self):
         """get_tool_limits returns tool limits."""
@@ -187,17 +187,17 @@ class TestAssertCapabilityPresent:
 class TestAssertToolCount:
     """Test assert_tool_count function."""
 
-    def test_community_has_22_tools(self):
-        """Community tier has 22 tools."""
-        assert_tool_count("community", 22)  # Should not raise
+    def test_community_has_23_tools(self):
+        """Community tier has 23 tools."""
+        assert_tool_count("community", 23)  # Should not raise
 
-    def test_pro_has_22_tools(self):
-        """Pro tier has all 22 tools."""
-        assert_tool_count("pro", 22)  # Should not raise
+    def test_pro_has_23_tools(self):
+        """Pro tier has all 23 tools."""
+        assert_tool_count("pro", 23)  # Should not raise
 
-    def test_enterprise_has_22_tools(self):
-        """Enterprise tier has all 22 tools."""
-        assert_tool_count("enterprise", 22)  # Should not raise
+    def test_enterprise_has_23_tools(self):
+        """Enterprise tier has all 23 tools."""
+        assert_tool_count("enterprise", 23)  # Should not raise
 
     def test_wrong_count_raises(self):
         """Wrong tool count raises AssertionError."""
