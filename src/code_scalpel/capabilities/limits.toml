@@ -233,7 +233,7 @@ osv_lookup = true
 
 [pro.type_evaporation_scan]
 max_files = -1               # Unlimited (match Enterprise)
-frontend_only = true         # Backend analysis is enterprise-only for consistent data preservation
+frontend_only = false        # Pro tier enables bidirectional (frontend+backend) analysis
 
 [pro.security_scan]
 vulnerability_types = "all"
