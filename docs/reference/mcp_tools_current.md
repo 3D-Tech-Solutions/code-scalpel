@@ -33,7 +33,7 @@ This document is generated from the current MCP tool registry shipped by this re
 
 ## analyze_code
 
-Parse and extract code structure (functions, classes, imports) from source text or a file.
+Parse and extract code structure (functions, classes, imports) from source text or a file. Pass static_tools to also run external linters (cppcheck, clang-tidy, clang-sa, cpplint; coverity/sonarqube on Enterprise) against the file.
 
 ### Input schema
 
@@ -68,6 +68,21 @@ Parse and extract code structure (functions, classes, imports) from source text 
       "default": "auto",
       "title": "Language",
       "type": "string"
+    },
+    "static_tools": {
+      "anyOf": [
+        {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Static Tools"
     }
   },
   "title": "analyze_codeArguments",
@@ -150,7 +165,7 @@ Check code against style guides and compliance standards (HIPAA, SOC2, PCI-DSS).
 
 ## crawl_project
 
-Crawl a directory and return a file inventory with complexity metrics and security warnings.
+Crawl a directory and return a file inventory with deep Python analysis and summary-level slices for other supported source languages.
 
 ### Input schema
 
@@ -483,6 +498,11 @@ Generate unit test cases derived from symbolic execution paths for a function or
       ],
       "default": null,
       "title": "Function Name"
+    },
+    "language": {
+      "default": "python",
+      "title": "Language",
+      "type": "string"
     }
   },
   "title": "generate_unit_testsArguments",
@@ -492,7 +512,7 @@ Generate unit test cases derived from symbolic execution paths for a function or
 
 ## get_call_graph
 
-Generate a call graph showing function relationships, entry points, and circular imports.
+Generate a call graph with advanced Python support, dedicated JS/TS and Java runtime slices, and local-call parity for the broader polyglot IR-backed language set.
 
 ### Input schema
 
@@ -586,7 +606,7 @@ List all tools with tier limits. Pass tool_name='...' for full parameter docs an
 
 ## get_cross_file_dependencies
 
-Trace cross-file dependency chains for a symbol with confidence scoring.
+Trace Python-first cross-file dependency chains for a symbol, including an initial local JS/TS graph-backed parity slice.
 
 ### Input schema
 
@@ -648,7 +668,7 @@ Trace cross-file dependency chains for a symbol with confidence scoring.
 
 ## get_file_context
 
-Get a file overview (functions, classes, imports, summary) without reading the full content.
+Get a file overview (functions, classes, imports, summary) without reading the full content, with current runtime-backed slices across all 13 shipped source languages.
 
 ### Input schema
 
@@ -670,7 +690,7 @@ Get a file overview (functions, classes, imports, summary) without reading the f
 
 ## get_graph_neighborhood
 
-Extract the k-hop subgraph around a center node from the project's call graph.
+Extract a Python-first k-hop subgraph around a local Python function node, a local JS/TS function or method node, or a local Java method node from the project's call graph.
 
 ### Input schema
 
@@ -722,7 +742,7 @@ Extract the k-hop subgraph around a center node from the project's call graph.
 
 ## get_project_map
 
-Produce a high-level project structure map with package hierarchy and complexity hotspots.
+Produce a high-level project structure map with package hierarchy and complexity hotspots, with current runtime-backed slices for Python, JS/TS, Java, and Go.
 
 ### Input schema
 
@@ -772,7 +792,7 @@ Produce a high-level project structure map with package hierarchy and complexity
 
 ## get_symbol_references
 
-Find all references, definitions, and call sites for a named symbol across the project.
+Find all references, definitions, and call sites for a named symbol across the project, with an initial local JS/TS parity slice.
 
 ### Input schema
 
@@ -919,7 +939,7 @@ Check requirements/package files for known CVEs via the OSV vulnerability databa
 
 ## security_scan
 
-Taint-based vulnerability scan for SQL injection, XSS, command injection, and path traversal.
+Taint-based vulnerability scan for SQL injection, XSS, command injection, and path traversal, with full Python analysis and bounded sink/pattern slices for other supported languages.
 
 ### Input schema
 
@@ -1023,6 +1043,11 @@ Explore execution paths symbolically to find edge cases, dead code, and unreacha
   "properties": {
     "code": {
       "title": "Code",
+      "type": "string"
+    },
+    "language": {
+      "default": "python",
+      "title": "Language",
       "type": "string"
     },
     "max_depth": {

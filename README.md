@@ -2,19 +2,9 @@
 
 **Latest Release: v2.2.0 | March 28, 2026**
 
-**Stop copy-pasting entire files into Claude.** Give your AI assistant surgical code analysis tools and reduce costs by 200x.
+**Stop copy-pasting entire files into Claude.** Give your AI assistant surgical code analysis tools and reduce costs by up to 200x.
 
-**Result:** $450/month → $22/month. Same quality answers, 95% lower cost, 10x faster responses.
-
-![Free Forever](https://img.shields.io/badge/Free-Forever-brightgreen) ![Setup Time](https://img.shields.io/badge/Setup-2%20Minutes-blue) ![Local Execution](https://img.shields.io/badge/Runs-Locally-orange) ![Core Tools](https://img.shields.io/badge/Core%20Tools-22-purple) ![Languages](https://img.shields.io/badge/Languages-13-blue) [![Governed by Aegis-OS](https://img.shields.io/badge/Governed%20by-Aegis--OS-blueviolet?logo=github)](https://github.com/tescolopio/aegis-os) [![GitHub release](https://img.shields.io/github/v/release/tescolopio/aegis-os)](https://github.com/tescolopio/aegis-os/releases)
-
-> **Enterprise governance for Code Scalpel is now available via [Aegis-OS](https://github.com/tescolopio/aegis-os).** Code Scalpel ships as the default MCP toolkit inside Aegis-OS — one `docker-compose up` gives you a fully governed, policy-enforced agent environment.
-> ```bash
-> git clone https://github.com/tescolopio/aegis-os && cd aegis-os && docker-compose up
-> # Code Scalpel available at http://localhost:18090/sse
-> ```
-
----
+![Free Forever](https://img.shields.io/badge/Free-Forever-brightgreen) ![Setup Time](https://img.shields.io/badge/Setup-2%20Minutes-blue) ![Local Execution](https://img.shields.io/badge/Runs-Locally-orange) ![Core Tools](https://img.shields.io/badge/Core%20Tools-22-purple) ![Languages](https://img.shields.io/badge/Languages-13-blue) 
 
 ## What's New in v2.2.0 — Telemetry Completeness & Crash Safety
 
