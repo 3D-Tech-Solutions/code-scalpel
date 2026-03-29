@@ -234,4 +234,3 @@ class GolangciLintParser:
             f"{i.file_path}:{i.line}:{i.column}: [{i.linter}] {i.message}"
             for i in issues
         )
-

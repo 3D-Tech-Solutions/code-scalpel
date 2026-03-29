@@ -247,4 +247,3 @@ def _sarif_to_vuln(f: SarifFinding) -> SecurityVulnerability:
         cwe_id=cwe,
         owasp_category=owasp,
     )
-

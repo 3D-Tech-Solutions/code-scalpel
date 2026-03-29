@@ -3021,7 +3021,6 @@ from code_scalpel.mcp.models.graph import (  # noqa: E402
 )
 
 
-
 def _generate_neighborhood_mermaid(
     nodes: list[NeighborhoodNodeModel],
     edges: list[NeighborhoodEdgeModel],

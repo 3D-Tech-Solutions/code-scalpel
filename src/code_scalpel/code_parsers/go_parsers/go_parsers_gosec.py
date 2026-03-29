@@ -313,4 +313,3 @@ class GosecParser:
             f"{i.file_path}:{i.line}: [{i.rule_id}] {i.severity} - {i.message}"
             for i in issues
         )
-
