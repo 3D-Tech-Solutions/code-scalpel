@@ -1777,7 +1777,7 @@ def handle_mcp(args: argparse.Namespace) -> int:
         start_kwargs["mismatch_action"] = args.mismatch_action
 
     return start_mcp_server(
-        **_filter_kwargs_for_callable(start_mcp_server, start_kwargs)
+        **_filter_kwargs_for_callable(start_mcp_server, start_kwargs)  # type: ignore[arg-type]
     )
 
 

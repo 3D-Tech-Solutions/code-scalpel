@@ -936,11 +936,11 @@ class SwiftVisitor(TreeSitterVisitor):
     def visit_equality_expression(self, node: Any) -> IRCompare:
         return self.visit_comparison_expression(node)
 
-    def visit_additive_expression(self, node: Any) -> IRBinaryOp:
+    def visit_additive_expression(self, node: Any) -> IRExpr:
         """x + y, x - y → IRBinaryOp."""
         return self._binary_op(node)
 
-    def visit_multiplicative_expression(self, node: Any) -> IRBinaryOp:
+    def visit_multiplicative_expression(self, node: Any) -> IRExpr:
         return self._binary_op(node)
 
     def visit_infix_expression(self, node: Any) -> IRExpr:

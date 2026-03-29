@@ -45,7 +45,7 @@ Rust version: Rust 2021 edition (tree-sitter-rust 0.23+)
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union, cast
 
 import tree_sitter_rust
 from tree_sitter import Language, Parser
@@ -172,6 +172,16 @@ class RustVisitor(TreeSitterVisitor):
 
     def _get_children_by_field(self, node: Any, field_name: str) -> List[Any]:
         return node.children_by_field_name(field_name)
+
+    def _unwrap_single(
+        self, result: Union[IRNode, List[IRNode], None]
+    ) -> Optional[IRNode]:
+        """Unwrap visit() result to a single node, handling lists."""
+        if result is None:
+            return None
+        if isinstance(result, list):
+            return result[0] if result else None
+        return result
 
     # ------------------------------------------------------------------
     # Module (root)
@@ -735,8 +745,12 @@ class RustVisitor(TreeSitterVisitor):
         if len(children) < 2:
             return IRName(id=self._get_text(node))
 
-        left = self.visit(children[0]) or IRName(id=self._get_text(children[0]))
-        right = self.visit(children[-1]) or IRName(id=self._get_text(children[-1]))
+        left = cast(Any, self._unwrap_single(self.visit(children[0]))) or IRName(
+            id=self._get_text(children[0])
+        )
+        right = cast(Any, self._unwrap_single(self.visit(children[-1]))) or IRName(
+            id=self._get_text(children[-1])
+        )
 
         if op_text in _COMPARE_MAP:
             return IRCompare(
@@ -768,7 +782,7 @@ class RustVisitor(TreeSitterVisitor):
     def visit_unary_expression(self, node: Any) -> IRNode:
         """! x / - x / * x → pass through to child."""
         for child in node.named_children:
-            result = self.visit(child)
+            result = self._unwrap_single(self.visit(child))
             if result:
                 return result
         return IRName(id=self._get_text(node))
@@ -776,7 +790,7 @@ class RustVisitor(TreeSitterVisitor):
     def visit_reference_expression(self, node: Any) -> IRNode:
         """&x / &mut x → pass through to inner expression."""
         for child in node.named_children:
-            result = self.visit(child)
+            result = self._unwrap_single(self.visit(child))
             if result:
                 return result
         return IRName(id=self._get_text(node))
@@ -792,7 +806,7 @@ class RustVisitor(TreeSitterVisitor):
     def visit_try_expression(self, node: Any) -> IRNode:
         """expr? → pass through to inner expr."""
         for child in node.named_children:
-            result = self.visit(child)
+            result = self._unwrap_single(self.visit(child))
             if result:
                 return result
         return IRName(id=self._get_text(node))
@@ -800,7 +814,7 @@ class RustVisitor(TreeSitterVisitor):
     def visit_await_expression(self, node: Any) -> IRNode:
         """expr.await → pass through."""
         for child in node.named_children:
-            result = self.visit(child)
+            result = self._unwrap_single(self.visit(child))
             if result:
                 return result
         return IRName(id=self._get_text(node))
@@ -809,7 +823,7 @@ class RustVisitor(TreeSitterVisitor):
         """expr as Type → pass through."""
         value_node = node.child_by_field_name("value")
         if value_node:
-            result = self.visit(value_node)
+            result = self._unwrap_single(self.visit(value_node))
             if result:
                 return result
         return IRName(id=self._get_text(node))
@@ -821,7 +835,7 @@ class RustVisitor(TreeSitterVisitor):
     def visit_expression_statement(self, node: Any) -> Optional[IRNode]:
         """Transparent wrapper — visit the inner expression."""
         for child in node.named_children:
-            result = self.visit(child)
+            result = self._unwrap_single(self.visit(child))
             if result is not None:
                 return result
         return None
@@ -946,7 +960,16 @@ class RustNormalizer(BaseNormalizer):
 
         tree = self._parser.parse(source.encode("utf-8"))
         visitor = RustVisitor(source=source)
-        module = visitor.visit(tree.root_node)
+        result = visitor.visit(tree.root_node)
+
+        # Normalize the result to an IRModule
+        if isinstance(result, IRModule):
+            module = result
+        elif isinstance(result, list):
+            module = IRModule(body=result, source_language="rust")
+        else:
+            module = IRModule(body=[], source_language="rust")
+
         if hasattr(module, "_metadata"):
             module._metadata["source_file"] = filename
         return module

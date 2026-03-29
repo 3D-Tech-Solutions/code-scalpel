@@ -1439,7 +1439,7 @@ class CallGraphBuilder:
     def _analyze_definitions_java(self, file_path: Path, rel_path: str) -> None:
         """Extract Java class and callable definitions."""
         parser, result = self._load_java_parse_result(file_path)
-        if parser is None or result is None:
+        if parser is None or result is None or parser._tree is None:
             return
 
         self._collect_java_sam_interfaces(parser, parser._tree.root_node, rel_path)
@@ -1548,7 +1548,7 @@ class CallGraphBuilder:
     ) -> Dict[str, List[str]]:
         """Extract Java method calls and resolve canonical same-file or cross-file callees."""
         parser, result = self._load_java_parse_result(file_path)
-        if parser is None or result is None or getattr(parser, "_tree", None) is None:
+        if parser is None or result is None or parser._tree is None:
             return {}
 
         definitions = self.definitions.get(rel_path, set())

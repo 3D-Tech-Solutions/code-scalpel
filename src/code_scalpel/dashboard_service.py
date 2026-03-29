@@ -2071,7 +2071,8 @@ class DashboardServer:
         self.server = Server(config)
 
         def run_server():
-            asyncio.run(self.server.serve())
+            if self.server is not None:
+                asyncio.run(self.server.serve())
 
         self.thread = threading.Thread(target=run_server, daemon=True)
         self.thread.start()

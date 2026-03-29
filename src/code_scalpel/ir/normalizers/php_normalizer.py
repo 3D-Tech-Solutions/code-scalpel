@@ -504,6 +504,11 @@ class PHPVisitor(TreeSitterVisitor):
             r = self.visit(child)
             if r is None:
                 return None
+            # Unwrap lists (should be single element for expressions)
+            if isinstance(r, list):
+                r = r[0] if r else None
+                if r is None:
+                    continue
             if isinstance(r, (IRAssign, IRAugAssign)):
                 return r  # assignments are statements directly
             if isinstance(r, IRExpr):
@@ -861,7 +866,11 @@ class PHPVisitor(TreeSitterVisitor):
 
     def visit_parenthesized_expression(self, node: Any) -> Optional[IRNode]:
         for child in node.named_children:
-            return self.visit(child)
+            result = self.visit(child)
+            # Unwrap lists (should be single element for parenthesized expressions)
+            if isinstance(result, list):
+                return result[0] if result else None
+            return result
         return None
 
     # ------------------------------------------------------------------

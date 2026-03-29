@@ -1045,7 +1045,13 @@ class CrossFileTaintTracker:
                     statement.finalbody, info, module, imports
                 )
                 for handler in statement.handlers:
-                    self._analyze_js_ts_statements(handler.body, info, module, imports)
+                    # handler is a tuple: (exception_type, name, body)
+                    handler_body = (
+                        handler[2]
+                        if isinstance(handler, tuple) and len(handler) > 2
+                        else []
+                    )
+                    self._analyze_js_ts_statements(handler_body, info, module, imports)
 
     def _analyze_js_ts_assignment(
         self,
@@ -1842,9 +1848,7 @@ class CrossFileTaintTracker:
             merged = set(info.taint_var_sources.get(target_name, set()))
             merged.update(depends_on)
             if imported_tainted:
-                merged.update(
-                    self._extract_java_argument_name_set(statement.value, info)
-                )
+                merged.update(self._extract_java_argument_name_set(statement.value))
             if merged:
                 info.taint_var_sources[target_name] = merged
             if self._is_java_field_write_target(statement.target, info):

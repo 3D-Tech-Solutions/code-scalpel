@@ -38,7 +38,7 @@ from code_scalpel.mcp.models.graph import (
     TaintFlowModel,
     WildcardExpansionModel,
 )
-from code_scalpel.graph_engine.node_id import NodeType, UniversalNodeID
+from code_scalpel.graph_engine.node_id import NodeType, UniversalNodeID, parse_node_id
 
 if TYPE_CHECKING:
     from code_scalpel.graph_engine.graph import UniversalGraph
@@ -2365,7 +2365,8 @@ def _get_graph_neighborhood_sync(
 
             # Add nodes
             for node in call_graph_result.nodes:
-                node_id = _build_graph_node_id(node.file, node.name)
+                node_id_str = _build_graph_node_id(node.file, node.name)
+                node_id = parse_node_id(node_id_str)
                 graph.add_node(
                     GraphNode(
                         id=node_id,
