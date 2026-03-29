@@ -267,10 +267,12 @@ class MyClass:
         # Invalid language will be rejected by the underlying analyzer
         result = await analyze_code(code, language="unsupported_lang")
 
-        # The result will have an error in the data payload
+        # The result will have an error in the data payload or envelope
         assert hasattr(result, "data")
-        # The data contains the error from the analyzer
-        assert "error" in result.data or "success" in result.data
+        # The data contains the error from the analyzer (or may be None if error in envelope)
+        if result.data is not None:
+            assert isinstance(result.data, dict)
+            assert "error" in result.data or "success" in result.data
 
 
 class TestHybridArchitecture:

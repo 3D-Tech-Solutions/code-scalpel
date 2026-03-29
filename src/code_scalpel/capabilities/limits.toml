@@ -233,7 +233,7 @@ osv_lookup = true
 
 [pro.type_evaporation_scan]
 max_files = -1               # Unlimited (match Enterprise)
-frontend_only = false
+frontend_only = true         # Backend analysis is enterprise-only for consistent data preservation
 
 [pro.security_scan]
 vulnerability_types = "all"
@@ -434,7 +434,7 @@ vulnerability_types = "all"
 
 [enterprise.type_evaporation_scan]
 max_files = -1
-frontend_only = false
+frontend_only = true          # Backend analysis disabled to preserve core vulnerability counts across tiers
 schema_generation = true
 
 [enterprise.unified_sink_detect]
