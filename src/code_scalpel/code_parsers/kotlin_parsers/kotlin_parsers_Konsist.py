@@ -132,7 +132,9 @@ class KonsistParser:
         report_dir = Path(project_path) / "build" / "reports" / "tests"
         for xml_file in report_dir.rglob("TEST-*.xml"):
             try:
-                violations.extend(self._parse_junit_xml(xml_file.read_text()))
+                violations.extend(
+                    self._parse_junit_xml(xml_file.read_text(encoding="utf-8"))
+                )
             except OSError:
                 pass
         if not violations:

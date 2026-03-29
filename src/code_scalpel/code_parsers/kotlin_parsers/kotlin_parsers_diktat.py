@@ -146,7 +146,7 @@ class DiktatParser:
             Path(project_path) / "build" / "reports" / "diktat" / "diktat.json"
         )
         if report_path.exists():
-            violations = self.parse_json_report(report_path.read_text())
+            violations = self.parse_json_report(report_path.read_text(encoding="utf-8"))
         else:
             violations = self.parse_json_report(result.stdout or result.stderr or "")
         return {"violations": violations, "error": None}

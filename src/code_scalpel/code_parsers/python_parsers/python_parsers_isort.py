@@ -330,7 +330,7 @@ class IsortParser:
         path = Path(config_path)
         if not path.exists():
             return
-        content = path.read_text()
+        content = path.read_text(encoding="utf-8")
         for line in content.splitlines():
             stripped = line.strip()
             if stripped.startswith("profile"):

@@ -18,7 +18,7 @@
 
 ## What's New in v2.2.0 — Telemetry Completeness & Crash Safety
 
-This release adds crash-safe JSONL streaming, failure-path telemetry for all 21 tools, encrypted error fields, and automatic log retention policies. All telemetry events are now captured with proper error handling and flushed incrementally per tool call for maximum durability.
+This release adds crash-safe JSONL streaming, failure-path telemetry for all 23 tools, encrypted error fields, and automatic log retention policies. All telemetry events are now captured with proper error handling and flushed incrementally per tool call for maximum durability.
 
 ## What's New in v2.1.1 — Metadata Sync
 
@@ -311,7 +311,7 @@ You apply the change. File had 48 lines. Now your code is broken.
 
 ## The Solution: Surgical Tools, Not Text Parsing
 
-Code Scalpel gives AI agents **22 core tools** to interact with code as structured data (AST + PDG), not text, plus a separate capability-introspection surface for tier/license discovery:
+Code Scalpel gives AI agents **23 tools** to interact with code as structured data (AST + PDG), not text, plus a separate capability-introspection surface for tier/license discovery:
 
 | Problem | Without Code Scalpel | With Code Scalpel |
 |---------|---------------------|-------------------|
@@ -377,13 +377,13 @@ def execute_search(query):
 
 ---
 
-## 22 Core Tools (All Free in Community Edition)
+## 23 Tools (All Free in Community Edition)
 
-Code Scalpel provides **20 development tools** + **2 core system tools** = **22 core tools**.
+Code Scalpel provides **23 tools** available in all editions.
 
-**All 22 core tools are available in free Community Edition.** Pro/Enterprise tiers add enhanced limits and team features.
+**All 23 tools are available in free Community Edition.** Pro/Enterprise tiers add enhanced limits and team features.
 
-Agent clients can also call **`get_capabilities`** to inspect the current tier/license limits. We treat that as capability introspection rather than part of the 22-core-tool product count.
+Agent clients can also call **`get_capabilities`** to inspect the current tier/license limits.
 
 ### 1. Surgical Extraction & Analysis (6 Tools)
 Stop grepping. Start understanding.
@@ -433,7 +433,7 @@ Code Scalpel is NOT a fork or wrapper of the `scalpel` Python library. It's a co
 |---------|--------------|------------------|
 | **Interface** | MCP server (primary) | CLI tool only |
 | **AI Agent Ready** | Yes (designed for agents) | CLI-only |
-| **Tools** | 22 core tools + `get_capabilities` introspection | Limited utilities |
+| **Tools** | 23 tools | Limited utilities |
 | **Security Scanning** | Taint analysis (12 CWEs) | Basic pattern matching |
 | **Symbolic Execution** | Z3-powered (all paths) | Not supported |
 | **Test Generation** | Auto-generate from paths | Not supported |
@@ -446,7 +446,7 @@ Code Scalpel is NOT a fork or wrapper of the `scalpel` Python library. It's a co
 | Feature | Code Scalpel | AST Explorer | Semgrep | Pylint |
 |---------|--------------|--------------|---------|--------|
 | **Primary Use** | MCP server for AI agents | Code visualization | Security patterns | Style linting |
-| **Tool Count** | 22 core tools + introspection | Query only | ~1000 rules | Limited |
+| **Tool Count** | 23 tools | Query only | ~1000 rules | Limited |
 | **Code Extraction** | ✅ By symbol name, safe | ⚠️ Manual AST inspection | ❌ Not primary | ❌ Not supported |
 | **Security Scan** | ✅ Full taint analysis (12 CWEs) | ❌ No | ⚠️ Pattern-based | ⚠️ Basic only |
 | **Symbolic Execution** | ✅ Z3-powered | ❌ No | ❌ No | ❌ No |
@@ -493,7 +493,7 @@ claude mcp add codescalpel uvx codescalpel mcp
 
 **What happens:**
 1. Claude runs `uvx codescalpel mcp` when you ask for code analysis
-2. All 22 core tools become available in your AI assistant, with capability introspection available separately for tier/license discovery
+2. All 23 tools become available in your AI assistant for code analysis
 3. Your code is analyzed locally; no data sent to external servers
 
 <details>
@@ -677,7 +677,7 @@ claude mcp add codescalpel uvx codescalpel mcp
 
 ## CLI Usage
 
-**All 22 MCP tools are now available directly from the command line!**
+**All 23 tools are now available directly from the command line!**
 
 In addition to the MCP server interface, Code Scalpel provides dedicated CLI commands for every tool. This is perfect for:
 - **Scripts and automation** - Integrate into CI/CD pipelines
@@ -712,7 +712,7 @@ codescalpel extract-code --help
 | `codescalpel cross-file-security-scan` | Cross-file taint analysis | `codescalpel cross-file-security-scan` |
 | `codescalpel validate-paths` | Validate import paths | `codescalpel validate-paths src/main.py` |
 
-**See all 22 commands**: [Complete CLI Tools Reference →](docs/CLI_TOOLS.md)
+**See all 23 commands**: [Complete CLI Tools Reference →](docs/CLI_TOOLS.md)
 
 ### Example Workflows
 
