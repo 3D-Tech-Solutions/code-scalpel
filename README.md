@@ -243,6 +243,28 @@ Then follow the [Installation Guide for Claude](docs/INSTALLING_FOR_CLAUDE.md) t
 
 **Developers?** See [Installation Options](#installation-options) and [Docs](#documentation) below.
 
+---
+
+## 🚀 Claude Code Integration (NEW v2.2.0)
+
+**One-liner setup for Claude Code users:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/3D-Tech-Solutions/code-scalpel/main/integration/claude-code/setup.sh | bash
+```
+
+This installs:
+- ✅ **MCP Server** — Automatic registration with Claude Code
+- ✅ **8 Slash Commands** — `/cs-extract`, `/cs-security`, `/cs-refactor`, `/cs-map`, `/cs-analyze`, `/cs-tests`, `/cs-setup`, `/cs-policy`
+- ✅ **System Prompts** — Teaches Claude Code when/how to use each tool
+- ✅ **Complete Guide** — `CLAUDE.md` in your project root
+
+**Result:** Claude Code automatically uses Code Scalpel for code analysis, security audits, safe refactoring, and architecture mapping.
+
+[**📖 Full Claude Code Integration Guide**](integration/claude-code/CLAUDE.md) — Complete documentation with examples and workflows.
+
+---
+
 ## The Problem: Why AI Agents Need Code Scalpel
 
 Most teams are on **Day 1** of agentic engineering: *"Look, it writes code!"* Day 3 is coming — and Day 3 is about **Governance, Security, and Compliance**.

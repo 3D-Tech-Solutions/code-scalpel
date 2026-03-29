@@ -185,7 +185,7 @@ async def test_telemetry_does_not_block_operations():
     original_emit = telemetry.emit_tool_event
     call_count = [0]
 
-    def failing_emit(*args, **kwargs):
+    def failing_emit(*_args, **_kwargs):
         call_count[0] += 1
         raise RuntimeError("Intentional test error")
 
@@ -203,14 +203,13 @@ async def test_telemetry_does_not_block_operations():
 
 
 @pytest.fixture(scope="function", autouse=True)
-async def cleanup_dashboard():
+def cleanup_dashboard():
     """Cleanup dashboard after each test."""
     yield
     try:
         from code_scalpel.dashboard_service import stop_dashboard
 
         stop_dashboard()
-        await asyncio.sleep(0.2)
     except Exception:
         pass
 

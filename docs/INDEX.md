@@ -3,15 +3,18 @@
 > [20260207_DOCS] Added regulated enterprise deployment gameplan reference.
 > [20260224_DOCS] Updated to v2.0.0: C/C++/C# language support, social media marketing guide, polyglot test suite.
 > [20260327_DOCS] Updated to v2.1.2: Go/PHP language support, Oracle error recovery, 22-tool maturity.
+> [20260328_DOCS] Updated to v2.2.0: Claude Code integration bundle, 8 slash commands, system prompts, setup.sh bootstrap.
 
-**Updated:** March 27, 2026  
-**Version:** 2.1.2
+**Updated:** March 28, 2026
+**Version:** 2.2.0
 
 ---
 
 ## Quick Links
 
 - **[Getting Started](getting_started/getting_started.md)** - Installation and first steps
+- **[Claude Code Integration Guide](CLAUDE_CODE_INTEGRATION.md)** - Complete documentation for the v2.2.0 integration bundle (NEW) ⭐
+- **[Claude Code Setup (User Guide)](../integration/claude-code/CLAUDE.md)** - Installation, priority rules, workflows
 - **[Installing for Claude](INSTALLING_FOR_CLAUDE.md)** - Claude Desktop/VSCode integration
 - **[Setup Checklist](SETUP_CHECKLIST.md)** - 5-minute setup guide
 - **[Oracle Resilience](oracle/ORACLE_RESILIENCE_QUICKSTART.md)** - Automatic error recovery (NEW in v1.3)
@@ -26,6 +29,21 @@
 - [Setup Checklist](SETUP_CHECKLIST.md)
 - [Beginner Guide](BEGINNER_GUIDE.md)
 - [Beginner FAQ](BEGINNER_FAQ.md)
+
+### 🎯 Claude Code Integration (v2.2.0) ⭐
+**Complete system for using Code Scalpel in Claude Code with slash commands and system prompts**
+- [Complete Integration Guide](../integration/claude-code/CLAUDE.md) — Installation, priority rules, workflows, auto-use triggers
+- [Setup Bootstrap Script](../integration/claude-code/setup.sh) — One-liner: `curl -fsSL ... | bash`
+- **8 Slash Commands:**
+  - `/cs-setup` — Install MCP, verify, show capabilities
+  - `/cs-extract` — Get code by name (99.5% context savings)
+  - `/cs-analyze` — Understand structure, find hotspots
+  - `/cs-security` — Full audit (local → cross-file → dependencies → polyglot)
+  - `/cs-tests` — Generate tests from execution paths
+  - `/cs-refactor` — Safe workflow (refs → deps → extract → test → simulate → apply)
+  - `/cs-map` — Architecture mapping (crawl → call graph → map → critical paths)
+  - `/cs-policy` — Compliance check (HIPAA, SOC2, PCI-DSS, custom rules)
+- **Developer Guide:** [CLAUDE.md](../CLAUDE.md) in project root — For developers working ON code-scalpel
 
 ### 🔧 Oracle Resilience Middleware (v1.3.0)
 - [Quick Start](oracle/ORACLE_RESILIENCE_QUICKSTART.md) - Get started with Oracle
@@ -101,6 +119,7 @@
 - `testing/` - Testing documentation and verification reports
 - `roadmap/` - Future plans
 - `tools/` - Tool-specific documentation
+- `../integration/claude-code/` - Claude Code integration bundle (NEW in v2.2.0) — User-facing CLAUDE.md, setup.sh, and 8 slash command skills
 
 ---
 
@@ -108,6 +127,9 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| v2.2.0 | 2026-03-28 | Claude Code integration bundle, 8 slash commands, system prompts, crash-safe telemetry |
+| v2.1.2 | 2026-03-10 | Oracle patch for error recovery |
+| v2.1.0 | 2026-03-06 | Go & PHP language support; 23 tools; expanded language matrix |
 | v2.0.0 | 2026-02-24 | C, C++, C# language support; 23 tools; 7,575+ tests |
 | v1.5.0 | 2026-02-24 | C and C++ initial parser implementation |
 | v1.4.0 | 2026-02-20 | Tier Limit Rebalancing & Website |
