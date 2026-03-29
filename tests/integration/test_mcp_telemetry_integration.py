@@ -75,7 +75,7 @@ def test_telemetry_emitted_for_analyze_code(test_python_file):
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
-        result = loop.run_until_complete(analyze_code(file_path=test_python_file))
+        loop.run_until_complete(analyze_code(file_path=test_python_file))
     finally:
         loop.close()
 
