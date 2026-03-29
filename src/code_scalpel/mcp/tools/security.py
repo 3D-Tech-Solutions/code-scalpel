@@ -79,80 +79,10 @@ async def unified_sink_detect(
     """
     started = time.perf_counter()
     try:
-        # [20260311_BUGFIX] Return guided validation outcomes for malformed
-        # language and threshold inputs instead of collapsing to internal_error.
-        supported_languages = {
-            "auto",
-            "python",
-            "javascript",
-            "typescript",
-            "java",
-            "c",
-            "cpp",
-            "csharp",
-            "go",
-            "kotlin",
-            "php",
-            "ruby",
-            "swift",
-            "rust",
-        }
         tier = _get_current_tier()
 
-        if not code or not code.strip():
-            error_obj = ToolError(
-                error="'code' must be a non-empty source string.",
-                error_code="invalid_argument",
-                error_details={
-                    "hint": "Provide source code to scan for dangerous sinks."
-                },
-            )
-            duration_ms = int((time.perf_counter() - started) * 1000)
-            return make_envelope(
-                data=None,
-                tool_id="unified_sink_detect",
-                tool_version=_pkg_version,
-                tier=tier,
-                duration_ms=duration_ms,
-                error=error_obj,
-            )
-
-        normalized_language = (language or "auto").lower()
-        if normalized_language not in supported_languages:
-            error_obj = ToolError(
-                error=(
-                    f"Unsupported language: {language}. Must be one of "
-                    f"{sorted(supported_languages)}"
-                ),
-                error_code="invalid_argument",
-                error_details={"supported_languages": sorted(supported_languages)},
-            )
-            duration_ms = int((time.perf_counter() - started) * 1000)
-            return make_envelope(
-                data=None,
-                tool_id="unified_sink_detect",
-                tool_version=_pkg_version,
-                tier=tier,
-                duration_ms=duration_ms,
-                error=error_obj,
-            )
-
-        if not 0.0 <= confidence_threshold <= 1.0:
-            error_obj = ToolError(
-                error="'confidence_threshold' must be between 0.0 and 1.0.",
-                error_code="invalid_argument",
-                error_details={"confidence_threshold": confidence_threshold},
-            )
-            duration_ms = int((time.perf_counter() - started) * 1000)
-            return make_envelope(
-                data=None,
-                tool_id="unified_sink_detect",
-                tool_version=_pkg_version,
-                tier=tier,
-                duration_ms=duration_ms,
-                error=error_obj,
-            )
-
+        # Let _unified_sink_detect_sync handle all input validation and return
+        # proper UnifiedSinkResult objects with correct error codes
         if language == "auto" or language is None:
             from code_scalpel.surgery.unified_extractor import Language, detect_language
 

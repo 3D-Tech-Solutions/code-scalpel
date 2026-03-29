@@ -446,7 +446,6 @@ languages = [
     "c",
     "cpp",
     "csharp",
-    "go",
     "kotlin",
     "php",  # [20260303_FEATURE]
     "ruby",  # [20260304_FEATURE]
