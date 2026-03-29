@@ -33,6 +33,9 @@ from typing import Any, List, Optional, TYPE_CHECKING
 if TYPE_CHECKING:
     from code_scalpel import SurgicalExtractor
     from code_scalpel.graph_engine.graph import UniversalGraph
+    from code_scalpel.security.analyzers.unified_sink_detector import (
+        UnifiedSinkDetector,
+    )
 
 from pydantic import BaseModel, Field
 
@@ -45,17 +48,27 @@ from code_scalpel.mcp.helpers.analyze_helpers import (
     _analyze_code_sync as helper_analyze_code_sync,
     _analyze_java_code as helper_analyze_java_code,
     _analyze_javascript_code as helper_analyze_js_code,
+    _get_cache,
 )
 from code_scalpel.mcp.helpers.context_helpers import EXT_TO_LANGUAGE
 from code_scalpel.mcp.models.core import (
     AnalysisResult,
     ClassInfo,
+    CrawlClassInfo,
+    CrawlFileResult,
+    CrawlFunctionInfo,
+    CrawlSummary,
     ExecutionPath,
     FunctionInfo,
     GeneratedTestCase,
+    ProjectCrawlResult,
+    RefactorSecurityIssue,
+    RefactorSimulationResult,
     SecurityResult,
     SymbolicResult,
     TestGenerationResult,
+    UnifiedDetectedSink,
+    UnifiedSinkResult,
     VulnerabilityInfo,
 )
 from code_scalpel.mcp.models.policy import PolicyVerificationResult
@@ -1023,10 +1036,13 @@ def _unified_sink_detect_sync(
     sinks: list[UnifiedDetectedSink] = []
     for sink in detected:
         owasp = detector.get_owasp_category(sink.vulnerability_type)
+        sink_type_str = getattr(sink.sink_type, "name", str(sink.sink_type))
+        sink_id = f"{lang}:{sink_type_str}:{sink.line}:{sink.pattern}"
         sinks.append(
             UnifiedDetectedSink(
+                sink_id=sink_id,
                 pattern=sink.pattern,
-                sink_type=getattr(sink.sink_type, "name", str(sink.sink_type)),
+                sink_type=sink_type_str,
                 confidence=sink.confidence,
                 line=sink.line,
                 column=getattr(sink, "column", 0),
@@ -3004,9 +3020,6 @@ from code_scalpel.mcp.models.graph import (  # noqa: E402
     ProjectMapResult as _ProjectMapResultCanonical,
 )
 
-ModuleInfo = _ProjectMapModuleInfoCanonical
-PackageInfo = _ProjectMapPackageInfoCanonical
-ProjectMapResult = _ProjectMapResultCanonical
 
 
 def _generate_neighborhood_mermaid(
@@ -3145,374 +3158,9 @@ def _fast_validate_python_function_node_exists(
         return True, None
 
 
-class ModuleInfo(BaseModel):
-    """Information about a Python module/file."""
-
-    path: str = Field(description="Relative file path")
-    functions: list[str] = Field(
-        default_factory=list, description="Function names in the module"
-    )
-    classes: list[str] = Field(
-        default_factory=list, description="Class names in the module"
-    )
-    imports: list[str] = Field(default_factory=list, description="Import statements")
-    entry_points: list[str] = Field(
-        default_factory=list, description="Detected entry points"
-    )
-    line_count: int = Field(default=0, description="Number of lines in file")
-    complexity_score: int = Field(default=0, description="Cyclomatic complexity score")
-
-
-class PackageInfo(BaseModel):
-    """Information about a Python package (directory with __init__.py)."""
-
-    name: str = Field(description="Package name")
-    path: str = Field(description="Relative path to package")
-    modules: list[str] = Field(
-        default_factory=list, description="Module names in package"
-    )
-    subpackages: list[str] = Field(default_factory=list, description="Subpackage names")
-
-
-class ProjectMapResult(BaseModel):
-    """Result of project map analysis."""
-
-    success: bool = Field(default=True, description="Whether analysis succeeded")
-    server_version: str = Field(default=__version__, description="Code Scalpel version")
-    project_root: str = Field(description="Absolute path to project root")
-    total_files: int = Field(default=0, description="Total Python files")
-    total_lines: int = Field(default=0, description="Total lines of code")
-    languages: dict[str, int] = Field(
-        default_factory=dict, description="Language breakdown by file count"
-    )
-    packages: list[PackageInfo] = Field(
-        default_factory=list, description="Detected packages"
-    )
-    modules: list[ModuleInfo] = Field(
-        default_factory=list, description="Modules analyzed (max 50 in Mermaid diagram)"
-    )
-    entry_points: list[str] = Field(
-        default_factory=list, description="All detected entry points"
-    )
-    circular_imports: list[list[str]] = Field(
-        default_factory=list, description="Circular import cycles"
-    )
-    complexity_hotspots: list[str] = Field(
-        default_factory=list, description="Files with high complexity"
-    )
-    mermaid: str = Field(default="", description="Mermaid diagram of package structure")
-    # [20251220_FEATURE] v3.0.5 - Truncation communication
-    modules_in_diagram: int = Field(
-        default=0, description="Number of modules shown in Mermaid diagram"
-    )
-    diagram_truncated: bool = Field(
-        default=False, description="Whether Mermaid diagram was truncated"
-    )
-    error: str | None = Field(default=None, description="Error message if failed")
-
-    # [20260120_FEATURE] v1.0 pre-release - Output transparency metadata
-    tier_applied: str | None = Field(
-        default=None,
-        description="Which tier's rules were applied (community/pro/enterprise)",
-    )
-    max_files_applied: int | None = Field(
-        default=None, description="Max files limit that was applied (None = unlimited)"
-    )
-    max_modules_applied: int | None = Field(
-        default=None,
-        description="Max modules limit that was applied (None = unlimited)",
-    )
-    pro_features_enabled: bool = Field(
-        default=False, description="Whether Pro features are enabled"
-    )
-    enterprise_features_enabled: bool = Field(
-        default=False, description="Whether enterprise features are enabled"
-    )
-
-    # [20251229_FEATURE] v3.3.0 - Pro/Enterprise fields
-    semantic_summary: Optional[str] = Field(
-        default=None, description="AI-generated semantic summary (Pro)"
-    )
-    related_imports: List[str] = Field(
-        default_factory=list, description="Related imports from other files (Pro)"
-    )
-    pii_redacted: bool = Field(
-        default=False, description="Whether PII was redacted (Enterprise)"
-    )
-    access_controlled: bool = Field(
-        default=False, description="Whether access control was applied (Enterprise)"
-    )
-
-
-def _get_project_map_sync(
-    project_root: str | None,
-    include_complexity: bool,
-    complexity_threshold: int,
-    include_circular_check: bool,
-) -> ProjectMapResult:
-    """Synchronous implementation of get_project_map."""
-    import ast
-    from code_scalpel.ast_tools.call_graph import CallGraphBuilder
-
-    root_path = Path(project_root) if project_root else PROJECT_ROOT
-
-    if not root_path.exists():
-        return ProjectMapResult(
-            success=False,
-            project_root=str(root_path),
-            error=f"Project root not found: {root_path}.",
-        )
-
-    try:
-        modules: list[ModuleInfo] = []
-        packages: dict[str, PackageInfo] = {}
-        all_entry_points: list[str] = []
-        complexity_hotspots: list[str] = []
-        total_lines = 0
-
-        # Entry point detection patterns
-        entry_decorators = {
-            "command",
-            "main",
-            "cli",
-            "app",
-            "route",
-            "get",
-            "post",
-            "put",
-            "delete",
-        }
-
-        def is_entry_point(func_node: ast.AST) -> bool:
-            """Check if function is an entry point."""
-            # Type guard: must be FunctionDef or AsyncFunctionDef
-            if not isinstance(func_node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                return False
-            if func_node.name == "main":
-                return True
-            for dec in getattr(func_node, "decorator_list", []):
-                dec_name = ""
-                if isinstance(dec, ast.Name):
-                    dec_name = dec.id
-                elif isinstance(dec, ast.Attribute):
-                    dec_name = dec.attr
-                elif isinstance(dec, ast.Call):
-                    if isinstance(dec.func, ast.Attribute):
-                        dec_name = dec.func.attr
-                    elif isinstance(dec.func, ast.Name):
-                        dec_name = dec.func.id
-                if dec_name in entry_decorators:
-                    return True
-            return False
-
-        def calculate_complexity(tree: ast.AST) -> int:
-            """Calculate cyclomatic complexity of a module."""
-            complexity = 1  # Base complexity
-            for node in ast.walk(tree):
-                if isinstance(
-                    node,
-                    (
-                        ast.If,
-                        ast.While,
-                        ast.For,
-                        ast.AsyncFor,
-                        ast.ExceptHandler,
-                        ast.With,
-                        ast.AsyncWith,
-                        ast.Assert,
-                        ast.comprehension,
-                    ),
-                ):
-                    complexity += 1
-                elif isinstance(node, (ast.And, ast.Or)):
-                    complexity += 1
-                elif isinstance(node, ast.BoolOp):
-                    complexity += len(node.values) - 1
-            return complexity
-
-        # Collect all Python files
-        python_files = list(root_path.rglob("*.py"))
-
-        # Filter out common excluded directories
-        exclude_patterns = {
-            "__pycache__",
-            ".git",
-            "venv",
-            ".venv",
-            "env",
-            ".env",
-            "node_modules",
-            "dist",
-            "build",
-            ".tox",
-            ".pytest_cache",
-            "htmlcov",
-            ".mypy_cache",
-        }
-
-        for file_path in python_files:
-            # Skip excluded directories
-            if any(part in exclude_patterns for part in file_path.parts):
-                continue
-
-            rel_path = str(file_path.relative_to(root_path))
-
-            try:
-                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-                    code = f.read()
-
-                lines = code.count("\n") + 1
-                total_lines += lines
-
-                tree = ast.parse(code)
-
-                # Extract module info
-                functions = []
-                classes = []
-                imports = []
-                entry_points = []
-
-                for node in ast.walk(tree):
-                    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                        functions.append(node.name)
-                        if is_entry_point(node):
-                            entry_points.append(f"{rel_path}:{node.name}")
-                    elif isinstance(node, ast.ClassDef):
-                        classes.append(node.name)
-                    elif isinstance(node, ast.Import):
-                        for alias in node.names:
-                            imports.append(alias.name)
-                    elif isinstance(node, ast.ImportFrom):
-                        if node.module:
-                            imports.append(node.module)
-
-                # Calculate complexity if requested
-                complexity = 0
-                if include_complexity:
-                    complexity = calculate_complexity(tree)
-                    if complexity >= complexity_threshold:
-                        complexity_hotspots.append(
-                            f"{rel_path} (complexity: {complexity})"
-                        )
-
-                all_entry_points.extend(entry_points)
-
-                modules.append(
-                    ModuleInfo(
-                        path=rel_path,
-                        functions=functions,
-                        classes=classes,
-                        imports=list(set(imports)),  # Dedupe
-                        entry_points=entry_points,
-                        line_count=lines,
-                        complexity_score=complexity,
-                    )
-                )
-
-                # Track packages
-                parent = file_path.parent
-                while parent != root_path and parent.exists():
-                    init_file = parent / "__init__.py"
-                    if init_file.exists():
-                        pkg_path = str(parent.relative_to(root_path))
-                        pkg_name = parent.name
-                        if pkg_path not in packages:
-                            packages[pkg_path] = PackageInfo(
-                                name=pkg_name,
-                                path=pkg_path,
-                                modules=[],
-                                subpackages=[],
-                            )
-                        # Add module to package
-                        if rel_path not in packages[pkg_path].modules:
-                            packages[pkg_path].modules.append(rel_path)
-                    parent = parent.parent
-
-            except Exception:
-                # Skip files with errors
-                continue
-
-        # Organize package hierarchy
-        pkg_list = list(packages.values())
-        for pkg in pkg_list:
-            for other_pkg in pkg_list:
-                if (
-                    other_pkg.path.startswith(pkg.path + "/")
-                    and other_pkg.name not in pkg.subpackages
-                ):
-                    pkg.subpackages.append(other_pkg.name)
-
-        # Check for circular imports
-        circular_imports = []
-        if include_circular_check:
-            builder = CallGraphBuilder(root_path)
-            circular_imports = builder.detect_circular_imports()
-
-        # [20251213_FEATURE] Calculate language breakdown
-        languages: dict[str, int] = {"python": len(modules)}
-        # Also count other common file types
-        for ext, lang in [
-            (".js", "javascript"),
-            (".ts", "typescript"),
-            (".java", "java"),
-            (".json", "json"),
-            (".yaml", "yaml"),
-            (".yml", "yaml"),
-            (".md", "markdown"),
-            (".html", "html"),
-            (".css", "css"),
-        ]:
-            len(list(root_path.rglob(f"*{ext}")))
-            # Exclude common ignored dirs
-            actual_count = sum(
-                1
-                for f in root_path.rglob(f"*{ext}")
-                if not any(p in exclude_patterns for p in f.parts)
-            )
-            if actual_count > 0:
-                languages[lang] = languages.get(lang, 0) + actual_count
-
-        # Generate Mermaid package diagram
-        mermaid_lines = ["graph TD"]
-        mermaid_lines.append("    subgraph Project")
-        modules_in_diagram = min(len(modules), 50)
-        for i, mod in enumerate(modules[:50]):  # Limit to 50 modules
-            mod_id = f"M{i}"
-            label = mod.path.replace("/", "_").replace(".", "_")
-            if mod.entry_points:
-                mermaid_lines.append(
-                    f'        {mod_id}[["{label}"]]'
-                )  # Stadium for entry
-            else:
-                mermaid_lines.append(f'        {mod_id}["{label}"]')
-        mermaid_lines.append("    end")
-
-        # [20251220_FEATURE] v3.0.5 - Communicate truncation
-        diagram_truncated = len(modules) > 50
-        if diagram_truncated:
-            mermaid_lines.append(f"    Note[... and {len(modules) - 50} more modules]")
-
-        return ProjectMapResult(
-            project_root=str(root_path),
-            total_files=len(modules),
-            total_lines=total_lines,
-            languages=languages,
-            packages=pkg_list,
-            modules=modules,
-            entry_points=all_entry_points,
-            circular_imports=circular_imports,
-            complexity_hotspots=complexity_hotspots,
-            mermaid="\n".join(mermaid_lines),
-            modules_in_diagram=modules_in_diagram,
-            diagram_truncated=diagram_truncated,
-        )
-
-    except Exception as e:
-        return ProjectMapResult(
-            success=False,
-            project_root=str(root_path),
-            error=f"Project map analysis failed: {str(e)}",
-        )
+ModuleInfo = _ProjectMapModuleInfoCanonical
+PackageInfo = _ProjectMapPackageInfoCanonical
+ProjectMapResult = _ProjectMapResultCanonical
 
 
 def _get_project_map_sync(
@@ -3541,14 +3189,6 @@ def _get_project_map_sync(
         max_files_limit=max_files_limit,
         max_modules_limit=max_modules_limit,
     )
-
-
-# [20260315_BUGFIX] Rebind the legacy server project-map models after the local
-# compatibility class block so imports from server.py match the delegated helper
-# return types from code_scalpel.mcp.models.graph.
-ModuleInfo = _ProjectMapModuleInfoCanonical
-PackageInfo = _ProjectMapPackageInfoCanonical
-ProjectMapResult = _ProjectMapResultCanonical
 
 
 class ImportNodeModel(BaseModel):

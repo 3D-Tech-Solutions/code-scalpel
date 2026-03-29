@@ -19,16 +19,15 @@ from code_scalpel.mcp.protocol import _get_current_tier
 from code_scalpel.mcp.v1_1_kernel_adapter import get_adapter
 from code_scalpel import telemetry
 
-# Avoid static import resolution issues in some type checkers
-mcp = import_module("code_scalpel.mcp.protocol").mcp
-
-
 # [20260305_REFACTOR] Polyglot dispatch extracted to shared helper.
 # Import with distinct names to avoid shadowing by the thin wrapper defs below.
 from code_scalpel.mcp.helpers.polyglot_dispatch import (
     COMMUNITY_MAX_TOOL_FINDINGS as _COMMUNITY_MAX_TOOL_FINDINGS,
     dispatch_tools as _polyglot_dispatch_tools,
 )
+
+# Avoid static import resolution issues in some type checkers
+mcp = import_module("code_scalpel.mcp.protocol").mcp
 
 
 def _run_static_tools(file_path: str, tools: list[str], tier: str) -> list[dict]:

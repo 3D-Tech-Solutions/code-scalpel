@@ -90,8 +90,6 @@ class RubyParserRegistry:
 
         If tools is None, runs all tools that have a CLI available.
         """
-        import shutil
-
         tool_names = tools if tools is not None else self.available_tools()
         results: Dict[str, Any] = {}
         p = Path(path) if not isinstance(path, Path) else path

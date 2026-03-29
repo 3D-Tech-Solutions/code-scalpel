@@ -119,7 +119,6 @@ class ReekParser:
         if not isinstance(data, list):
             return []
         for item in data:
-            file_path = ""
             line_number = 0
             # Reek puts source_path and lines separately
             source = item.get("source", "")

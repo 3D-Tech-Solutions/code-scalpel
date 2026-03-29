@@ -93,7 +93,7 @@ class GoParserRegistry:
         results: Dict[str, List] = {}
         for tool in selected:
             try:
-                parser = self.get_parser(tool)
+                _parser = self.get_parser(tool)  # noqa: F841
                 results[tool] = []  # default; parsers require CLI execution
             except Exception:  # noqa: BLE001
                 results[tool] = []

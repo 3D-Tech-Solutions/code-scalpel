@@ -235,6 +235,3 @@ class GolangciLintParser:
             for i in issues
         )
 
-
-from dataclasses import dataclass
-from enum import Enum

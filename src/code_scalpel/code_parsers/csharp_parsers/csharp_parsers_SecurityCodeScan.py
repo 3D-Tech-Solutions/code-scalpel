@@ -248,6 +248,3 @@ def _sarif_to_vuln(f: SarifFinding) -> SecurityVulnerability:
         owasp_category=owasp,
     )
 
-
-from dataclasses import dataclass
-from enum import Enum

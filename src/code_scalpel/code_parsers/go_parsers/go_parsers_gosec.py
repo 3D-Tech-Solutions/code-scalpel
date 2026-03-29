@@ -314,6 +314,3 @@ class GosecParser:
             for i in issues
         )
 
-
-from dataclasses import dataclass, field
-from enum import Enum

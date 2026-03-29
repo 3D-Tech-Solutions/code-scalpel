@@ -323,8 +323,6 @@ class KotlinVisitor(TreeSitterVisitor):
         fun greet(name: String): String { return "Hello $name" }
         fun String.shout(): String = this.uppercase()  (extension function)
         """
-        children_types = [c.type for c in node.children if c.is_named]
-
         # Detect extension function: user_type before "." before identifier
         # Pattern: fun <user_type> . <identifier> ...
         receiver: Optional[str] = None
@@ -462,7 +460,6 @@ class KotlinVisitor(TreeSitterVisitor):
         interface Drawable { fun draw() }
         """
         # Detect if it's an interface, data class, sealed class, etc.
-        keywords = [c.type for c in node.children if not c.is_named]
         is_interface = "interface" in [c.type for c in node.children]
 
         name_node = next(
@@ -476,7 +473,7 @@ class KotlinVisitor(TreeSitterVisitor):
         )
 
         # Base classes
-        bases: List[str] = []
+        bases: List[IRExpr] = []
         supers = [
             c
             for c in node.named_children
@@ -488,7 +485,7 @@ class KotlinVisitor(TreeSitterVisitor):
             )
         ]
         for spec in supers:
-            bases.append(self._text_of(spec))
+            bases.append(IRName(id=self._text_of(spec), loc=self._get_location(spec)))
 
         # Body
         body_node = next(
@@ -683,11 +680,6 @@ class KotlinVisitor(TreeSitterVisitor):
 
     def visit_if_expression(self, node: Any) -> IRIf:
         """if (cond) { ... } else { ... }"""
-        named = node.named_children
-        # condition: first named child (the expression inside parens)
-        cond_node: Optional[Any] = next(
-            (c for c in node.children if c.type == "(" and not c.is_named), None
-        )
         # Find condition between ( and )
         cond_ir: Optional[IRExpr] = None
         in_paren = False
