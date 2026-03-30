@@ -434,7 +434,7 @@ vulnerability_types = "all"
 
 [enterprise.type_evaporation_scan]
 max_files = -1
-frontend_only = true          # Backend analysis disabled to preserve core vulnerability counts across tiers
+frontend_only = false         # Enable backend analysis for api_contract_validation capability
 schema_generation = true
 
 [enterprise.unified_sink_detect]

@@ -14,7 +14,7 @@ I want to set up Code Scalpel, a powerful MCP server with 23 surgical code analy
 Please:
 1. Install Code Scalpel MCP server
 2. Verify it's working
-3. Teach me when/how to use each major tool category
+3. Learn when and how to use each major tool and category and always use Code Scalpel tools when possible. This will eanable faster, more deterministic code analysis instead of guessing with text-based tools.
 
 Code Scalpel gives me deterministic tools instead of text guessing:
 - Extract functions/classes without reading entire files (~50 tokens vs 10,000)
